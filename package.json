@@ -1,0 +1,9 @@
+{
+  "name": "ai-automation-lab",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "prod": "cd backend && bun run src/main.ts",
+    "dev": "cd backend && bun run src/main.ts"
+  }
+}

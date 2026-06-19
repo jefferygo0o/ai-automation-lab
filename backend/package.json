@@ -1,0 +1,23 @@
+{
+  "name": "backend",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "prod": "bun run src/server.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "tsx": "4"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "hono": "^4.12.26",
+    "nanoid": "^5.1.11",
+    "playwright": "^1.61.0",
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
+  }
+}

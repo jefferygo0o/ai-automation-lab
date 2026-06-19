@@ -1,0 +1,147 @@
+import { NavLink, useNavigate } from "react-router-dom";
+import {
+  Bot, MessagesSquare, Globe, FolderTree, Timer,
+  Wand2, Wrench, KeyRound, History, Compass,
+  PanelRightOpen, Plus,
+} from "lucide-react";
+import { useState } from "react";
+import { useAuth } from "../state/auth";
+
+const NAV_SECTIONS = [
+  {
+    label: "Workspace",
+    items: [
+      { to: "/chats", label: "Chat", icon: MessagesSquare },
+      { to: "/agents", label: "Agents", icon: Bot },
+      { to: "/web-space", label: "Web Space", icon: Globe },
+      { to: "/files", label: "Files", icon: FolderTree },
+      { to: "/automations", label: "Automations", icon: Timer },
+    ],
+  },
+  {
+    label: "Library",
+    items: [
+      { to: "/skills", label: "Skills", icon: Wand2 },
+      { to: "/mcp", label: "MCP", icon: Wrench },
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      { to: "/secrets", label: "Secrets", icon: KeyRound },
+      { to: "/runs", label: "Runs", icon: History },
+      { to: "/browser", label: "Browser", icon: Compass },
+    ],
+  },
+];
+
+export default function Sidebar() {
+  const { email, logout } = useAuth();
+  const navigate = useNavigate();
+  const [collapsed, setCollapsed] = useState(false);
+
+  if (collapsed) {
+    return (
+      <aside className="w-[52px] shrink-0 border-r border-line bg-paper-50 flex flex-col items-center">
+        <div className="h-12 flex items-center justify-center border-b border-line w-full">
+          <div className="w-6 h-6 grid place-items-center bg-ink-900 text-paper-50 font-serif text-sm cursor-pointer" onClick={() => navigate("/")}>
+            L
+          </div>
+        </div>
+        {NAV_SECTIONS.map((section) =>
+          section.items.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                `w-full flex items-center justify-center h-9 text-ink-400 hover:text-ink-900 hover:bg-paper-200/60 transition-colors ${isActive ? "text-ink-900 bg-paper-200" : ""}`
+              }
+              title={label}
+            >
+              <Icon className="w-4 h-4 stroke-[1.5]" />
+            </NavLink>
+          ))
+        )}
+        <button
+          onClick={() => setCollapsed(false)}
+          className="mt-auto mb-3 w-full flex items-center justify-center h-9 text-ink-400 hover:text-ink-900"
+          title="Expand sidebar"
+        >
+          <PanelRightOpen className="w-4 h-4 stroke-[1.5]" />
+        </button>
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="w-[220px] shrink-0 border-r border-line bg-paper-50 flex flex-col">
+      {/* Brand header — Zo-style */}
+      <div className="px-4 h-12 flex items-center justify-between border-b border-line shrink-0">
+        <div
+          className="flex items-center gap-2 cursor-pointer"
+          onClick={() => navigate("/")}
+        >
+          <div className="w-7 h-7 grid place-items-center bg-ink-900 text-paper-50 font-serif text-base font-bold tracking-tight">
+            L
+          </div>
+          <div className="leading-tight">
+            <div className="text-sm font-semibold text-ink-900 tracking-tight">Lab</div>
+            <div className="text-2xs text-ink-400 uppercase tracking-[0.15em]">Automation</div>
+          </div>
+        </div>
+        <button
+          onClick={() => setCollapsed(true)}
+          className="btn btn-ghost btn-icon"
+          title="Collapse sidebar"
+        >
+          <PanelRightOpen className="w-3.5 h-3.5 stroke-[1.5]" />
+        </button>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 p-2 space-y-3 overflow-y-auto">
+        {NAV_SECTIONS.map((section) => (
+          <div key={section.label}>
+            <div className="px-2.5 pb-1 pt-0.5">
+              <div className="eyebrow text-2xs tracking-[0.15em]">{section.label}</div>
+            </div>
+            <div className="space-y-px">
+              {section.items.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === "/"}
+                  className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+                >
+                  <Icon className="w-3.5 h-3.5 stroke-[1.75]" />
+                  <span>{label}</span>
+                </NavLink>
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+
+      {/* Footer — user + quick actions */}
+      <div className="border-t border-line p-2 space-y-1 shrink-0">
+        <div className="px-2.5 py-1.5 flex items-center justify-between">
+          <span className="text-2xs text-ink-400 font-mono truncate max-w-[120px]">{email}</span>
+          <button onClick={logout} className="btn btn-ghost btn-icon" title="Sign out">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="stroke-[1.5]">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
+        </div>
+        <button
+          onClick={() => navigate("/agents?new=1")}
+          className="btn btn-sm w-full justify-start gap-2"
+        >
+          <Plus className="w-3.5 h-3.5 stroke-[1.75]" />
+          <span>New Agent</span>
+        </button>
+      </div>
+    </aside>
+  );
+}

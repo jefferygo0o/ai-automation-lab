@@ -1,0 +1,693 @@
+/**
+ * REST + SSE API server (Hono).
+ *
+ * Routes are mounted under /api. Chat streaming uses Server-Sent Events.
+ */
+import { Hono } from "hono";
+import { createUser, login, createSession, authenticateBearer } from "../security/auth.ts";
+import { Audit } from "../audit/index.ts";
+import { approvalsApi } from "../approvals/api.ts";
+import { templatesApi } from "../templates/api.ts";
+import { webhooksApi } from "../webhooks/index.ts";
+import { rateLimit, incrementHourly } from "../security/ratelimit.ts";
+import { SecretStore } from "../secrets/store.ts";
+import { db } from "../db/index.ts";
+import { AgentStore } from "../agents/registry.ts";
+import { HistoryStore } from "../agents/history.ts";
+import { ChatStore } from "../chats/index.ts";
+import { runAgentTurn, type StreamEvent } from "../agents/runtime.ts";
+import { Skills } from "../skills/index.ts";
+import { mcpManager, McpStore } from "../mcp/client.ts";
+import { MemoryStore } from "../memory/index.ts";
+import { readAgentConfig, AGENTS_DIR } from "../agents/files.ts";
+import { toolRegistry } from "../tools/registry.ts";
+import { RunStore } from "../runs/index.ts";
+import { sandboxBrowse, sandboxRead, sandboxWrite, sandboxExec, sandboxDelete } from "../sandbox/api.ts";
+import { resolveSandboxOptions } from "../agents/permissions.ts";
+import { createSandbox } from "../sandbox/index.ts";
+// ---- Web Space (routes management) ----
+import { webSpaceApi } from "../webspace/index.ts";
+// ---- Workspace file browser ----
+import { workspaceApi } from "../workspace/index.ts";
+// ---- Automations ----
+import { automationsApi } from "../automations/index.ts";
+import { join } from "node:path";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { register } from "../tools/approval_tools.ts";
+import { dashboardApi } from "../dashboard/api.ts";
+
+const api = new Hono<{ Variables: { userId: string } }>();
+
+// ---- Auth + rate limit middleware (applies to all /api/* except public) ----
+api.use("/api/*", async (c, next) => {
+  const path = c.req.path;
+  const PUBLIC =
+    path === "/api/auth/login" ||
+    path === "/api/auth/register" ||
+    path === "/api/health";
+  if (!PUBLIC) {
+    const auth = authenticateBearer(c.req.raw.headers.get("authorization") ?? undefined);
+    if (!auth) return c.json({ error: "unauthorized" }, 401);
+    const rl = rateLimit(`u:${auth.userId}`, { perMinute: 240, perHour: 10_000 });
+    if (!rl.allowed) {
+      c.header("Retry-After", String(Math.ceil(rl.retryAfterMs / 1000)));
+      return c.json({ error: "rate_limited", reason: rl.reason }, 429);
+    }
+    c.set("userId", auth.userId);
+  }
+  await next();
+});
+
+api.get("/api/health", (c) => c.json({ ok: true, time: Date.now() }));
+
+// ---- Auth ----
+api.post("/api/auth/login", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string };
+  if (!body.email || !body.password) return c.json({ error: "email and password required" }, 400);
+  const session = login(body.email, body.password);
+  if (!session) return c.json({ error: "invalid credentials" }, 401);
+  Audit.record({
+    ownerId: session.userId,
+    actor: "user",
+    action: "auth.login",
+    metadata: { email: body.email },
+    ipAddress: c.req.raw.headers.get("x-forwarded-for") ?? null,
+  });
+  return c.json({ token: session.token, userId: session.userId, expiresAt: session.expiresAt });
+});
+
+api.post("/api/auth/register", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string };
+  if (!body.email || !body.password || body.password.length < 8) {
+    return c.json({ error: "email and password (>=8 chars) required" }, 400);
+  }
+  try {
+    const user = createUser(body.email, body.password);
+    Audit.record({
+      ownerId: user.id,
+      actor: "user",
+      action: "auth.register",
+      metadata: { email: user.email },
+      ipAddress: c.req.raw.headers.get("x-forwarded-for") ?? null,
+    });
+    return c.json({ user });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? "register failed" }, 400);
+  }
+});
+
+// ---- Agents ----
+api.get("/api/agents", (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ agents: AgentStore.list(userId) });
+});
+
+api.post("/api/agents", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = (await c.req.json().catch(() => ({}))) as { name?: string; description?: string };
+  if (!body.name) return c.json({ error: "name required" }, 400);
+  const agent = AgentStore.create(userId, body.name, body.description ?? "");
+  Audit.record({ ownerId: userId, actor: "user", action: "agent.create", targetId: agent.id, targetType: "agent", metadata: { name: agent.name } });
+  return c.json({ agent });
+});
+
+api.get("/api/agents/:id", (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "not found" }, 404);
+  return c.json({ agent, config: readAgentConfig(agent.id) });
+});
+
+api.delete("/api/agents/:id", (c) => {
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id");
+  const ok = AgentStore.delete(id, userId);
+  if (ok) Audit.record({ ownerId: userId, actor: "user", action: "agent.delete", targetId: id, targetType: "agent" });
+  return c.json({ ok });
+});
+
+api.post("/api/agents/:id/clone", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = (await c.req.json().catch(() => ({}))) as { name?: string };
+  const a = AgentStore.clone(c.req.param("id"), userId, body.name);
+  if (!a) return c.json({ error: "not found" }, 404);
+  return c.json({ agent: a });
+});
+
+api.put("/api/agents/:id/config", async (c) => {
+  const userId = c.get("userId") as string;
+  const raw = await c.req.json();
+  // Validate critical fields to prevent saving malformed config
+  if (typeof raw !== "object" || raw === null) {
+    return c.json({ error: "config must be a JSON object" }, 400);
+  }
+  if (raw.provider !== undefined && typeof raw.provider !== "string") {
+    return c.json({ error: "provider must be a string" }, 400);
+  }
+  if (raw.baseUrl !== undefined && typeof raw.baseUrl !== "string") {
+    return c.json({ error: "baseUrl must be a string" }, 400);
+  }
+  if (raw.model !== undefined && typeof raw.model !== "string") {
+    return c.json({ error: "model must be a string" }, 400);
+  }
+  if (raw.apiKeySecret !== undefined && typeof raw.apiKeySecret !== "string") {
+    return c.json({ error: "apiKeySecret must be a string" }, 400);
+  }
+  if (raw.temperature !== undefined && (typeof raw.temperature !== "number" || raw.temperature < 0 || raw.temperature > 2)) {
+    return c.json({ error: "temperature must be a number between 0 and 2" }, 400);
+  }
+  if (raw.maxTokens !== undefined && (typeof raw.maxTokens !== "number" || raw.maxTokens < 1)) {
+    return c.json({ error: "maxTokens must be a positive number" }, 400);
+  }
+
+  // Whitelist known config fields so invalid keys (e.g. "stream") are silently
+  // stripped instead of being persisted as invalid JSON.
+  const knownFields = new Set([
+    "provider", "baseUrl", "apiKeySecret", "model",
+    "temperature", "maxTokens", "sandbox", "permissions",
+    "mcpServers",
+  ]);
+  const cfg: Record<string, unknown> = {};
+  for (const key of knownFields) {
+    if (key in raw) cfg[key] = raw[key];
+  }
+
+  // Validate nested objects have the right shape
+  if (cfg.sandbox !== undefined && (typeof cfg.sandbox !== "object" || cfg.sandbox === null)) {
+    return c.json({ error: "sandbox must be an object" }, 400);
+  }
+  if (cfg.permissions !== undefined && (typeof cfg.permissions !== "object" || cfg.permissions === null)) {
+    return c.json({ error: "permissions must be an object" }, 400);
+  }
+  if (cfg.mcpServers !== undefined && !Array.isArray(cfg.mcpServers)) {
+    return c.json({ error: "mcpServers must be an array" }, 400);
+  }
+
+  return c.json({ ok: AgentStore.updateConfig(c.req.param("id"), userId, cfg) });
+});
+
+// Agent file CRUD — `?name=...` query param so file
+const getFileName = (c: any): string => {
+  const raw = c.req.query("name") ?? "";
+  console.log("getFileName raw params:", c.req.param());
+  return decodeURIComponent(raw).replace(/^\/+/, "");
+};
+
+api.get("/api/agents/:id/files", (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ files: AgentStore.listFiles(c.req.param("id"), userId) });
+});
+
+api.get("/api/agents/:id/file", (c) => {
+  const userId = c.get("userId") as string;
+  const file = AgentStore.readFile(c.req.param("id"), userId, getFileName(c));
+  return c.json({ content: file.content, name: file.name, size: file.size, mtime: file.mtime });
+});
+
+api.put("/api/agents/:id/file", async (c) => {
+  const userId = c.get("userId") as string;
+  const { content } = (await c.req.json()) as { content: string };
+  const file = getFileName(c);
+  try {
+    const result = AgentStore.writeFile(c.req.param("id"), userId, file, content);
+    if (!result.ok) {
+      return c.json({ error: result.error }, 400);
+    }
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 500);
+  }
+});
+
+api.get("/api/agents/:id/history", (c) => {
+  const userId = c.get("userId") as string;
+  const file = c.req.query("file");
+  return c.json({ history: file ? HistoryStore.list(c.req.param("id"), file) : HistoryStore.list(c.req.param("id")) });
+});
+
+api.post("/api/agents/:id/history/:versionId/revert", (c) => {
+  const version = HistoryStore.get(c.req.param("versionId"));
+  if (!version) return c.json({ ok: false }, 404);
+  AgentStore.writeFile(version.agentId, c.get("userId"), version.filename, version.content);
+  return c.json({ ok: true });
+});
+
+// ---- Export / Import ----
+api.get("/api/agents/:id/export", (c) => {
+  const userId = c.get("userId") as string;
+  const pack = AgentStore.exportPack(c.req.param("id"), userId);
+  if (!pack) return c.json({ error: "not found" }, 404);
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  c.header("Content-Disposition", `attachment; filename="${agent?.name ?? c.req.param("id")}.json"`);
+  return c.json(pack);
+});
+
+api.post("/api/agents/import", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = (await c.req.json()) as any;
+  return c.json({ agent: AgentStore.importPack(userId, body) });
+});
+
+// ---- Chats ----
+api.get("/api/chats", (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ chats: ChatStore.list(userId) });
+});
+
+api.post("/api/chats", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = (await c.req.json().catch(() => ({}))) as { agentId: string; title?: string };
+  if (!body.agentId) return c.json({ error: "agentId required" }, 400);
+  return c.json({ chat: ChatStore.create(userId, body.agentId, body.title) });
+});
+
+api.get("/api/chats/:id", (c) => {
+  const userId = c.get("userId") as string;
+  const chat = ChatStore.get(c.req.param("id"), userId);
+  if (!chat) return c.json({ error: "not found" }, 404);
+  return c.json({ chat, messages: ChatStore.listMessages(chat.id, userId) });
+});
+
+api.delete("/api/chats/:id", (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ ok: ChatStore.delete(c.req.param("id"), userId) });
+});
+
+api.post("/api/chats/:id/rename", async (c) => {
+  const userId = c.get("userId") as string;
+  const { title } = (await c.req.json()) as { title: string };
+  return c.json({ ok: ChatStore.rename(c.req.param("id"), userId, title) });
+});
+
+api.post("/api/chats/:id/active-agent", async (c) => {
+  const userId = c.get("userId") as string;
+  const { agentId } = (await c.req.json()) as { agentId: string };
+  return c.json({ ok: ChatStore.setActiveAgent(c.req.param("id"), userId, agentId) });
+});
+
+// SSE chat streaming
+api.post("/api/chats/:id/messages", async (c) => {
+  const userId = c.get("userId") as string;
+  const { content } = (await c.req.json()) as { content: string };
+  if (!content) return c.json({ error: "content required" }, 400);
+  incrementHourly(userId);
+
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+
+  const send = async (e: StreamEvent) => {
+    try {
+      await writer.write(
+        encoder.encode(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`)
+      );
+    } catch {}
+  };
+
+  runAgentTurn(userId, c.req.param("id"), content, send)
+    .catch((e: any) => send({ type: "error", message: e?.message ?? String(e) }))
+    .finally(() => writer.close().catch(() => {}));
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+});
+
+// ---- Chat feedback (thumbs up/down on assistant messages) ----
+api.post("/api/chats/:id/feedback", async (c) => {
+  const userId = c.get("userId") as string;
+  const chat = ChatStore.get(c.req.param("id"), userId);
+  if (!chat) return c.json({ error: "chat not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as { messageId?: string; rating?: number; comment?: string };
+  if (!body.messageId) return c.json({ error: "messageId required" }, 400);
+  if (body.rating !== 1 && body.rating !== -1 && body.rating !== 0) return c.json({ error: "rating must be 1, -1, or 0" }, 400);
+  const r = db.prepare("UPDATE messages SET feedback_rating = ?, feedback_comment = ? WHERE id = ? AND chat_id = ?")
+    .run(body.rating, body.comment ?? null, body.messageId, c.req.param("id"));
+  if (!r.changes) return c.json({ error: "message not found" }, 404);
+  Audit.record({ ownerId: userId, actor: "user", action: "chat.feedback", targetId: c.req.param("id"), targetType: "chat", metadata: { messageId: body.messageId, rating: body.rating, hasComment: !!body.comment } });
+  return c.json({ ok: true });
+});
+
+api.get("/api/chats/:id/feedback", (c) => {
+  const userId = c.get("userId") as string;
+  const chat = ChatStore.get(c.req.param("id"), userId);
+  if (!chat) return c.json({ error: "chat not found" }, 404);
+  const rows = db.prepare("SELECT id, role, feedback_rating, feedback_comment FROM messages WHERE chat_id = ? AND feedback_rating IS NOT NULL").all(c.req.param("id"));
+  return c.json({ feedback: rows });
+});
+
+// ---- Skills ----
+api.get("/api/skills", (c) => {
+  const userId = c.get("userId") as string;
+  const userSkills = Skills.listForUser(userId);
+  const allSkills = Skills.list().filter(s => !s.source === "builtin" || !userSkills.find(u => u.id === s.id));
+  const combined = [...allSkills, ...userSkills];
+  const seen = new Set<string>();
+  const dedu = combined.filter(s => seen.has(s.id) ? false : (seen.add(s.id), true));
+  return c.json({ skills: dedu });
+});
+
+api.get("/api/skills/:id", (c) => {
+  const userId = c.get("userId") as string;
+  const skill = Skills.readForUser(userId, c.req.param("id"));
+  if (!skill) return c.json({ error: "not found" }, 404);
+  return c.json({ body: skill.body, name: skill.name, description: skill.description, id: skill.id, inputs: skill.inputs, mcp_required: skill.mcp_required });
+});
+
+api.post("/api/skills", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = (await c.req.json()) as { id: string; name: string; body: string; description?: string; mcp_required?: string[]; inputs?: any[] };
+  if (!body.id || !body.name || !body.body) return c.json({ error: "id, name, body required" }, 400);
+  try {
+    const skill = Skills.saveUser(userId, body.id, body.name, body.body, { description: body.description ?? "", mcp_required: body.mcp_required, inputs: body.inputs });
+    return c.json({ skill });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+api.delete("/api/skills/:id", (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ ok: Skills.deleteUser(userId, c.req.param("id")) });
+});
+
+// ---- MCP ----
+api.get("/api/mcp/servers", (c) => {
+  return c.json({ servers: McpStore.list() });
+});
+
+api.post("/api/mcp/servers", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = (await c.req.json()) as { name: string; command: string; args?: string[]; env?: Record<string, string> };
+  const server = McpStore.upsert(body, userId);
+  Audit.record({ ownerId: userId, actor: "user", action: "mcp.create", targetId: server.id, targetType: "mcp_server", metadata: { name: server.name, command: server.command } });
+  return c.json({ server });
+});
+
+api.post("/api/mcp/servers/:id/connect", async (c) => {
+  const srv = McpStore.get(c.req.param("id"));
+  if (!srv) return c.json({ error: "not found" }, 404);
+  await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
+  return c.json({ ok: true });
+});
+
+api.post("/api/mcp/servers/:id/disconnect", (c) => {
+  const srv = McpStore.get(c.req.param("id"));
+  if (!srv) return c.json({ ok: false, error: "not found" }, 404);
+  mcpManager.stopServer(srv.name);
+  return c.json({ ok: true });
+});
+
+api.delete("/api/mcp/servers/:id", (c) => {
+  const id = c.req.param("id");
+  const ok = McpStore.delete(id);
+  if (ok) {
+    const userId = c.get("userId") as string;
+    Audit.record({ ownerId: userId, actor: "user", action: "mcp.delete", targetId: id, targetType: "mcp_server" });
+  }
+  return c.json({ ok });
+});
+
+api.get("/api/mcp/servers/:id/tools", async (c) => {
+  const srv = McpStore.get(c.req.param("id"));
+  if (!srv) return c.json({ tools: [] });
+  try {
+    await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
+  } catch {}
+  return c.json({ tools: mcpManager.getServerTools(srv.name) });
+});
+
+// ---- Memory (per-(agent, owner) scoped) ----
+api.get("/api/agents/:id/memory", (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "agent not found" }, 404);
+  const kind = c.req.query("kind");
+  return c.json({ items: MemoryStore.list(agent.id, userId, kind) });
+});
+
+api.post("/api/agents/:id/memory", async (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "agent not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as { kind?: string; key?: string; value?: string; source?: string };
+  if (!body.kind || !body.key) return c.json({ error: "kind and key required" }, 400);
+  const id = MemoryStore.upsert(agent.id, userId, body.kind as any, body.key, body.value ?? "", body.source ?? "user");
+  return c.json({ id });
+});
+
+api.put("/api/agents/:id/memory/:memId", async (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "agent not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as { value?: string; source?: string };
+  const ok = MemoryStore.update(c.req.param("memId"), userId, body.value ?? "", body.source);
+  if (!ok) return c.json({ error: "memory item not found" }, 404);
+  return c.json({ ok: true });
+});
+
+api.delete("/api/agents/:id/memory/:memId", (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "agent not found" }, 404);
+  const ok = MemoryStore.remove(c.req.param("memId"), userId);
+  if (!ok) return c.json({ error: "memory item not found" }, 404);
+  return c.json({ ok: true });
+});
+
+api.delete("/api/agents/:id/memory", (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "agent not found" }, 404);
+  const removed = MemoryStore.clear(agent.id, userId);
+  return c.json({ ok: true, removed });
+});
+
+// ---- Secrets ----
+api.get("/api/secrets", (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ secrets: SecretStore.list(userId) });
+});
+
+api.put("/api/secrets/:name", async (c) => {
+  const userId = c.get("userId") as string;
+  const name = c.req.param("name");
+  const { value } = (await c.req.json()) as { value: string };
+  const secret = SecretStore.set(userId, name, value);
+  Audit.record({ ownerId: userId, actor: "user", action: "secret.set", targetId: name, targetType: "secret" });
+  return c.json({ secret });
+});
+
+api.delete("/api/secrets/:name", (c) => {
+  const userId = c.get("userId") as string;
+  const name = c.req.param("name");
+  const ok = SecretStore.delete(name, userId);
+  if (ok) Audit.record({ ownerId: userId, actor: "user", action: "secret.delete", targetId: name, targetType: "secret" });
+  return c.json({ ok });
+});
+
+// ---- Audit log ----
+api.get("/api/audit", (c) => {
+  const userId = c.get("userId") as string;
+  const action = c.req.query("action");
+  const targetType = c.req.query("targetType");
+  const limit = Number(c.req.query("limit") ?? 100);
+  const cursor = c.req.query("cursor") ? Number(c.req.query("cursor")) : undefined;
+  return c.json({ events: Audit.list(userId, { action, targetType, limit, cursor }) });
+});
+
+api.get("/api/audit/stats", (c) => {
+  const userId = c.get("userId") as string;
+  const since = c.req.query("sinceMs") ? Number(c.req.query("sinceMs")) : Date.now() - 24 * 60 * 60 * 1000;
+  return c.json({ counts: Audit.countByAction(userId, since), since });
+});
+
+api.delete("/api/audit", (c) => {
+  const userId = c.get("userId") as string;
+  const beforeMs = c.req.query("beforeMs") ? Number(c.req.query("beforeMs")) : Date.now() - 30 * 24 * 60 * 60 * 1000;
+  return c.json({ ok: true, deleted: Audit.clear(userId, beforeMs) });
+});
+
+// ---- Tool registry introspection ----
+api.get("/api/tools", (c) => {
+  return c.json({ tools: toolRegistry.all().map((t) => ({ name: t.name, description: t.description })) });
+});
+
+// ---- Models (presets + all agent models discovered from disk) ----
+api.get("/api/models", (c) => {
+  const MODELS = [
+    { id: "mock", name: "Mock (local test)", provider: "mock", model: "mock" },
+    { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", provider: "openai", model: "gpt-4.1-mini" },
+    { id: "gpt-4.1", name: "GPT-4.1", provider: "openai", model: "gpt-4.1" },
+    { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "openai", model: "gpt-4o-mini" },
+    { id: "gpt-4o", name: "GPT-4o", provider: "openai", model: "gpt-4o" },
+    { id: "o3-mini", name: "o3-mini", provider: "openai", model: "o3-mini" },
+    { id: "claude-sonnet-4", name: "Claude Sonnet 4", provider: "anthropic", model: "claude-sonnet-4-20250514" },
+    { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "anthropic", model: "claude-3-5-sonnet-20241022" },
+    { id: "claude-3.5-haiku", name: "Claude 3.5 Haiku", provider: "anthropic", model: "claude-3-5-haiku-20241022" },
+    { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "custom", model: "gemini-2.5-flash" },
+    { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "custom", model: "gemini-2.5-pro" },
+    { id: "llama-3.3-70b", name: "Llama 3.3 70B", provider: "groq", model: "llama-3.3-70b-versatile" },
+    { id: "deepseek-r1", name: "DeepSeek R1", provider: "custom", model: "deepseek-reasoner" },
+  ];
+  const seen = new Set(MODELS.map((m) => m.id));
+
+  // Scan all agent directories on disk for unique custom model configs.
+  // This discovers models configured in any agent, regardless of ownership.
+  try {
+    const agentsDir = AGENTS_DIR;
+    if (existsSync(agentsDir)) {
+      for (const entry of readdirSync(agentsDir)) {
+        const cfgPath = join(agentsDir, entry, "config.json");
+        if (!existsSync(cfgPath)) continue;
+        try {
+          const raw = readFileSync(cfgPath, "utf8");
+          const cfg = JSON.parse(raw);
+          const pid = `${cfg.provider}/${cfg.model}`;
+          if (
+            cfg.provider && cfg.provider !== "mock" &&
+            cfg.model && cfg.model !== "mock" &&
+            !seen.has(pid)
+          ) {
+            seen.add(pid);
+            MODELS.push({
+              id: pid,
+              name: `${cfg.provider}: ${cfg.model}`,
+              provider: cfg.provider,
+              model: cfg.model,
+              baseUrl: cfg.baseUrl || undefined,
+              apiKeySecret: cfg.apiKeySecret || undefined,
+            });
+          }
+        } catch {
+          // skip malformed configs
+        }
+      }
+    }
+  } catch {
+    // agents dir not available — that's fine, return presets only
+  }
+
+  return c.json({ models: MODELS });
+});
+
+// ---- Runs (execution history) ----
+api.get("/api/runs", (c) => {
+  const userId = c.get("userId") as string;
+  const limit = Number(c.req.query("limit") ?? 100);
+  return c.json({ runs: RunStore.listForUser(userId, limit) });
+});
+
+api.get("/api/runs/:id", (c) => {
+  const userId = c.get("userId") as string;
+  const run = RunStore.get(c.req.param("id"), userId);
+  if (!run) return c.json({ error: "not found" }, 404);
+  return c.json({ run, invocations: RunStore.listForRun(run.id) });
+});
+
+api.get("/api/chats/:id/runs", (c) => {
+  const userId = c.get("userId") as string;
+  // Confirm ownership of chat
+  const chat = ChatStore.get(c.req.param("id"), userId);
+  if (!chat) return c.json({ error: "not found" }, 404);
+  return c.json({ runs: RunStore.listForChat(c.req.param("id"), 50) });
+});
+
+// ---- Approvals (human-in-the-loop) ----
+api.route("/api/approvals", approvalsApi);
+// ---- Templates ----
+api.route("/api/templates", templatesApi);
+// ---- Webhooks (CRUD is auth-protected; public fire endpoint is mounted) ----
+api.route("/api/webhooks", webhooksApi);
+
+// ---- Web Space ----
+api.route("/api/web-space", webSpaceApi);
+
+// ---- Workspace ----
+api.route("/api/workspace", workspaceApi);
+
+// ---- Automations ----
+api.route("/api/automations", automationsApi);
+
+// ---- Sandbox live interaction (for the editor UI) ----
+api.get("/api/agents/:id/sandbox", (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "not found" }, 404);
+  const opts = resolveSandboxOptions(agent);
+  const path = c.req.query("path") ?? ".";
+  try {
+    const result = sandboxBrowse(opts, path);
+    return c.json(result);
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+api.get("/api/agents/:id/sandbox/read", (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "not found" }, 404);
+  const opts = resolveSandboxOptions(agent);
+  const path = c.req.query("path");
+  if (!path) return c.json({ error: "path required" }, 400);
+  try {
+    const content = sandboxRead(opts, path);
+    return c.json({ path, content });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+api.put("/api/agents/:id/sandbox/write", async (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "not found" }, 404);
+  const opts = resolveSandboxOptions(agent);
+  const { path, content } = (await c.req.json()) as { path: string; content: string };
+  try {
+    sandboxWrite(opts, path, content);
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+api.delete("/api/agents/:id/sandbox", (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "not found" }, 404);
+  const opts = resolveSandboxOptions(agent);
+  const path = c.req.query("path");
+  if (!path) return c.json({ error: "path required" }, 400);
+  try {
+    sandboxDelete(opts, path);
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+api.post("/api/agents/:id/sandbox/exec", async (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "not found" }, 404);
+  const opts = resolveSandboxOptions(agent);
+  const { command, args, timeoutMs } = (await c.req.json()) as { command: string; args?: string[]; timeoutMs?: number };
+  try {
+    const r = await sandboxExec(opts, command, args ?? [], timeoutMs);
+    return c.json(r);
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+// ---- Dashboard (observability) ----
+api.route("/api/dashboard", dashboardApi);
+
+export default api;

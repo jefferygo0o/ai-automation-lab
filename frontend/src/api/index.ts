@@ -1,0 +1,229 @@
+import { api } from "./client";
+
+// ---- New types for Web Space, Workspace, Automations, Browser ----
+
+export interface SpaceRoute {
+  id: string;
+  path: string;
+  type: "page" | "api";
+  code: string;
+  public: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkspaceEntry {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  size: number;
+  mtime: number;
+}
+
+export interface WorkspaceReadResult {
+  path: string;
+  content: string;
+  encoding: string;
+}
+
+export interface Automation {
+  id: string;
+  ownerId: string;
+  name: string;
+  description: string;
+  agentId: string | null;
+  instruction: string;
+  rrule: string;
+  enabled: boolean;
+  lastRunAt: number | null;
+  nextRunAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface AutomationRun {
+  id: string;
+  automationId: string;
+  status: string;
+  startedAt: number | null;
+  finishedAt: number | null;
+  output: string | null;
+  error: string | null;
+  createdAt: number;
+}
+
+export interface Auth { token: string; userId: string; expiresAt: number; }
+export interface Agent { id: string; ownerId: string; name: string; description: string; createdAt: number; updatedAt: number; hash: string; runtime: string; }
+export interface AgentConfig {
+  provider: string; baseUrl: string; apiKeySecret: string | null; model: string;
+  temperature?: number; maxTokens?: number;
+  sandbox: { backend: string; workdir: string; timeoutMs: number; memoryMb: number; cpus: number; network: string; allowHosts: string[]; };
+  permissions: Record<string, string>;
+  mcpServers: Array<{ name: string; command: string; args: string[]; env?: Record<string, string> }>;
+}
+export interface FileEntry { name: string; size: number; mtime: number; }
+export interface MemoryItem { id: string; agentId: string; ownerUserId: string; kind: string; key: string; value: string; source: string; createdAt: number; updatedAt: number; }
+export interface Chat { id: string; agentId: string; ownerId: string; title: string; activeAgentId: string | null; createdAt: number; updatedAt: number; }
+export interface Message { id: string; chatId: string; role: string; content: string; toolCalls?: any; toolCallId?: string; name?: string; runId?: string; createdAt: number; }
+export interface Run { id: string; chatId: string; userId: string; agentId: string; status: string; startedAt: number; finishedAt: number | null; promptTokens: number; completionTokens: number; totalTokens: number; costCents: number; errorMessage?: string | null; agentHash: string; agentRuntime: string; }
+export interface ToolInvocation { id: string; runId: string; toolName: string; arguments: any; result: any; status: string; error: string | null; startedAt: number; finishedAt: number | null; durationMs: number; sandboxId: string | null; }
+export interface Skill { id: string; name: string; description: string; body: string; source: string; filename: string; updatedAt: number; inputs?: Array<{ name: string; description: string; type?: string; required?: boolean; default?: any }>; mcp_required?: string[]; }
+export interface McpServer { id: string; name: string; command: string; args: string[]; env?: Record<string, string>; enabled: boolean; connected: boolean; }
+export interface SecretMeta { id: string; ownerId: string; name: string; createdAt: number; }
+export interface SandboxEntry { name: string; path: string; type: string; size: number; mtime: number; }
+export interface SandboxExecResult { ok: boolean; exitCode: number | null; signal: string | null; stdout: string; stderr: string; durationMs: number; truncated: boolean; }
+export interface McpTool { name: string; description?: string; inputSchema?: any; }
+
+export const Auth = {
+  register: (email: string, password: string) =>
+    api<{ user: { id: string; email: string } }>("/api/auth/register", { method: "POST", body: JSON.stringify({ email, password }) }),
+  login: (email: string, password: string) =>
+    api<Auth>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+};
+
+export const Agents = {
+  list: () => api<{ agents: Agent[] }>("/api/agents"),
+  create: (name: string, description = "") =>
+    api<{ agent: Agent }>("/api/agents", { method: "POST", body: JSON.stringify({ name, description }) }),
+  get: (id: string) => api<{ agent: Agent; config: AgentConfig }>(`/api/agents/${id}`),
+  updateConfig: (id: string, config: Partial<AgentConfig>) =>
+    api<{ ok: boolean }>(`/api/agents/${id}/config`, { method: "PUT", body: JSON.stringify(config) }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/agents/${id}`, { method: "DELETE" }),
+  remove: (id: string) => api<{ ok: boolean }>(`/api/agents/${id}`, { method: "DELETE" }),
+  clone: (id: string, name?: string) =>
+    api<{ agent: Agent }>(`/api/agents/${id}/clone`, { method: "POST", body: JSON.stringify({ name }) }),
+  exportPack: (id: string) => api<any>(`/api/agents/${id}/export`),
+  importPack: (pack: any) =>
+    api<{ agent: Agent }>("/api/agents/import", { method: "POST", body: JSON.stringify(pack) }),
+  files: (id: string) => api<{ files: FileEntry[] }>(`/api/agents/${id}/files`),
+  listFiles: (id: string) => api<{ files: FileEntry[] }>(`/api/agents/${id}/files`),
+  readFile: (id: string, name: string) =>
+    api<{ content: string }>(`/api/agents/${id}/file?name=${encodeURIComponent(name)}`),
+  writeFile: (id: string, name: string, content: string) =>
+    api<{ ok: boolean }>(`/api/agents/${id}/file?name=${encodeURIComponent(name)}`, { method: "PUT", body: JSON.stringify({ content }) }),
+  history: (id: string, file?: string) =>
+    api<{ history: any[] }>(`/api/agents/${id}/history${file ? `?file=${encodeURIComponent(file)}` : ""}`),
+  revert: (id: string, versionId: string) =>
+    api<{ ok: boolean }>(`/api/agents/${id}/history/${versionId}/revert`, { method: "POST" }),
+  revertHistory: (id: string, versionId: string) =>
+    api<{ ok: boolean }>(`/api/agents/${id}/history/${versionId}/revert`, { method: "POST" }),
+  sandboxBrowse: (id: string, path: string) =>
+    api<{ path: string; entries: SandboxEntry[] }>(`/api/agents/${id}/sandbox?path=${encodeURIComponent(path)}`),
+  sandboxRead: (id: string, path: string) =>
+    api<{ path: string; content: string }>(`/api/agents/${id}/sandbox/read?path=${encodeURIComponent(path)}`),
+  sandboxWrite: (id: string, path: string, content: string) =>
+    api<{ ok: boolean }>(`/api/agents/${id}/sandbox/write`, { method: "PUT", body: JSON.stringify({ path, content }) }),
+  sandboxDelete: (id: string, path: string) =>
+    api<{ ok: boolean }>(`/api/agents/${id}/sandbox?path=${encodeURIComponent(path)}`, { method: "DELETE" }),
+  sandboxExec: (id: string, command: string, args: string[] = [], timeoutMs?: number) =>
+    api<SandboxExecResult>(`/api/agents/${id}/sandbox/exec`, { method: "POST", body: JSON.stringify({ command, args, timeoutMs }) }),
+};
+
+export const Memory = {
+  list: (agentId: string, kind?: string) =>
+    api<{ items: MemoryItem[] }>(`/api/agents/${agentId}/memory${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`),
+  add: (agentId: string, kind: string, key: string, value: string, source = "user") =>
+    api<{ id: string }>(`/api/agents/${agentId}/memory`, { method: "POST", body: JSON.stringify({ kind, key, value, source }) }),
+  upsert: (agentId: string, kind: string, key: string, value: string, source = "user") =>
+    api<{ id: string }>(`/api/agents/${agentId}/memory`, { method: "POST", body: JSON.stringify({ kind, key, value, source }) }),
+  update: (agentId: string, memId: string, value: string, source?: string) =>
+    api<{ ok: boolean }>(`/api/agents/${agentId}/memory/${memId}`, { method: "PUT", body: JSON.stringify({ value, source }) }),
+  remove: (agentId: string, memId: string) =>
+    api<{ ok: boolean }>(`/api/agents/${agentId}/memory/${memId}`, { method: "DELETE" }),
+  clear: (agentId: string) =>
+    api<{ ok: boolean; removed: number }>(`/api/agents/${agentId}/memory`, { method: "DELETE" }),
+};
+
+export const Chats = {
+  list: () => api<{ chats: Chat[] }>("/api/chats"),
+  create: (agentId: string, title?: string) =>
+    api<{ chat: Chat }>("/api/chats", { method: "POST", body: JSON.stringify({ agentId, title }) }),
+  get: (id: string) => api<{ chat: Chat; messages: Message[] }>(`/api/chats/${id}`),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/chats/${id}`, { method: "DELETE" }),
+  remove: (id: string) => api<{ ok: boolean }>(`/api/chats/${id}`, { method: "DELETE" }),
+  rename: (id: string, title: string) =>
+    api<{ ok: boolean }>(`/api/chats/${id}/rename`, { method: "POST", body: JSON.stringify({ title }) }),
+  setActiveAgent: (id: string, agentId: string) =>
+    api<{ ok: boolean }>(`/api/chats/${id}/active-agent`, { method: "POST", body: JSON.stringify({ agentId }) }),
+  sendMessage: (id: string, content: string) =>
+    fetch(`/api/chats/${id}/messages`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(api as any).authHeaders },
+      body: JSON.stringify({ content }),
+    }),
+};
+
+export const Skills = {
+  list: () => api<{ skills: Skill[] }>("/api/skills"),
+  get: (id: string) => api<Skill>(`/api/skills/${id}`),
+  save: (id: string, name: string, body: string, description = "") =>
+    api<{ skill: Skill }>("/api/skills", { method: "POST", body: JSON.stringify({ id, name, body, description }) }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/skills/${id}`, { method: "DELETE" }),
+  remove: (id: string) => api<{ ok: boolean }>(`/api/skills/${id}`, { method: "DELETE" }),
+};
+
+export const MCP = {
+  list: () => api<{ servers: McpServer[] }>("/api/mcp/servers"),
+  save: (name: string, command: string, args: string[], env?: Record<string, string>) =>
+    api<{ server: McpServer }>("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name, command, args, env }) }),
+  connect: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}/connect`, { method: "POST" }),
+  disconnect: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}/disconnect`, { method: "POST" }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}`, { method: "DELETE" }),
+  remove: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}`, { method: "DELETE" }),
+  tools: (id: string) => api<{ tools: McpTool[] }>(`/api/mcp/servers/${id}/tools`),
+};
+
+export const Secrets = {
+  list: () => api<{ secrets: SecretMeta[] }>("/api/secrets"),
+  save: (name: string, value: string) =>
+    api<{ secret: SecretMeta }>(`/api/secrets/${encodeURIComponent(name)}`, { method: "PUT", body: JSON.stringify({ value }) }),
+  remove: (name: string) => api<{ ok: boolean }>(`/api/secrets/${encodeURIComponent(name)}`, { method: "DELETE" }),
+};
+
+export const Runs = {
+  list: (limit = 100) => api<{ runs: Run[] }>(`/api/runs?limit=${limit}`),
+  get: (id: string) => api<{ run: Run; invocations: ToolInvocation[] }>(`/api/runs/${id}`),
+  byChat: (chatId: string) => api<{ runs: Run[] }>(`/api/chats/${chatId}/runs`),
+};
+
+// ---- Web Space ----
+export const Space = {
+  list: () => api<{ routes: SpaceRoute[] }>("/api/web-space/routes"),
+  get: (id: string) => api<SpaceRoute>(`/api/web-space/routes/${id}`),
+  create: (path: string, type: string, code: string, isPublic: boolean) =>
+    api<SpaceRoute>("/api/web-space/routes", { method: "POST", body: JSON.stringify({ path, type, code, public: !!isPublic }) }),
+  update: (id: string, data: Partial<{ path: string; code: string; type: string; public: boolean }>) =>
+    api<{ ok: boolean }>(`/api/web-space/routes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  publish: (id: string, isPublic: boolean) =>
+    api<{ ok: boolean }>(`/api/web-space/routes/${id}/publish`, { method: "POST", body: JSON.stringify({ public: !!isPublic }) }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/web-space/routes/${id}`, { method: "DELETE" }),
+};
+
+// ---- Workspace ----
+export const Workspace = {
+  tree: (path: string = "") =>
+    api<{ entries: WorkspaceEntry[]; path: string }>(`/api/workspace/tree?path=${encodeURIComponent(path)}`),
+  read: (path: string) =>
+    api<WorkspaceReadResult>(`/api/workspace/read?path=${encodeURIComponent(path)}`),
+  write: (path: string, content: string) =>
+    api<{ ok: boolean }>("/api/workspace/write", { method: "PUT", body: JSON.stringify({ path, content }) }),
+  delete: (path: string) =>
+    api<{ ok: boolean }>("/api/workspace/delete", { method: "DELETE", body: JSON.stringify({ path }) }),
+  newFolder: (path: string) =>
+    api<{ ok: boolean }>("/api/workspace/mkdir", { method: "POST", body: JSON.stringify({ path }) }),
+};
+
+// ---- Automations ----
+export const Automations = {
+  list: () => api<{ automations: Automation[] }>("/api/automations"),
+  get: (id: string) => api<{ automation: Automation }>(`/api/automations/${id}`),
+  create: (name: string, instruction: string, rrule: string, description: string = "", agentId: string | null = null) =>
+    api<{ automation: Automation }>("/api/automations", { method: "POST", body: JSON.stringify({ name, instruction, rrule, description, agentId }) }),
+  update: (id: string, data: Partial<{ name: string; description: string; instruction: string; rrule: string; agentId: string | null; enabled: boolean }>) =>
+    api<{ automation: Automation }>(`/api/automations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/automations/${id}`, { method: "DELETE" }),
+  runs: (id: string, limit: number = 50) =>
+    api<{ runs: AutomationRun[] }>(`/api/automations/${id}/runs?limit=${limit}`),
+  runNow: (id: string) =>
+    api<{ run: AutomationRun; output?: string }>(`/api/automations/${id}/run`, { method: "POST" }),
+};
