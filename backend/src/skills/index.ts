@@ -93,72 +93,50 @@ function ensureDirs() {
   }
 }
 
+// Robust frontmatter parser. Skills may have been written by an LLM that
+// accidentally doubled the `---` fence (e.g. when editing an already-formed
+// skill). We tolerate that by treating the FIRST `---` line as the opener
+// and the LAST `\n---` line at column 0 as the closer — anything in between
+// is the YAML body, and the markdown body starts after the closer.
+//
+// We also normalise whitespace and reject files that don't yield a non-empty
+// id+name pair so corrupted skills fail loudly rather than silently being
+// read as "no skill".
 function parseFrontmatter(raw: string): { meta: SkillFrontmatter; body: string } {
-  if (!raw.startsWith("---")) return { meta: { id: "", name: "", description: "" }, body: raw };
-  const end = raw.indexOf("\n---", 3);
-  if (end === -1) return { meta: { id: "", name: "", description: "" }, body: raw };
-  const fm = raw.slice(3, end).trim();
-  const body = raw.slice(end + 4).replace(/^\n/, "");
-
-  const meta: Record<string, unknown> = {};
-  const lines = fm.split("\n");
-  let currentList: Record<string, unknown>[] | null = null;
-  let currentItem: Record<string, unknown> | null = null;
-
-  const flushItem = () => {
-    if (currentItem && currentList) {
-      currentList.push(currentItem);
-      currentItem = null;
-    }
+  const empty: { meta: SkillFrontmatter; body: string } = {
+    meta: { id: "", name: "", description: "" },
+    body: raw,
   };
+  if (!raw.startsWith("---")) return empty;
 
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    if (line.startsWith("  - ") || line.startsWith("\t- ")) {
-      flushItem();
-      currentList = (currentList as unknown as Record<string, unknown>[]) ?? [];
-      currentItem = {};
-      const rest = line.replace(/^\s*-\s*/, "");
-      const [k, ...v] = rest.split(":");
-      if (k && v.length) currentItem[k.trim()] = v.join(":").trim();
-    } else if (line.startsWith("    ") || line.startsWith("\t\t")) {
-      if (currentItem) {
-        const [k, ...v] = line.trim().split(":");
-        if (k && v.length) currentItem[k.trim()] = v.join(":").trim();
-      }
-    } else {
-      flushItem();
-      if (currentList) {
-        const key = Object.keys(meta).find((k) => meta[k] === currentList);
-        if (key) meta[key] = currentList;
-        currentList = null;
-      }
-      const idx = line.indexOf(":");
-      if (idx > 0) {
-        const k = line.slice(0, idx).trim();
-        const v = line.slice(idx + 1).trim();
-        if (v === "" || v === "|") {
-          meta[k] = v === "|" ? "" : [];
-          if (v === "") currentList = meta[k] as unknown as Record<string, unknown>[];
-        } else if (v.startsWith("[") && v.endsWith("]")) {
-          meta[k] = v.slice(1, -1).split(",").map((s) => s.trim()).filter(Boolean);
-        } else {
-          meta[k] = v;
-        }
-      }
-    }
+  // Find every `\n---` (a `---` line on its own) that is preceded by a
+  // newline. Skip the opening `---` (which is at index 0). Take the LAST
+  // such position so duplicated/embedded fences don't truncate the frontmatter.
+  const closers: number[] = [];
+  const re = /\n---\n?/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    closers.push(m.index + 1); // position of the `-` in `---`
   }
-  flushItem();
-  if (currentList && currentList.length) {
-    const key = Object.keys(meta).find((k) => meta[k] === currentList);
-    if (key) meta[key] = currentList;
-  }
+  if (closers.length === 0) return empty;
 
+  const closerIdx = closers[closers.length - 1];
+  const fm = raw.slice(3, closerIdx).replace(/\n+$/, "").trim();
+  let body = raw.slice(closerIdx + 3);
+  body = body.replace(/^\n+/, "");
+
+  // Strip any leading `---` + bare frontmatter block that the LLM accidentally
+  // re-emitted above the body. (Defence-in-depth — the closer-finding above
+  // already handles most cases, but if the body itself opens with `---name:`
+  // we want to drop it so the agent never sees malformed YAML in its prompt.)
+  body = body.replace(/^---\s*\n(?:[a-zA-Z_][\w-]*:[^\n]*\n)+---\s*\n?/, "");
+
+  const meta = parseYaml(fm);
   return {
     meta: {
-      id: String(meta.id ?? ""),
-      name: String(meta.name ?? ""),
-      description: String(meta.description ?? ""),
+      id: String(meta.id ?? "").trim(),
+      name: String(meta.name ?? "").trim(),
+      description: String(meta.description ?? "").trim(),
       inputs: (meta.inputs as SkillInput[] | undefined) ?? [],
       outputs: (meta.outputs as SkillOutput[] | undefined) ?? [],
       mcp_required: (meta.mcp_required as string[] | undefined) ?? [],
@@ -166,6 +144,96 @@ function parseFrontmatter(raw: string): { meta: SkillFrontmatter; body: string }
     },
     body,
   };
+}
+
+// Minimal YAML subset for frontmatter: scalars, [a, b] lists, and `- item`
+// lists of scalars (used for `tags:` and `mcp_required:`). Deliberately
+// not a full YAML parser — frontmatter in this codebase is constrained.
+function parseYaml(fm: string): Record<string, unknown> {
+  const meta: Record<string, unknown> = {};
+  const lines = fm.split("\n");
+  let currentList: string[] | null = null;
+  let currentItem: Record<string, unknown> | null = null;
+
+  const flushItem = () => {
+    if (currentItem && currentList) {
+      currentList.push(Object.entries(currentItem).map(([k, v]) => `${k}: ${v}`).join("; "));
+      currentItem = null;
+    }
+  };
+
+  for (const raw of lines) {
+    const line = raw.replace(/\s+$/, "");
+    if (!line.trim()) continue;
+
+    if (/^\s{2,}-\s/.test(line) || /^\t-\s/.test(line)) {
+      // List item start
+      flushItem();
+      if (!currentList) currentList = [];
+      const rest = line.replace(/^\s*-\s*/, "");
+      const colon = rest.indexOf(":");
+      if (colon > 0) {
+        const k = rest.slice(0, colon).trim();
+        const v = rest.slice(colon + 1).trim();
+        currentItem = { [k]: v };
+      } else {
+        currentList.push(rest.trim());
+        currentItem = null;
+      }
+      continue;
+    }
+
+    if (/^\s{4,}\S/.test(line) || /^\t\t\S/.test(line)) {
+      // Continuation of current list item
+      if (currentItem) {
+        const colon = line.trim().indexOf(":");
+        if (colon > 0) {
+          const k = line.trim().slice(0, colon).trim();
+          const v = line.trim().slice(colon + 1).trim();
+          currentItem[k] = v;
+        }
+      } else if (currentList) {
+        currentList.push(line.trim());
+      }
+      continue;
+    }
+
+    flushItem();
+    if (currentList) {
+      // We had a list and now hit a top-level key — flush the list under
+      // whichever meta key holds the same array reference. (Single-list case.)
+      for (const k of Object.keys(meta)) {
+        if (meta[k] === currentList) {
+          meta[k] = currentList;
+        }
+      }
+      currentList = null;
+    }
+
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const k = line.slice(0, idx).trim();
+    const v = line.slice(idx + 1).trim();
+    if (v === "" || v === "|") {
+      meta[k] = [];
+      currentList = meta[k] as unknown as string[];
+    } else if (v.startsWith("[") && v.endsWith("]")) {
+      meta[k] = v
+        .slice(1, -1)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+    } else {
+      meta[k] = v;
+    }
+  }
+  flushItem();
+  if (currentList && currentList.length) {
+    for (const k of Object.keys(meta)) {
+      if (meta[k] === currentList) meta[k] = currentList;
+    }
+  }
+  return meta;
 }
 
 function readSkillFile(path: string, source: "user" | "builtin"): Skill | null {
@@ -283,6 +351,37 @@ export const Skills = {
     const { meta, body } = parseFrontmatter(raw);
     if (!meta.id || !meta.name) return null;
     return { ...meta, body, source: "user", filename: basename(path), updatedAt: statSync(path).mtimeMs };
+  },
+
+  /**
+   * Owner-aware skill lookup. Falls through: global → builtin → user-owned.
+   * Use this from the runtime and from tools so an agent always sees its
+   * owner's private skills (not just the platform-installed ones).
+   */
+  readForOwner(id: string, ownerId: string | null): Skill | null {
+    const global = Skills.read(id);
+    if (global) return global;
+    if (ownerId) {
+      const user = Skills.readForUser(ownerId, id);
+      if (user) return user;
+    }
+    return null;
+  },
+
+  /**
+   * Owner-aware listing. Used by the runtime prompt and by `list_skills`
+   * so an agent sees its owner's private skills in addition to platform
+   * skills. Deduplicates by id, with user skills shadowing global ones
+   * (so a user can override a platform skill with their own copy).
+   */
+  listForOwner(ownerId: string | null): Skill[] {
+    const platform = Skills.list();
+    if (!ownerId) return platform;
+    const user = Skills.listForUser(ownerId);
+    const byId = new Map<string, Skill>();
+    for (const s of platform) byId.set(s.id, s);
+    for (const s of user) byId.set(s.id, s); // user shadows platform
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
   },
 
   saveUser(

@@ -41,6 +41,12 @@ export interface LLMRequest {
   maxTokens?: number;
   stream?: boolean;
   signal?: AbortSignal;
+  /**
+   * Per-chunk callback invoked as the upstream SSE stream is consumed.
+   * Used by the runtime to forward content deltas to the client as
+   * `event: token` events instead of waiting for the full response.
+   */
+  onChunk?: (chunk: StreamChunk) => void;
 }
 
 export interface LLMResponse {
@@ -49,11 +55,22 @@ export interface LLMResponse {
   finishReason: "stop" | "tool_calls" | "length" | "error";
   raw?: unknown;
   usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+  /**
+   * Accumulated model reasoning ("thinking" / "chain-of-thought") when the
+   * provider surfaces it as a structured field (e.g. OpenAI/DeepSeek
+   * `reasoning_content`). Providers that only emit reasoning inline via
+   * `<thinking>` tags leave this undefined.
+   */
+  reasoning?: string;
 }
 
 export interface StreamChunk {
-  type: "content" | "tool_call" | "done" | "error";
+  type: "content" | "thinking" | "tool_call" | "done" | "error";
   content?: string;
+  /**
+   * For `type: "thinking"` chunks this holds the reasoning delta; for
+   * `type: "content"` it holds the visible-message delta.
+   */
   toolCall?: { id: string; name: string; arguments: string };
   finishReason?: LLMResponse["finishReason"];
   usage?: LLMResponse["usage"];
@@ -64,6 +81,72 @@ export interface StreamHandle {
   on(event: "chunk", cb: (c: StreamChunk) => void): StreamHandle;
   on(event: "end", cb: () => void): StreamHandle;
   close(): void;
+}
+
+// ─── SSE processing helper ───
+interface SseProcessCtx {
+  content: string;
+  reasoning: string;
+  toolCallAcc: Map<number, { id: string; name: string; args: string }>;
+  finishReason: LLMResponse["finishReason"];
+  usage: LLMResponse["usage"] | undefined;
+  onChunk: (c: StreamChunk) => void;
+}
+
+/**
+ * Strip accumulated-prefix from streaming deltas.
+ * The API may send the FULL accumulated text in each chunk.
+ * If delta starts with prev, return only the new suffix.
+ */
+function dedupeDelta(prev: string, delta: string): string {
+  if (!prev) return delta;
+  if (delta.startsWith(prev)) return delta.slice(prev.length);
+  // Partial overlap — trim common prefix
+  let overlap = 0;
+  const maxLen = Math.min(prev.length, delta.length);
+  while (overlap < maxLen && prev[overlap] === delta[overlap]) overlap++;
+  return delta.slice(overlap);
+}
+
+function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
+  const line = rawLine.trim();
+  if (!line || !line.startsWith("data:")) return;
+  const payload = line.slice(5).trim();
+  if (payload === "[DONE]") return;
+  try {
+    const json = JSON.parse(payload);
+    const delta = parseDelta(json);
+    if (delta.reasoning) {
+      // The opencode.ai API sends the FULL accumulated reasoning
+      // in each chunk. Strip any overlap with previously accumulated content.
+      const deduped = dedupeDelta(ctx.reasoning, delta.reasoning);
+      if (deduped) {
+        ctx.reasoning += deduped;
+        ctx.onChunk({ type: "thinking", content: deduped });
+      }
+    }
+    if (delta.content !== undefined && delta.content !== null && delta.content !== "") {
+      const deduped = dedupeDelta(ctx.content, delta.content);
+      if (deduped) {
+        ctx.content += deduped;
+        ctx.onChunk({ type: "content", content: deduped });
+      }
+    }
+    if (delta.toolCalls) {
+      for (const tc of delta.toolCalls) {
+        const idx = tc.index ?? 0;
+        const existing = ctx.toolCallAcc.get(idx) ?? { id: tc.id ?? "", name: tc.name ?? "", args: "" };
+        if (tc.id) existing.id = tc.id;
+        if (tc.name) existing.name = tc.name;
+        if (tc.arguments) existing.args += tc.arguments;
+        ctx.toolCallAcc.set(idx, existing);
+      }
+    }
+    if (delta.finishReason) ctx.finishReason = delta.finishReason as LLMResponse["finishReason"];
+    if (delta.usage) ctx.usage = delta.usage;
+  } catch {
+    // ignore malformed chunk
+  }
 }
 
 /**
@@ -102,11 +185,25 @@ export async function streamChat(
   const decoder = new TextDecoder();
   let buffer = "";
   let content = "";
+  let reasoning = "";
   // Accumulate tool calls by index across streaming chunks
   // Each OpenAI streaming tool-call delta has an `index` field.
   const toolCallAcc = new Map<number, { id: string; name: string; args: string }>();
   let finishReason: LLMResponse["finishReason"] = "stop";
   let usage: LLMResponse["usage"] | undefined;
+
+  const sseCtx: SseProcessCtx = {
+    get content() { return content; },
+    set content(v: string) { content = v; },
+    get reasoning() { return reasoning; },
+    set reasoning(v: string) { reasoning = v; },
+    toolCallAcc,
+    get finishReason() { return finishReason; },
+    set finishReason(v: LLMResponse["finishReason"]) { finishReason = v; },
+    get usage() { return usage; },
+    set usage(v: LLMResponse["usage"] | undefined) { usage = v; },
+    onChunk,
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -116,33 +213,16 @@ export async function streamChat(
     buffer = lines.pop() ?? "";
 
     for (const raw of lines) {
-      const line = raw.trim();
-      if (!line || !line.startsWith("data:")) continue;
-      const payload = line.slice(5).trim();
-      if (payload === "[DONE]") continue;
-      try {
-        const json = JSON.parse(payload);
-        const delta = parseDelta(json);
-        if (delta.content) {
-          content += delta.content;
-          onChunk({ type: "content", content: delta.content });
-        }
-        if (delta.toolCalls) {
-          for (const tc of delta.toolCalls) {
-            const idx = tc.index ?? 0;
-            const existing = toolCallAcc.get(idx) ?? { id: tc.id ?? "", name: tc.name ?? "", args: "" };
-            if (tc.id) existing.id = tc.id;
-            if (tc.name) existing.name = tc.name;
-            if (tc.arguments) existing.args += tc.arguments;
-            toolCallAcc.set(idx, existing);
-          }
-        }
-        if (delta.finishReason) finishReason = delta.finishReason as LLMResponse["finishReason"];
-        if (delta.usage) usage = delta.usage;
-      } catch {
-        // ignore malformed chunk
-      }
+      processSseLine(raw, sseCtx);
     }
+  }
+
+  // 🐛 FIX: Process any leftover buffer that wasn't followed by a newline.
+  // The while loop slices at "\n" boundaries; the final chunk may contain a
+  // complete SSE line without a trailing "\n" — that data was silently lost,
+  // which caused the last tokens of the AI response to be dropped mid-sentence.
+  if (buffer.trim()) {
+    processSseLine(buffer.trim(), sseCtx);
   }
 
   // Build final tool call list from accumulator
@@ -157,7 +237,7 @@ export async function streamChat(
   }
 
   onChunk({ type: "done", finishReason, usage });
-  return { content, toolCalls, finishReason, usage };
+  return { content, reasoning: reasoning || undefined, toolCalls, finishReason, usage };
 }
 
 /** Non-streaming call — convenience for non-interactive uses. */
@@ -168,7 +248,7 @@ export async function callLLM(cfg: LLMConfig, req: LLMRequest): Promise<LLMRespo
     return callMockLLM(cfg, req);
   }
   if (req.stream) {
-    return streamChat(cfg, req, () => {});
+    return streamChat(cfg, req, req.onChunk ?? (() => {}));
   }
   const url = buildChatUrl(cfg);
   const res = await fetch(url, {
@@ -188,8 +268,13 @@ export async function callLLM(cfg: LLMConfig, req: LLMRequest): Promise<LLMRespo
     name: tc.function?.name ?? tc.name ?? "",
     arguments: tc.function?.arguments ?? tc.arguments ?? "{}",
   }));
+  const reasoning: string | undefined =
+    (typeof choice?.message?.reasoning_content === "string" && choice.message.reasoning_content) ||
+    (typeof choice?.message?.reasoning === "string" && choice.message.reasoning) ||
+    undefined;
   return {
     content: choice?.message?.content ?? "",
+    reasoning,
     toolCalls,
     finishReason: (choice?.finish_reason as LLMResponse["finishReason"]) ?? "stop",
     raw: json,
@@ -306,6 +391,7 @@ function buildAnthropicBody(cfg: LLMConfig, req: LLMRequest, stream: boolean): a
 
 function parseDelta(json: any): {
   content?: string;
+  reasoning?: string;
   toolCalls?: Array<{ index: number; id: string; name: string; arguments: string }>;
   finishReason?: string;
   usage?: LLMResponse["usage"];
@@ -313,9 +399,20 @@ function parseDelta(json: any): {
   // OpenAI streaming
   if (json.choices) {
     const c = json.choices[0];
-    if (c?.delta?.content) {
-      return { content: c.delta.content as string };
+    // DeepSeek/OpenAI/GLM: surface reasoning as `reasoning_content` on the
+    // delta, distinct from `content` (the visible answer). Some providers
+    // also use the older `reasoning` field — accept both.
+    // IMPORTANT: A single delta may contain BOTH reasoning and content
+    // (e.g. when the model transitions from thinking to answering in the
+    // same chunk). We must collect ALL fields, not return on the first match.
+    const r: string | undefined =
+      (typeof c?.delta?.reasoning_content === "string" && c.delta.reasoning_content) ||
+      (typeof c?.delta?.reasoning === "string" && c.delta.reasoning) ||
+      undefined;
+    if (c?.delta?.content !== undefined) {
+      return { reasoning: r, content: c.delta.content as string };
     }
+    if (r) return { reasoning: r };
     if (c?.delta?.tool_calls) {
       const calls: Array<{ index: number; id: string; name: string; arguments: string }> = [];
       for (const tc of c.delta.tool_calls) {

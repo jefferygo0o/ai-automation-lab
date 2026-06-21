@@ -36,8 +36,8 @@ toolRegistry.register({
     "List every skill available to this agent, with ids, descriptions, inputs, and required MCP servers. Use this when you need to decide which skill fits a task.",
   parameters: {},
   defaultPermission: "always",
-  async execute(_args, _ctx) {
-    return text(renderSkillIndex(Skills.list()));
+  async execute(_args, ctx) {
+    return text(renderSkillIndex(Skills.listForOwner(ctx.ownerId)));
   },
 });
 
@@ -50,8 +50,8 @@ toolRegistry.register({
     skillId: { type: "string", description: "skill id (e.g. 'web-research')", required: true },
   },
   defaultPermission: "always",
-  async execute(args, _ctx) {
-    const s = Skills.read(args.skillId);
+  async execute(args, ctx) {
+    const s = Skills.readForOwner(args.skillId, ctx.ownerId);
     if (!s) return err(`skill not found: ${args.skillId}`);
     const fm = [
       `id: ${s.id}`,
@@ -75,7 +75,7 @@ toolRegistry.register({
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
-    const s = Skills.read(args.skillId);
+    const s = Skills.readForOwner(args.skillId, ctx.ownerId);
     if (!s) return err(`skill not found: ${args.skillId}`);
 
     // Validate required inputs

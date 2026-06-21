@@ -4,10 +4,10 @@
   "apiKeySecret": "OPENCODE_API_KEY",
   "model": "big-pickle",
   "temperature": 0.7,
-  "maxTokens": 8192,
+  "maxTokens": 32768,
   "streaming": true,
   "thinking": true,
-  "reasoning": true,
+  "reasoning": "high",
   "sandbox": {
     "backend": "local",
     "workdir": "workdir",

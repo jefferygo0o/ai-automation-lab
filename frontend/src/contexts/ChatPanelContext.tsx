@@ -6,6 +6,8 @@ interface ChatPanelState {
   openChat: (id: string) => void;
   closeChat: () => void;
   toggleChat: () => void;
+  panelWidth: number;
+  setPanelWidth: (width: number) => void;
 }
 
 const ChatPanelCtx = createContext<ChatPanelState>({
@@ -14,11 +16,14 @@ const ChatPanelCtx = createContext<ChatPanelState>({
   openChat: () => {},
   closeChat: () => {},
   toggleChat: () => {},
+  panelWidth: 420,
+  setPanelWidth: () => {},
 });
 
 export function ChatPanelProvider({ children }: { children: ReactNode }) {
-  const [isOpen, setOpen] = useState(true); // always open by default
+  const [isOpen, setOpen] = useState(true);
   const [chatId, setChatId] = useState<string | null>(null);
+  const [panelWidth, setPanelWidthState] = useState<number>(420);
 
   const openChat = useCallback((id: string) => {
     setChatId(id);
@@ -34,8 +39,12 @@ export function ChatPanelProvider({ children }: { children: ReactNode }) {
     setOpen((v) => !v);
   }, []);
 
+  const setPanelWidth = useCallback((width: number) => {
+    setPanelWidthState((v) => Math.max(280, Math.min(800, width)));
+  }, []);
+
   return (
-    <ChatPanelCtx.Provider value={{ isOpen, chatId, openChat, closeChat, toggleChat }}>
+    <ChatPanelCtx.Provider value={{ isOpen, chatId, openChat, closeChat, toggleChat, panelWidth, setPanelWidth }}>
       {children}
     </ChatPanelCtx.Provider>
   );

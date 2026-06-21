@@ -1,9 +1,13 @@
 import { useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../state/auth";
 import { ArrowRight } from "lucide-react";
 
 export default function LoginPage() {
   const { register, login } = useAuth();
+  const navigate = useNavigate();
+  const loc = useLocation();
+  const from = (loc.state as { from?: string } | null)?.from ?? "/chats";
   const [mode, setMode] = useState<"login" | "register">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -17,6 +21,7 @@ export default function LoginPage() {
     try {
       if (mode === "register") await register(email, password);
       else await login(email, password);
+      navigate(from, { replace: true });
     } catch (e: any) {
       setErr(e?.message || "Failed");
     } finally {

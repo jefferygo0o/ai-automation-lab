@@ -30,9 +30,10 @@ import { RunStore } from "../runs/index.ts";
 
 export type StreamEvent =
   | { type: "token"; delta: string }
+  | { type: "thinking"; delta: string }
   | { type: "tool_call"; name: string; args: any }
   | { type: "tool_result"; name: string; result: any; ok: boolean }
-  | { type: "message"; content: string }
+  | { type: "message"; content: string; messageId?: string }
   | { type: "run_started"; runId: string }
   | { type: "error"; message: string }
   | { type: "done" };
@@ -88,10 +89,12 @@ export async function runAgentTurn(
   const sandboxOpts = resolveSandboxOptions(agent);
   const sandbox = createSandbox(sandboxOpts);
 
-  const ac = new AbortController();
-  const timeoutMs = 30_000;
-  const timeout = setTimeout(() => ac.abort(new Error("LLM request timed out")), timeoutMs);
-  const abort = opts.signal ? AbortSignal.any?.([opts.signal, ac.signal]) ?? opts.signal : ac.signal;
+  const abort = opts.signal ?? new AbortController().signal;
+  // No LLM-side timeout. Long-running models, multi-step tool chains, and
+  // streamed responses can take well over 30s; cutting them off mid-stream
+  // produces the "timed out" errors users were seeing. The user's manual
+  // cancel signal (opts.signal) is still respected, and the keepalive ping
+  // prevents idle-proxy disconnects.
   const onLog: ToolContext["onLog"] = (entry) => {
     opts.onLog?.(entry);
   };
@@ -121,15 +124,18 @@ export async function runAgentTurn(
   const memoryMd = readAgentFile(agent.id, "memory.md") ?? "";
 
   let skillsBlock = skillsMd;
-  // Inject bodies of any skills referenced in skills.md
+  // Inject bodies of any skills referenced in skills.md. Use owner-aware
+  // lookup so user-owned skills (data/skills/users/{ownerId}/) are visible
+  // alongside platform/global skills — previously Skills.read() only saw
+  // the global + builtin directories and silently dropped user skills.
   const skillRefs = Array.from(skillsMd.matchAll(/`([a-z0-9-]+)`/gi))
     .map((m) => m[1])
     .filter((id): id is string => typeof id === "string");
   for (const id of new Set(skillRefs)) {
-    const body = Skills.read(id);
-    if (body) skillsBlock += `\n\n---\n## Skill: ${id}\n\n${body.body}\n`;
+    const skill = Skills.readForOwner(id, ownerId);
+    if (skill) skillsBlock += `\n\n---\n## Skill: ${skill.id}\n\n${skill.body}\n`;
   }
-  const installed = Skills.list();
+  const installed = Skills.listForOwner(ownerId);
   const skillsIndex = installed
     .map((s) => `- \`${s.id}\`: ${s.name} - ${s.description}`)
     .join("\n");
@@ -142,6 +148,12 @@ export async function runAgentTurn(
 
   const toolListForPrompt = builtinToolSpecs.map((t) => `- \`${t.name}\``).join("\n") || "(none)";
 
+  // The agent's user-authored system prompt is the primary voice; the lines
+  // below are injected at runtime to keep multi-step automations running
+  // until the user's full request is satisfied (rather than returning after
+  // the first action).
+  const RUNTIME_SYSTEM_TAIL = `\n\n# Runtime directives (from the lab)\n- You have an iterative tool-use loop. Keep calling tools until the user's request is fully complete. Do not stop after a single step.\n- Only return a final message when the task is done or you have clear, recoverable evidence it cannot be completed. If a tool fails, try alternatives, adjust parameters, or use a different tool — do not give up after the first error.\n- When the user says "do X, then Y, then Z" or "until everything is done", treat each as a mandatory checkpoint and keep going until all are done. A final assistant message means the whole task is finished.\n\n## 🛠️ Tool error recovery protocol\nWhen a tool returns an \`!ERROR!\` result:\n  1. Acknowledge the error briefly\n  2. Analyse what went wrong (e.g. invalid args, network issue, permission denied)\n  3. Try again with adjusted parameters OR use a different tool entirely\n  4. NEVER give up after one failure — retry at least 2-3 times with different approaches\n  5. Only stop after exhausting reasonable alternatives, then clearly explain why`;
+
   const systemPrompt = [
     systemMd.trim(),
     personaMd.trim() ? `\n\n# Persona\n${personaMd.trim()}\n` : "",
@@ -151,6 +163,7 @@ export async function runAgentTurn(
     longTermBlock,
     `\n\n# Tools available\n${toolListForPrompt}\n`,
     `\n\n# Working directory\nYou have a sandboxed working directory at ${sandboxOpts.workdir}. Use relative paths. All execute_command calls are isolated.\n`,
+    RUNTIME_SYSTEM_TAIL,
   ].join("");
 
   // LLM config: use the agent's provider + secret-resolved API key
@@ -197,24 +210,9 @@ export async function runAgentTurn(
   let totalPrompt = 0; // forces number type
   let totalCompletion = 0;
 
-  const MAX_STEPS = 12;
+  const MAX_STEPS = 100;
   let runStatus: "completed" | "failed" | "cancelled" = "completed";
   let runError: string | undefined;
-
-  // Keep-alive interval to prevent proxy/browser timeout during long operations
-  let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
-  function startKeepalive() {
-    stopKeepalive();
-    keepaliveInterval = setInterval(() => {
-      emit({ type: "keepalive" as any, delta: "" });
-    }, 10_000);
-  }
-  function stopKeepalive() {
-    if (keepaliveInterval) {
-      clearInterval(keepaliveInterval);
-      keepaliveInterval = null;
-    }
-  }
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -223,19 +221,18 @@ export async function runAgentTurn(
       let resp: LLMResponse;
       try {
         console.log("[runtime] calling LLM...");
-        startKeepalive();
-        try {
-          resp = await callLLM(llmCfg, {
-            messages,
-            tools: builtinToolSpecs,
-            temperature: llmCfg.temperature,
-            maxTokens: llmCfg.maxTokens,
-            stream: true,
-            signal: abort,
-          });
-        } finally {
-          stopKeepalive();
-        }
+        resp = await callLLM(llmCfg, {
+          messages,
+          tools: builtinToolSpecs,
+          temperature: llmCfg.temperature,
+          maxTokens: llmCfg.maxTokens,
+          stream: true,
+          signal: abort,
+          onChunk: (c) => {
+            if (c.type === "content" && c.content) emit({ type: "token", delta: c.content });
+            else if (c.type === "thinking" && c.content) emit({ type: "thinking", delta: c.content });
+          },
+        });
         if (resp.usage) {
           totalPrompt += resp.usage.promptTokens ?? 0;
           totalCompletion += resp.usage.completionTokens ?? 0;
@@ -274,32 +271,36 @@ export async function runAgentTurn(
         break;
       }
 
-      if (resp.content) {
-        emit({ type: "token", delta: resp.content });
-      }
+      // Streaming already delivered every content delta via onChunk above.
+      // Do NOT re-emit the accumulated `resp.content` here — that would send
+      // the full message a second time as one big chunk (the "content dump"
+      // bug users were seeing).
 
-      if (!resp.toolCalls || resp.toolCalls.length === 0) {
-        ChatStore.addMessage(chatId, { role: "assistant", content: resp.content, runId: run.id });
-        emit({ type: "message", content: resp.content });
+      // Filter out empty-named tool calls BEFORE adding the assistant message.
+      // Malformed streaming artifacts with empty names create malformed
+      // assistant+tool message pairs that confuse providers.
+      const validToolCalls = (resp.toolCalls ?? []).filter(
+        (tc) => tc.name && typeof tc.name === "string" && tc.name.trim() !== ""
+      );
+
+      if (validToolCalls.length === 0) {
+        // All tool calls were malformed — treat as content-only response
+        const msg = ChatStore.addMessage(chatId, { role: "assistant", content: resp.content, runId: run.id });
+        emit({ type: "message", content: resp.content, messageId: msg.id });
         break;
       }
 
-      // Append assistant message with tool calls
+      // Append assistant message with only valid tool calls
       ChatStore.addMessage(chatId, {
         role: "assistant",
         content: resp.content,
-        toolCalls: resp.toolCalls as any,
+        toolCalls: validToolCalls as any,
         runId: run.id,
       });
-      messages.push({ role: "assistant", content: resp.content, toolCalls: resp.toolCalls });
-      for (const tc of resp.toolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
+      messages.push({ role: "assistant", content: resp.content, toolCalls: validToolCalls });
+      for (const tc of validToolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
 
-      for (const tc of resp.toolCalls) {
-        // Skip tool calls with empty names — these are malformed streaming artifacts
-        if (!tc.name || typeof tc.name !== "string" || tc.name.trim() === "") {
-          console.log("[runtime] skipping tool call with empty name");
-          continue;
-        }
+      for (const tc of validToolCalls) {
         let fnArgs: any = {};
         try {
           fnArgs = typeof tc.arguments === "string" ? JSON.parse(tc.arguments) : (tc.arguments ?? {});
@@ -329,9 +330,14 @@ export async function runAgentTurn(
             result = { error: e?.message ?? String(e) };
             ok = false;
           }
+          // Detect non-thrown tool errors (the `err()` helper returns
+          // isError=true without throwing)
+          if (ok && result && typeof result === "object" && result.isError === true) {
+            ok = false;
+          }
           RunStore.recordToolFinish(inv.id, ok ? "ok" : "error", result, ok ? null : String(result?.error ?? ""));
         }
-        const resultStr = typeof result === "string" ? result : JSON.stringify(result);
+        const resultStr = normalizeToolResult(result, ok);
         emit({ type: "tool_result", name: tc.name, result, ok });
         pushToolMessage(messages, chatId, tc, resultStr, run.id);
         onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: Date.now() - toolStart, at: toolStart });
@@ -344,8 +350,6 @@ export async function runAgentTurn(
     runError = e?.message ?? String(e);
     emit({ type: "error", message: runError ?? "unknown error" });
   } finally {
-    stopKeepalive();
-    clearTimeout(timeout);
     // Sandbox persists intentionally — agent files created during conversation
     // (e.g. instructions.txt, scripts, data) must survive for the user to
     // browse and reuse. The sandbox is cleaned up when the agent is deleted.
@@ -381,6 +385,53 @@ function pushToolMessage(
 ) {
   messages.push({ role: "tool", content, toolCallId: tc.id, name: tc.name });
   ChatStore.addMessage(chatId, { role: "tool", content, toolCallId: tc.id, name: tc.name, runId });
+}
+
+/**
+ * Normalise a tool execution result into a clean plain-text string suitable
+ * for the `tool`-role message the LLM will see. The key rule: errors always
+ * start with `!ERROR! ` so the LLM can immediately recognise failure and
+ * continue rather than stopping.
+ */
+function normalizeToolResult(result: any, ok: boolean): string {
+  // Already a string? If it's an error, prefix it; otherwise pass through.
+  if (typeof result === "string") {
+    if (!ok && !result.startsWith("!ERROR! ")) return `!ERROR! ${result}`;
+    return result;
+  }
+
+  // Tool called `err()` internally — extract text from the content array.
+  // err() returns: { content: [{ type: "text", text: "..." }], isError: true }
+  if (result?.content && Array.isArray(result.content)) {
+    const texts = result.content
+      .filter((c: any) => c?.type === "text" && typeof c.text === "string")
+      .map((c: any) => c.text);
+    if (texts.length > 0) {
+      const joined = texts.join("\n");
+      return ok ? joined : `!ERROR! ${joined}`;
+    }
+  }
+
+  // Thrown errors from the runtime catch block: { error: "msg" }
+  if (result?.error && typeof result.error === "string") {
+    return `!ERROR! ${result.error}`;
+  }
+
+  // Fallback: JSON-serialise — but only the meaningful bits, not the full
+  // content-array wrapper the tools return internally.
+  if (typeof result === "object") {
+    if (result.isError === true) ok = false;
+    // Strip the transport wrapper if the inner text is extractable
+    const inner = typeof result.text === "string" ? result.text
+      : typeof result.message === "string" ? result.message
+      : null;
+    const body = inner ?? JSON.stringify(result);
+    return ok ? body : `!ERROR! ${body}`;
+  }
+
+  // Unknown type — cast and prefix if error
+  const str = String(result ?? "");
+  return ok ? str : `!ERROR! ${str}`;
 }
 
 function toolToSpec(t: Tool): ToolSpec {

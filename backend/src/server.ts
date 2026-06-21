@@ -6,15 +6,21 @@ import "./db/index.ts";
 import "./security/auth.ts";
 import "./tools/builtin.ts";
 import "./tools/skill_tools.ts";
+import "./tools/lab_tools.ts";
+import "./tools/integration_tools.ts";
 import { Skills } from "./skills/index.ts";
 import api from "./api/server.ts";
 import { mcpManager } from "./mcp/client.ts";
+import { AutomationScheduler } from "./automations/scheduler.ts";
 
 Skills.init();
 Skills.seedUserSkills();
 
 // Boot any saved MCP servers
 mcpManager.startAll();
+
+// Start the automation scheduler (background loop).
+AutomationScheduler.start();
 
 // Global crash handler — prevent server death from unhandled promise rejections
 // in agent turns, sandbox spawns, etc.

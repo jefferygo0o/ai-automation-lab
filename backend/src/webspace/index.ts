@@ -5,6 +5,7 @@
 import { Hono } from "hono";
 import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
+import { invalidateApiCache } from "./render.ts";
 
 interface SpaceRoute {
   id: string;
@@ -64,6 +65,7 @@ webSpaceApi.post("/routes", async (c) => {
   db.query(
     "INSERT INTO space_routes (id, owner_id, path, type, code, is_public, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(id, userId, body.path, body.type, body.code ?? "", body.isPublic ? 1 : 0, now, now);
+  invalidateApiCache(id);
   return c.json({ id, path: body.path, type: body.type, code: body.code ?? "", public: !!body.isPublic, updatedAt: now });
 });
 
@@ -84,6 +86,7 @@ webSpaceApi.put("/routes/:id", async (c) => {
     `UPDATE space_routes SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`
   ).run(...vals);
   if (!result.changes) return c.json({ error: "not found" }, 404);
+  invalidateApiCache(c.req.param("id"));
   return c.json({ ok: true });
 });
 
@@ -94,11 +97,13 @@ webSpaceApi.post("/routes/:id/publish", async (c) => {
     "UPDATE space_routes SET is_public = ?, updated_at = ? WHERE id = ? AND owner_id = ?"
   ).run(body.isPublic ? 1 : 0, Date.now(), c.req.param("id"), userId);
   if (!result.changes) return c.json({ error: "not found" }, 404);
+  invalidateApiCache(c.req.param("id"));
   return c.json({ ok: true });
 });
 
 webSpaceApi.delete("/routes/:id", (c) => {
   const userId = c.get("userId") as string;
+  invalidateApiCache(c.req.param("id"));
   const result = db.query(
     "DELETE FROM space_routes WHERE id = ? AND owner_id = ?"
   ).run(c.req.param("id"), userId);

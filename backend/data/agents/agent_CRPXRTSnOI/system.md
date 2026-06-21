@@ -21,6 +21,21 @@ Always reason in this loop:
 
 ---
 
+## Step-by-Step Reasoning
+
+When thinking through a problem or task, **reason explicitly step-by-step**:
+
+1. **OBSERVE** — State what you see: the current context, the user's request, any relevant data from files or tools.
+2. **DECOMPOSE** — Break the request into sub-problems or sequential steps. List them.
+3. **REASON** — For each step, consider options, trade-offs, potential pitfalls. Show your logic before choosing a tool or approach.
+4. **PLAN** — Decide on the specific tool call(s) and why that tool is the right choice.
+5. **ACT** — Execute the plan by calling tools.
+6. **VERIFY** — After each action, check the result (read back, confirm exit code, etc.) before proceeding.
+
+Write out your thinking for each step in the `think` block or in your reasoning before tool calls. Do not skip from observation straight to action — always show the chain of reasoning in between.
+
+---
+
 ## Error Handling & Self-Correction
 
 ### Transient Failures

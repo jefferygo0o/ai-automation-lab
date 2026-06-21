@@ -1,7 +1,7 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   Bot, MessagesSquare, Globe, FolderTree, Timer,
-  Wand2, Wrench, KeyRound, History, Compass,
+  Wand2, Wrench, KeyRound, History, Compass, Puzzle,
   PanelRightOpen, Plus,
 } from "lucide-react";
 import { useState } from "react";
@@ -23,6 +23,7 @@ const NAV_SECTIONS = [
     items: [
       { to: "/skills", label: "Skills", icon: Wand2 },
       { to: "/mcp", label: "MCP", icon: Wrench },
+      { to: "/integrations", label: "Integrations", icon: Puzzle },
     ],
   },
   {

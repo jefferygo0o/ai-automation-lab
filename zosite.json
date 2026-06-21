@@ -1,7 +1,7 @@
 {
   "name": "AI Automation Lab",
   "local_port": 7777,
-  "entrypoint": "bun run src/server.ts",
+  "entrypoint": "bun run dev",
   "publish": {
     "label": "ai-automation-lab",
     "type": "http",

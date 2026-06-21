@@ -234,3 +234,9 @@
 
 /* selection */
 ::selection { background: #1a1a18; color: #f5f3ee; }
+
+
+@keyframes shimmer-sweep {
+  0% { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}

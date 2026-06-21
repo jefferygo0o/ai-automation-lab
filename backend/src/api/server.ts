@@ -9,6 +9,7 @@ import { Audit } from "../audit/index.ts";
 import { approvalsApi } from "../approvals/api.ts";
 import { templatesApi } from "../templates/api.ts";
 import { webhooksApi } from "../webhooks/index.ts";
+import { integrationsApi } from "../integrations/api.ts";
 import { rateLimit, incrementHourly } from "../security/ratelimit.ts";
 import { SecretStore } from "../secrets/store.ts";
 import { db } from "../db/index.ts";
@@ -35,6 +36,7 @@ import { join } from "node:path";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { register } from "../tools/approval_tools.ts";
 import { dashboardApi } from "../dashboard/api.ts";
+import { MCP_MARKETPLACE, findMarketplaceEntry } from "../mcp/marketplace.ts";
 
 const api = new Hono<{ Variables: { userId: string } }>();
 
@@ -296,17 +298,39 @@ api.post("/api/chats/:id/messages", async (c) => {
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
 
+  let isDone = false;
+
   const send = async (e: StreamEvent) => {
     try {
       await writer.write(
         encoder.encode(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`)
       );
+      if (e.type === "done" || e.type === "error") isDone = true;
     } catch {}
   };
 
+  // Heartbeat — emit a keepalive event every 10s so proxies and the frontend
+  // know the connection is still alive during long thinking phases.
+  const heartbeat = setInterval(async () => {
+    if (isDone) return;
+    try {
+      await writer.write(
+        encoder.encode(`event: keepalive\ndata: {}\n\n`)
+      );
+    } catch {
+      clearInterval(heartbeat);
+    }
+  }, 10_000);
+
+  // Cancel heartbeat when stream ends
+  const clearHb = () => { clearInterval(heartbeat); };
+
   runAgentTurn(userId, c.req.param("id"), content, send)
     .catch((e: any) => send({ type: "error", message: e?.message ?? String(e) }))
-    .finally(() => writer.close().catch(() => {}));
+    .finally(() => {
+      clearHb();
+      writer.close().catch(() => {});
+    });
 
   return new Response(readable, {
     headers: {
@@ -379,6 +403,62 @@ api.delete("/api/skills/:id", (c) => {
 // ---- MCP ----
 api.get("/api/mcp/servers", (c) => {
   return c.json({ servers: McpStore.list() });
+});
+
+// ---- MCP Marketplace (curated catalog) ----
+api.get("/api/mcp/marketplace", (c) => {
+  const installedNames = new Set(McpStore.list().map((s) => s.name));
+  const entries = MCP_MARKETPLACE.map((e) => ({
+    ...e,
+    installed: installedNames.has(e.name),
+  }));
+  return c.json({ entries, total: entries.length });
+});
+
+api.get("/api/mcp/marketplace/:id", (c) => {
+  const entry = findMarketplaceEntry(c.req.param("id"));
+  if (!entry) return c.json({ error: "marketplace entry not found" }, 404);
+  const installedNames = new Set(McpStore.list().map((s) => s.name));
+  return c.json({ ...entry, installed: installedNames.has(entry.name) });
+});
+
+api.post("/api/mcp/marketplace/:id/install", async (c) => {
+  const userId = c.get("userId") as string;
+  const entry = findMarketplaceEntry(c.req.param("id"));
+  if (!entry) return c.json({ error: "marketplace entry not found" }, 404);
+  const server = McpStore.upsert(
+    { name: entry.name, command: entry.command, args: entry.args, enabled: true },
+    userId,
+  );
+  Audit.record({
+    ownerId: userId,
+    actor: "user",
+    action: "mcp.marketplace_install",
+    targetId: server.id,
+    targetType: "mcp_server",
+    metadata: { marketplace_id: entry.id, name: entry.name },
+  });
+  let connectStatus: "ready" | "error" | "starting" = "starting";
+  let connectError: string | undefined;
+  try {
+    const live = await mcpManager.startServer({
+      name: server.name,
+      command: server.command,
+      args: server.args,
+      env: server.env,
+    });
+    connectStatus = live.status;
+    if (live.error) connectError = live.error;
+  } catch (e: any) {
+    connectStatus = "error";
+    connectError = e?.message ?? String(e);
+  }
+  return c.json({
+    server: McpStore.list().find((s) => s.id === server.id),
+    status: connectStatus,
+    error: connectError,
+    needs_env: (entry.envVars ?? []).filter((v) => v.required).map((v) => v.name),
+  });
 });
 
 api.post("/api/mcp/servers", async (c) => {
@@ -486,7 +566,7 @@ api.put("/api/secrets/:name", async (c) => {
 api.delete("/api/secrets/:name", (c) => {
   const userId = c.get("userId") as string;
   const name = c.req.param("name");
-  const ok = SecretStore.delete(name, userId);
+  const ok = SecretStore.delete(userId, name);
   if (ok) Audit.record({ ownerId: userId, actor: "user", action: "secret.delete", targetId: name, targetType: "secret" });
   return c.json({ ok });
 });
@@ -613,6 +693,7 @@ api.route("/api/workspace", workspaceApi);
 
 // ---- Automations ----
 api.route("/api/automations", automationsApi);
+api.route("/api/integrations", integrationsApi);
 
 // ---- Sandbox live interaction (for the editor UI) ----
 api.get("/api/agents/:id/sandbox", (c) => {

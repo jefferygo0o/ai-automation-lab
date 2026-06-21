@@ -73,7 +73,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   apiKeySecret: DEFAULT_MODEL.apiKeySecret,
   model: DEFAULT_MODEL.model,
   temperature: 0.7,
-  maxTokens: 2048,
+  maxTokens: 32768,
   sandbox: {
     backend: "local",
     workdir: "workdir",

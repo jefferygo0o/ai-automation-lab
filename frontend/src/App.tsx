@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useRef, useEffect, useCallback } from "react";
 import { useAuth } from "./state/auth";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
@@ -16,27 +17,69 @@ import WebSpacePage from "./pages/WebSpacePage";
 import FilesPage from "./pages/FilesPage";
 import AutomationsPage from "./pages/AutomationsPage";
 import BrowserPage from "./pages/BrowserPage";
+import IntegrationsPage from "./pages/IntegrationsPage";
 
 const HIDE_TOPBAR = ["/browser"];
 
-/**
- * Inner shell that has access to ChatPanel context so it can
- * toggle chat panel visibility.
- */
 function Shell({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
   const hideTopbar = HIDE_TOPBAR.some((p) => loc.pathname.startsWith(p));
+  const { isOpen, panelWidth, setPanelWidth } = useChatPanel();
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      if (!dragRef.current) return;
+      const dx = e.clientX - dragRef.current.startX;
+      setPanelWidth(dragRef.current.startWidth + dx);
+    }
+    function onMouseUp() {
+      dragRef.current = null;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+    if (dragRef.current) {
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", onMouseUp);
+    }
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [setPanelWidth]);
+
+  const startDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startWidth: panelWidth };
+    document.body.style.cursor = "ew-resize";
+    document.body.style.userSelect = "none";
+  }, [panelWidth]);
 
   return (
-    <div className="grid grid-cols-[220px_1fr_420px] h-full">
+    <div
+      className="grid h-full"
+      style={{
+        gridTemplateColumns: isOpen
+          ? `220px 1fr ${panelWidth}px`
+          : "auto 1fr",
+      }}
+    >
       <Sidebar />
-      <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex flex-col h-full overflow-hidden min-w-0">
         {!hideTopbar && <Topbar />}
         <main className={`flex-1 overflow-auto ${!hideTopbar ? "bg-paper-50" : ""}`}>
           {children}
         </main>
       </div>
-      <ChatPanel />
+      {isOpen && (
+        <div className="flex">
+          <div
+            className="w-[3px] cursor-ew-resize shrink-0 bg-transparent hover:bg-ink-300/40 active:bg-ink-300/60 transition-colors relative"
+            onMouseDown={startDrag}
+          />
+          <ChatPanel />
+        </div>
+      )}
     </div>
   );
 }
@@ -49,25 +92,77 @@ function ShellWithProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  const { token } = useAuth();
+  const loc = useLocation();
+  if (!token) {
+    return <Navigate to="/login" replace state={{ from: loc.pathname + loc.search }} />;
+  }
+  return <>{children}</>;
+}
+
 export default function App() {
   const { token } = useAuth();
-  if (!token) return <Routes><Route path="*" element={<LoginPage />} /></Routes>;
   return (
     <ShellWithProvider>
       <Routes>
-        <Route path="/" element={<Navigate to="/chats" replace />} />
-        <Route path="/chats" element={<ChatsPage />} />
-        <Route path="/agents" element={<AgentsPage />} />
-        <Route path="/agents/:id" element={<AgentEditPage />} />
-        <Route path="/web-space" element={<WebSpacePage />} />
-        <Route path="/files" element={<FilesPage />} />
-        <Route path="/automations" element={<AutomationsPage />} />
-        <Route path="/skills" element={<SkillsPage />} />
-        <Route path="/mcp" element={<McpPage />} />
-        <Route path="/secrets" element={<SecretsPage />} />
-        <Route path="/runs" element={<RunsPage />} />
-        <Route path="/browser" element={<BrowserPage />} />
-        <Route path="*" element={<Navigate to="/chats" replace />} />
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/"
+          element={<Navigate to={token ? "/chats" : "/login"} replace />}
+        />
+        <Route
+          path="/chats"
+          element={<RequireAuth><ChatsPage /></RequireAuth>}
+        />
+        <Route
+          path="/agents"
+          element={<RequireAuth><AgentsPage /></RequireAuth>}
+        />
+        <Route
+          path="/agents/:id"
+          element={<RequireAuth><AgentEditPage /></RequireAuth>}
+        />
+        <Route
+          path="/web-space"
+          element={<RequireAuth><WebSpacePage /></RequireAuth>}
+        />
+        <Route
+          path="/files"
+          element={<RequireAuth><FilesPage /></RequireAuth>}
+        />
+        <Route
+          path="/automations"
+          element={<RequireAuth><AutomationsPage /></RequireAuth>}
+        />
+        <Route
+          path="/skills"
+          element={<RequireAuth><SkillsPage /></RequireAuth>}
+        />
+        <Route
+          path="/mcp"
+          element={<RequireAuth><McpPage /></RequireAuth>}
+        />
+        <Route
+          path="/secrets"
+          element={<RequireAuth><SecretsPage /></RequireAuth>}
+        />
+        <Route
+          path="/runs"
+          element={<RequireAuth><RunsPage /></RequireAuth>}
+        />
+        <Route
+          path="/browser"
+          element={<RequireAuth><BrowserPage /></RequireAuth>}
+        />
+        <Route
+          path="/integrations"
+          element={<RequireAuth><IntegrationsPage /></RequireAuth>}
+        />
+        <Route
+          path="*"
+          element={<Navigate to={token ? "/chats" : "/login"} replace />}
+        />
       </Routes>
     </ShellWithProvider>
   );

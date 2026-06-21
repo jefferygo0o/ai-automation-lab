@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Esquire Law UK — Meet Our Team</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+
+<!-- ===== GSAP CDN (from GSAP Advanced Animations skill) ===== -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
+
+<style>
+:root {
+  --display: 'Playfair Display', Georgia, serif;
+  --body: 'Inter', -apple-system, sans-serif;
+  --gold: #c9a84c;
+  --gold-dark: #a8872e;
+  --navy: #0a1628;
+  --navy-light: #132240;
+  --cream: #f5f0e8;
+  --white: #ffffff;
+  --text: #2d2d2d;
+  --text-light: #6b7280;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:var(--body);-webkit-font-smoothing:antialiased;background:var(--cream)}
+.section{padding:100px 0;background:var(--white)}
+.container{max-width:1200px;margin:0 auto;padding:0 24px}
+
+/* ===== PATTERN: Section Title from website-design-patterns skill ===== */
+.section-title{font-family:var(--display);font-size:clamp(2rem,4vw,2.8rem);color:var(--navy);margin-bottom:16px;text-align:center}
+.section-subtitle{font-size:1.05rem;color:var(--text-light);text-align:center;max-width:640px;margin:0 auto 64px;font-weight:300}
+.gold-accent{color:var(--gold)}
+.gold-line{width:60px;height:3px;background:var(--gold);margin:16px auto 24px;border-radius:2px}
+.section-label{display:block;text-align:center;font-size:0.75rem;letter-spacing:3px;text-transform:uppercase;color:var(--gold);margin-bottom:12px}
+
+/* ===== PATTERN: Card Grid from skill ===== */
+.team-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:32px}
+@media(max-width:992px){.team-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:576px){.team-grid{grid-template-columns:1fr}}
+
+/* ===== PATTERN: Hover Card with Gold Accent ===== */
+.team-card{background:var(--white);padding:0 0 32px 0;border:1px solid rgba(201,168,76,0.1);transition:all 0.4s ease;position:relative;overflow:hidden;text-align:center}
+.team-card::before{content:'';position:absolute;top:0;left:0;width:3px;height:0;background:var(--gold);transition:height 0.4s ease}
+.team-card:hover::before{height:100%}
+.team-card:hover{transform:translateY(-8px);box-shadow:0 20px 50px rgba(10,22,40,0.15)}
+.team-photo{width:100%;height:280px;background:linear-gradient(135deg,var(--navy)0%,var(--navy-light)100%);display:flex;align-items:center;justify-content:center;margin-bottom:24px;position:relative;overflow:hidden}
+.team-photo::after{content:'';position:absolute;inset:0;background:radial-gradient(circle at 30% 40%,rgba(201,168,76,0.1)0%,transparent 60%)}
+.team-initials{font-family:var(--display);font-size:3rem;color:var(--gold);position:relative;z-index:1;opacity:0.8}
+.team-card h3{font-family:var(--display);font-size:1.25rem;color:var(--navy);margin-bottom:4px}
+.team-card .role{font-size:0.8rem;color:var(--gold);text-transform:uppercase;letter-spacing:2px;font-weight:500;margin-bottom:12px}
+.team-card p{font-size:0.88rem;color:var(--text-light);padding:0 24px;line-height:1.6;margin-bottom:16px}
+.team-social{display:flex;justify-content:center;gap:12px}
+.team-social a{width:32px;height:32px;border:1px solid rgba(10,22,40,0.1);display:flex;align-items:center;justify-content:center;color:var(--text-light);text-decoration:none;font-size:0.75rem;transition:all 0.3s;border-radius:50%}
+.team-social a:hover{background:var(--gold);color:var(--white);border-color:var(--gold)}
+
+/* ===== PATTERN: CTA Banner ===== */
+.cta-banner{background:linear-gradient(135deg,var(--navy)0%,var(--navy-light)100%);padding:5rem 0;text-align:center;position:relative;overflow:hidden}
+.cta-banner::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(201,168,76,0.06)0%,transparent 70%)}
+.cta-banner .container{position:relative;z-index:1}
+.cta-banner h2{font-family:var(--display);font-size:clamp(1.8rem,3vw,2.8rem);color:var(--white);margin-bottom:16px}
+.cta-banner p{color:rgba(255,255,255,0.6);max-width:550px;margin:0 auto 32px;font-size:1.05rem}
+
+/* ===== PATTERN: Buttons ===== */
+.btn{display:inline-flex;align-items:center;gap:0.5rem;padding:14px 36px;font-family:var(--body);font-size:0.9rem;font-weight:500;text-decoration:none;cursor:pointer;transition:all 0.3s ease;border:none}
+.btn-primary{background:var(--gold);color:var(--navy)}
+.btn-primary:hover{background:var(--gold-dark);transform:translateY(-2px);box-shadow:0 8px 25px rgba(201,168,76,0.3)}
+</style>
+</head>
+<body>
+
+<!-- ===== HERO (MINI) ===== -->
+<section style="min-height:60vh;display:flex;align-items:center;background:linear-gradient(135deg,var(--navy)0%,var(--navy-light)100%);position:relative;overflow:hidden">
+  <div style="position:absolute;inset:0;background-image:linear-gradient(rgba(201,168,76,0.03)1px,transparent 1px),linear-gradient(90deg,rgba(201,168,76,0.03)1px,transparent 1px);background-size:60px 60px;pointer-events:none"></div>
+  <div class="container" style="position:relative;z-index:2;text-align:center">
+    <span style="display:inline-block;padding:6px 18px;border:1px solid rgba(201,168,76,0.3);border-radius:100px;font-size:0.78rem;letter-spacing:2px;text-transform:uppercase;color:var(--gold);margin-bottom:28px">✦ Our People</span>
+    <h1 style="font-family:var(--display);font-size:clamp(2.6rem,6vw,4.2rem);color:var(--white);line-height:1.1;margin-bottom:16px">
+      Meet the <span class="gold-accent">Team</span>
+    </h1>
+    <p style="font-size:1.1rem;color:rgba(255,255,255,0.7);max-width:600px;margin:0 auto;line-height:1.7">
+      Behind every great legal outcome is a dedicated team. Get to know the people who will fight for you.
+    </p>
+  </div>
+</section>
+
+<!-- ===== TEAM GRID ===== -->
+<section class="section" id="team">
+  <div class="container">
+    <h2 class="section-title">Our <span class="gold-accent">Solicitors &amp; Barristers</span></h2>
+    <div class="gold-line"></div>
+    <p class="section-subtitle">Each member of our team brings specialist expertise, a track record of success, and a commitment to client care.</p>
+    
+    <div class="team-grid" id="teamGrid">
+      <div class="team-card"><div class="team-photo"><div class="team-initials">JW</div></div><h3>Jonathan Whitmore</h3><div class="role">Senior Partner</div><p>Corporate law and commercial litigation. Called to the Bar in 1998.</p><div class="team-social"><a href="#">✉</a><a href="#">in</a></div></div>
+      <div class="team-card"><div class="team-photo"><div class="team-initials">EC</div></div><h3>Eleanor Crawford</h3><div class="role">Partner, Family Law</div><p>Leading our family practice with over 20 years of courtroom experience.</p><div class="team-social"><a href="#">✉</a><a href="#">in</a></div></div>
+      <div class="team-card"><div class="team-photo"><div class="team-initials">MH</div></div><h3>Marcus Harrington</h3><div class="role">Partner, Property</div><p>High-value commercial and residential property across London.</p><div class="team-social"><a href="#">✉</a><a href="#">in</a></div></div>
+      <div class="team-card"><div class="team-photo"><div class="team-initials">SR</div></div><h3>Sophia Rahman</h3><div class="role">Barrister, Litigation</div><p>Accomplished advocate in the High Court and Court of Appeal.</p><div class="team-social"><a href="#">✉</a><a href="#">in</a></div></div>
+      <div class="team-card"><div class="team-photo"><div class="team-initials">TD</div></div><h3>Thomas Durand</h3><div class="role">Solicitor, Employment</div><p>Complex workplace disputes and tribunal representation.</p><div class="team-social"><a href="#">✉</a><a href="#">in</a></div></div>
+      <div class="team-card"><div class="team-photo"><div class="team-initials">AL</div></div><h3>Amara Lewis</h3><div class="role">Solicitor, Wills &amp; Trusts</div><p>Estate planning, probate, and legacy protection with care.</p><div class="team-social"><a href="#">✉</a><a href="#">in</a></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== CTA ===== -->
+<section class="cta-banner">
+  <div class="container">
+    <h2>Ready to Work With Us?</h2>
+    <p>Book a confidential consultation with the right specialist for your needs.</p>
+    <a href="#" class="btn btn-primary">Schedule a Consultation →</a>
+  </div>
+</section>
+
+<script>
+// ===== GSAP ANIMATIONS (from GSAP Advanced Animations skill) =====
+gsap.registerPlugin(ScrollTrigger);
+
+// 1. Staggered card reveal (from skill technique #2)
+gsap.from('.team-card', {
+  scrollTrigger: {
+    trigger: '#teamGrid',
+    start: 'top 80%',
+  },
+  opacity: 0,
+  y: 60,
+  duration: 0.8,
+  stagger: 0.15,
+  ease: 'power3.out'
+});
+
+// 2. Section title reveal (from skill technique #1)
+gsap.from('.section-title', {
+  scrollTrigger: {
+    trigger: '.section-title',
+    start: 'top 85%'
+  },
+  opacity: 0,
+  y: 30,
+  duration: 0.8,
+  ease: 'power2.out'
+});
+
+// 3. Gold line animation — draw it in
+gsap.from('.gold-line', {
+  scrollTrigger: '.gold-line',
+  width: 0,
+  duration: 0.6,
+  ease: 'power2.inOut'
+});
+
+// 4. CTA fade-in
+gsap.from('.cta-banner .container', {
+  scrollTrigger: {
+    trigger: '.cta-banner',
+    start: 'top 80%'
+  },
+  opacity: 0,
+  y: 40,
+  duration: 0.8,
+  ease: 'power2.out'
+});
+</script>
+</body>
+</html>

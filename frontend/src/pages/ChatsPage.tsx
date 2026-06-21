@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { Chats, Chat } from "../api";
-import { Plus, MessageSquare, Bot, Trash2, ArrowUpRight, PanelRightOpen } from "lucide-react";
+import { Plus, MessageSquare, Bot, Trash2, PanelRightOpen } from "lucide-react";
 import { useChatPanel } from "../contexts/ChatPanelContext";
 
 export default function ChatsPage() {
@@ -11,7 +10,7 @@ export default function ChatsPage() {
   const [agentId, setAgentId] = useState<string>("");
   const [title, setTitle] = useState("");
   const [agents, setAgents] = useState<Array<{ id: string; name: string }>>([]);
-  const { openChat, closeChat } = useChatPanel();
+  const { openChat } = useChatPanel();
 
   async function reload() {
     const { chats } = await Chats.list();
@@ -24,10 +23,11 @@ export default function ChatsPage() {
   async function create() {
     if (!agentId) return;
     setBusy(true);
-    await Chats.create(agentId, title || undefined);
+    const { chat } = await Chats.create(agentId, title || undefined);
     setTitle(""); setCreating(false);
     setBusy(false);
     await reload();
+    openChat(chat.id);
   }
   async function remove(id: string) {
     if (!confirm("Delete this chat?")) return;
@@ -87,38 +87,34 @@ export default function ChatsPage() {
         <div className="card overflow-hidden">
           <div className="divide-y divide-line">
             {chats.map((c) => (
-              <div key={c.id} className="px-4 py-3 flex items-center gap-3 hover:bg-paper-50 transition-colors group">
+              <div
+                key={c.id}
+                className="px-4 py-3 flex items-center gap-3 hover:bg-paper-50 transition-colors group cursor-pointer"
+                onClick={() => openChat(c.id)}
+              >
                 <div className="w-8 h-8 rounded-full bg-paper-200 border border-line grid place-items-center shrink-0">
                   <Bot className="w-4 h-4 stroke-[1.5] text-ink-600" />
                 </div>
-                <Link to={`/chats/${c.id}`} className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-ink-900 truncate">
                     {c.title || "Untitled chat"}
                   </div>
                   <div className="text-xs text-ink-400 truncate flex items-center gap-1.5">
-                    <span>{c.agentName}</span>
-                    <span>·</span>
                     <span className="font-mono text-2xs">{c.id}</span>
                     <span>·</span>
                     <span>{new Date(c.createdAt).toLocaleString()}</span>
                   </div>
-                </Link>
-                <Link
-                  to={`/chats/${c.id}`}
-                  className="opacity-0 group-hover:opacity-100 text-ink-400 hover:text-ink-900"
-                  onClick={() => closeChat()}
-                >
-                  <ArrowUpRight className="w-4 h-4 stroke-[1.75]" />
-                </Link>
+                </div>
                 <button
-                  onClick={() => openChat(c.id)}
-                  className="opacity-0 group-hover:opacity-100 text-ink-400 hover:text-ink-900"
+                  onClick={(e) => { e.stopPropagation(); openChat(c.id); }}
+                  className="text-ink-400 hover:text-ink-900 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Open in chat panel"
                 >
                   <PanelRightOpen className="w-4 h-4 stroke-[1.75]" />
                 </button>
                 <button
-                  onClick={() => remove(c.id)}
-                  className="text-ink-300 hover:text-rose-700 opacity-0 group-hover:opacity-100"
+                  onClick={(e) => { e.stopPropagation(); remove(c.id); }}
+                  className="text-ink-300 hover:text-rose-700 opacity-0 group-hover:opacity-100 transition-opacity"
                 >
                   <Trash2 className="w-3.5 h-3.5 stroke-[1.75]" />
                 </button>

@@ -132,6 +132,92 @@ const migrations: Migration[] = [
     sql: "ALTER TABLE webhook_endpoints ADD COLUMN reusable INTEGER;",
     run: () => { if (!columnExists("webhook_endpoints", "reusable")) db.exec("ALTER TABLE webhook_endpoints ADD COLUMN reusable INTEGER;"); },
   },
+  {
+    id: "integrations",
+    sql: "CREATE TABLE IF NOT EXISTS integration_connections (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, app_slug TEXT NOT NULL, app_name TEXT NOT NULL, auth_type TEXT NOT NULL DEFAULT 'none', status TEXT NOT NULL DEFAULT 'disconnected', credentials_ref TEXT, connected_account_id TEXT, metadata_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(owner_id, app_slug));",
+    run: () => {
+      if (!tableExists("integration_connections")) {
+        db.exec(`CREATE TABLE IF NOT EXISTS integration_connections (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          app_slug TEXT NOT NULL,
+          app_name TEXT NOT NULL,
+          auth_type TEXT NOT NULL DEFAULT 'none',
+          status TEXT NOT NULL DEFAULT 'disconnected',
+          credentials_ref TEXT,
+          connected_account_id TEXT,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(owner_id, app_slug)
+        );`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_integrations_owner ON integration_connections(owner_id);`);
+      }
+    },
+  },
+  {
+    id: "secrets.uppercase_names",
+    sql: "UPDATE secrets SET name = UPPER(name) WHERE name != UPPER(name);",
+    run: () => {
+      // Canonicalise legacy mixed-case secret names. Safe to run repeatedly:
+      // when no rows match the WHERE clause, this is a no-op.
+      db.exec("UPDATE secrets SET name = UPPER(name) WHERE name != UPPER(name);");
+    },
+  },
+  {
+    id: "integration_action_cache",
+    sql: "CREATE TABLE IF NOT EXISTS integration_action_cache (id TEXT PRIMARY KEY, app_slug TEXT NOT NULL, action_key TEXT NOT NULL, name TEXT NOT NULL, description TEXT, source TEXT NOT NULL DEFAULT 'action', input_schema_json TEXT, fetched_at INTEGER NOT NULL, UNIQUE(app_slug, action_key));",
+    run: () => {
+      if (!tableExists("integration_action_cache")) {
+        db.exec(`CREATE TABLE IF NOT EXISTS integration_action_cache (
+          id TEXT PRIMARY KEY,
+          app_slug TEXT NOT NULL,
+          action_key TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          source TEXT NOT NULL DEFAULT 'action',
+          input_schema_json TEXT,
+          fetched_at INTEGER NOT NULL,
+          UNIQUE(app_slug, action_key)
+        );`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_action_cache_app ON integration_action_cache(app_slug);`);
+      }
+    },
+  },
+  {
+    id: "catalog_app_cache",
+    sql: "CREATE TABLE IF NOT EXISTS catalog_app_cache (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, app_slug TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', auth_type TEXT NOT NULL DEFAULT 'none', auth_description TEXT NOT NULL DEFAULT '', action_count INTEGER NOT NULL DEFAULT 0, trigger_count INTEGER NOT NULL DEFAULT 0, logo_url TEXT NOT NULL DEFAULT '', categories_json TEXT NOT NULL DEFAULT '[]', fetched_at INTEGER NOT NULL, UNIQUE(owner_id, app_slug));",
+    run: () => {
+      if (!tableExists("catalog_app_cache")) {
+        db.exec(`CREATE TABLE IF NOT EXISTS catalog_app_cache (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          app_slug TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          auth_type TEXT NOT NULL DEFAULT 'none',
+          auth_description TEXT NOT NULL DEFAULT '',
+          action_count INTEGER NOT NULL DEFAULT 0,
+          trigger_count INTEGER NOT NULL DEFAULT 0,
+          logo_url TEXT NOT NULL DEFAULT '',
+          categories_json TEXT NOT NULL DEFAULT '[]',
+          fetched_at INTEGER NOT NULL,
+          UNIQUE(owner_id, app_slug)
+        );`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_cache_owner ON catalog_app_cache(owner_id);`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_catalog_cache_slug ON catalog_app_cache(owner_id, app_slug);`);
+        // Also create sync state table
+        db.exec(`CREATE TABLE IF NOT EXISTS catalog_sync_state (
+          owner_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'idle',
+          total INTEGER NOT NULL DEFAULT 0,
+          error_message TEXT,
+          started_at INTEGER NOT NULL DEFAULT 0,
+          completed_at INTEGER
+        );`);
+      }
+    },
+  },
 ];
 
 for (const m of migrations) {

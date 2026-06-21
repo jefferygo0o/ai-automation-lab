@@ -1,21 +1,24 @@
 # AI Automation Lab
 
-Multi-agent platform for creating, testing, and deploying AI agents with skills, memory, tools, MCP servers, and sandboxed execution.
+Multi-agent platform for creating, testing, and deploying AI agents with skills, memory, tools, MCP servers, sandboxed execution, and scheduled automations.
 
 ## Layout
 
 - `backend/` — Bun + Hono + bun:sqlite API server. Source in `backend/src/`.
   - `agents/` — registry, files, runtime, permissions, history
-  - `api/server.ts` — Hono routes (auth, agents, chats, skills, memory, runs, secrets, MCP, sandbox)
+  - `api/server.ts` — Hono routes (auth, agents, chats, skills, memory, runs, secrets, MCP, sandbox, webspace, workspace)
+  - `automations/` — scheduled agent tasks + polling scheduler
   - `db/` — schema + migrations
   - `llm/` — OpenAI/Anthropic/Ollama provider abstraction
-  - `sandbox/` — local + docker sandboxed execution
+  - `sandbox/` — local sandboxed execution
   - `mcp/` — MCP client + store
   - `memory/` — per-(agent, owner) long-term memory store
   - `runs/` — run + tool invocation records
   - `skills/` — global + per-user skill registry (markdown + frontmatter)
   - `tools/` — tool registry + builtins (read/write/exec/http/memory/etc)
 - `frontend/` — Vite + React + Tailwind UI. Source in `frontend/src/`.
+- `docs/` — durable design notes and plans.
+  - `docs/plans/` — dated architecture / implementation plans
 - `data/` — agents, skills, memory, sandboxes, sqlite DB. Created at runtime.
 
 ## Run

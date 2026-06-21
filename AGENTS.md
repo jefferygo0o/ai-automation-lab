@@ -5,7 +5,7 @@ with skills, memory, MCP tools, sandboxed execution, and a full REST + SSE API.
 
 ## Architecture
 
-```
+```markdown
 ┌─────────────────────────────────────────────────────────┐
 │                    React SPA (Vite)                      │
 │  Login → Agents → AgentEdit → Chat → Skills → MCP →    │
@@ -56,6 +56,7 @@ bun run build
 
 The backend runs on port **7777** as a managed process service (`ai-automation-lab`).
 It is NOT accessible as an HTTP service (plan limit reached). To preview the UI:
+
 ```bash
 proxy_local_service(7777)
 ```
@@ -68,7 +69,7 @@ and interval-based scheduling.
 ### API Endpoints
 
 | Method | Path | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | GET | /api/automations | List automations for user |
 | GET | /api/automations/:id | Get automation details |
 | POST | /api/automations | Create automation (name, agent_id, rrule, instruction) |
@@ -81,9 +82,9 @@ and interval-based scheduling.
 ```bash
 TOKEN="your-bearer-token"
 
-curl -X POST http://localhost:7777/api/automations \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer $TOKEN" \
+curl -X POST http://localhost:7777/api/automations 
+  -H "Content-Type: application/json" 
+  -H "Authorization: Bearer $TOKEN" 
   -d '{
     "name": "Daily Report",
     "agent_id": "agent_xxx",
@@ -102,7 +103,7 @@ curl -X POST http://localhost:7777/api/automations \
 
 ### Scheduling
 
-The scheduler runs in `backend/src/automations/index.ts` as a setInterval loop
+The scheduler runs in `file backend/src/automations/index.ts` as a setInterval loop
 (default: check every 15s). It queries `automations` where `active=1` and
 `last_run_at + interval < now()`, then spawns an agent turn using the
 automation's `instruction` as the user message in a new chat.
@@ -117,7 +118,7 @@ Each automation execution creates a row in `automation_runs` with status
 The `lab.sqlite` database uses these tables:
 
 | Table | Purpose |
-|-------|---------|
+| --- | --- |
 | `users` | User accounts (scrypt hashed passwords) |
 | `sessions` | Bearer token sessions |
 | `agents` | Agent registry (fs-backed content, db metadata) |
@@ -143,13 +144,54 @@ The `lab.sqlite` database uses these tables:
 `prompt TEXT NOT NULL`, but the TypeScript handler was inserting into
 `instruction` column name.
 
-**Fix:** Updated `backend/src/automations/index.ts` to use column name `prompt`
+**Fix:** Updated `file backend/src/automations/index.ts` to use column name `prompt`
 in SQL INSERT/UPDATE statements while keeping `instruction` as the API body
 field name (maps `body.instruction` → column `prompt`).
 
+### 2026-06-20: Web Space hosting for agents
+
+**Issue:** Agents needed the ability to create and host real web projects, but
+without relying on Zo Computer resources.
+
+**Fix:** Added a self-contained Web Space subsystem in `backend/src/webspace/`
+and `backend/src/tools/webspace_tools.ts`.
+
+- `manage_webspace` lets agents create/list/update/publish page and API routes.
+- `fetch_webspace_route` lets agents verify their own hosted routes.
+- Hosted routes are served by the lab backend at `/ws/<owner>/<path>`.
+- API routes compile at runtime and execute with a real Hono context.
+- Ownership is enforced by bearer token; cross-user access is blocked.
+- No Zo Computer APIs, storage, or hosting primitives are used.
+
+### 2026-06-20: Web Space auth — public routes + query-param token
+
+**Issue:** Web Space routes (`/ws/<owner>/<path>`) required a Bearer token in the
+`Authorization` header, which browsers don't send on normal page navigation.
+All routes returned `{"error":"unauthorized"}` when opened in a browser, even
+the route owner's own pages.
+
+**Fix:** Updated `file backend/src/webspace/serving.ts` with two auth paths:
+
+1. **Public routes** (`is_public=1`) — served to anyone without authentication.
+   The owner's index page shows 🔓/🔒 visibility icons.
+2. **Query-param token** (`?token=xxx`) — browsers can pass a session token in
+   the URL as a fallback for private routes. Same validation as the Bearer header.
+3. **Publish action** — `manage_webspace` publish action now sets `is_public=1`
+   (was a no-op placeholder before). Create action also respects `isPublic`.
+
+**Migration:** Set existing routes public:
+```bash
+sqlite3 data/lab.db \
+  "UPDATE space_routes SET is_public=1 WHERE owner_id='<owner_id>' AND path LIKE '/esquire-law-uk/%';"
+```
+
+**Files changed:**
+- `backend/src/webspace/serving.ts` — auth logic, index page split for owner/anonymous
+- `backend/src/tools/webspace_tools.ts` — publish sets is_public=1, create respects isPublic
+
 ## Project Layout
 
-```
+```markdown
 backend/
 ├── src/
 │   ├── api/server.ts       # Hono REST + SSE routes
@@ -184,7 +226,7 @@ frontend/
 ## Frontend Pages
 
 | Page | Route | Description |
-|------|-------|-------------|
+| --- | --- | --- |
 | Login | /login | Auth (register/login tabs) |
 | Agents | /agents | Agent list + create/clone |
 | AgentEdit | /agents/:id | File editor, config, sandbox, memory, MCP |
@@ -202,7 +244,7 @@ frontend/
 ## API Endpoints
 
 | Method | Path | Description |
-|--------|------|-------------|
+| --- | --- | --- |
 | POST | /api/auth/register | Create account |
 | POST | /api/auth/login | Login (returns bearer token) |
 | GET | /api/health | Health check |
@@ -231,12 +273,12 @@ frontend/
 | GET | /api/tools | List registered tools |
 | GET | /api/runs | List runs (execution history) |
 | GET | /api/runs/:id | Get run + tool invocations |
-| GET/PUT/DEL/POST | /api/agents/:id/sandbox/* | Sandbox file operations |
+| GET/PUT/DEL/POST | /api/agents/:id/sandbox/\* | Sandbox file operations |
 
 ## Key Features
 
 | Feature | Status |
-|---------|--------|
+| --- | --- |
 | Auth (register/login, scrypt, bearer tokens) | ✅ |
 | Agent CRUD (create, clone, import/export) | ✅ |
 | Agent Filesystem (system.md, persona.md, skills.md, tools.md, memory.md, config.json) | ✅ |
@@ -253,6 +295,19 @@ frontend/
 | SSE Chat Streaming | ✅ |
 | Mock LLM Provider | ✅ |
 
+## Integrations
+
+| Feature | Status |
+| --- | --- |
+| Integrations System (Pipedream-powered) | ✅ |
+| Browsing Pipedream catalog (search + categories) | ✅ |
+| Connect/disconnect integrations (API key & OAuth) | ✅ |
+| Integration action execution | ✅ |
+| Integration credentials for agents | ✅ |
+| Lab tool: manage_integrations (list/execute/sync) | ✅ |
+| Lab tool: use_integration (direct action call) | ✅ |
+| Credential management (secrets vault) | ✅ |
+
 ## Built-in Tools
 
 `read_file`, `write_file`, `list_files`, `execute_command`, `http_request`,
@@ -262,10 +317,10 @@ frontend/
 
 ### Lab Management Tools (6 tools — added 2026-06-19)
 
-These tools give any agent self-service access to manage the automation lab's own resources. All are registered in `src/tools/lab_tools.ts`:
+These tools give any agent self-service access to manage the automation lab's own resources. All are registered in `file src/tools/lab_tools.ts`:
 
 | Tool | Action | Description |
-|------|--------|-------------|
+| --- | --- | --- |
 | `manage_skills` | list/read/create/edit/delete/clone | Create and manage reusable skill procedures |
 | `manage_automations` | list/get/create/edit/delete/toggle | Schedule recurring agent tasks |
 | `manage_mcp_servers` | list/create/edit/delete/connect/disconnect | Manage MCP server connections |
@@ -273,7 +328,7 @@ These tools give any agent self-service access to manage the automation lab's ow
 | `browser_screenshot` | (url, fullPage) | Capture a headless Playwright screenshot as base64 PNG |
 | `web_search` | (query, count) | Search Google and return result snippets |
 
-**File:** `backend/src/tools/lab_tools.ts`
+**File:** `file backend/src/tools/lab_tools.ts`
 
 **Architecture note:** These tools operate by calling the same Skills, DB, MCP, and Playwright modules that the API routes use. Data created by the agent via these tools appears immediately in the Skills, Automations, and MCP tabs in the UI — no manual refresh needed.
 
@@ -291,6 +346,7 @@ All components are running and end-to-end tested. Below is the verified status.
 
 The system ships with a **mock LLM provider** so it works out of the box
 without API keys. The mock recognizes natural-language prompts like:
+
 - `list files`
 - `read system.md`
 - `run ls -la`
@@ -300,5 +356,73 @@ without API keys. The mock recognizes natural-language prompts like:
 - `plan: scrape the top 10 results`
 
 To use a real provider (OpenAI, Anthropic, etc.):
+
 1. Go to **Secrets** page and add your API key
 2. Edit your agent's **config.json** → set `provider` + `model` + `apiKeySecret`
+
+## Integrations System (Pipedream-powered)
+
+The integrations subsystem connects the lab to Pipedream's catalog of 2,500+
+external services. Users add a Pipedream API key as a secret (`pipedream_api_key`),
+then browse the catalog, connect accounts, and execute actions.
+
+### Files
+
+| File | Description |
+| --- | --- |
+|  | Pipedream Connect API client (catalog, accounts, actions) |
+|  | Integration connection CRUD (DB-backed) |
+|  | REST API routes for integrations |
+|  | Lab tools: manage_integrations, use_integration |
+|  | Integrations management UI |
+|  | Integrations API client |
+
+### Database Tables
+
+| Table | Description |
+| --- | --- |
+| `integration_connections` | Active integration connections per user (app_slug, auth_type, status, credentials_ref) |
+| `integration_action_cache` | Cached action schemas per app (fetched from Pipedream) |
+
+### API Endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | /api/integrations | List user's connected integrations |
+| POST | /api/integrations | Connect a new integration (app_slug, auth_type, credentials) |
+| GET | /api/integrations/:id | Get connection details (incl. available actions) |
+| DELETE | /api/integrations/:id | Disconnect integration |
+| POST | /api/integrations/:id/execute | Execute an action on the integration |
+| PUT | /api/integrations/:id/credentials | Update credentials for a connection |
+| PUT | /api/integrations/:id/oauth | Update OAuth connected_account_id |
+| GET | /api/integrations/catalog | Browse Pipedream catalog (?q=search, ?page=, ?per_page=) |
+| GET | /api/integrations/catalog/:slug | Get app details with actions/triggers |
+| POST | /api/integrations/catalog/:slug/refresh | Re-fetch app from Pipedream |
+| POST | /api/integrations/connect/:slug | Full OAuth connect flow |
+| GET | /api/integrations/stats | Count by connection status |
+| GET | /api/integrations/categories | List all catalog categories |
+| GET | /api/integrations/pipedream/status | Check if PD API key is configured |
+| PUT | /api/integrations/pipedream/key | Set/update the PD API key via secrets |
+
+### Agent Tools
+
+Two lab tools are registered for agents:
+
+1. **manage_integrations** — list connected integrations, execute actions,
+   sync action cache
+2. **use_integration** — execute an action with full params on a connected
+   integration (action-specific input)
+
+### Authentication Flow
+
+1. User creates a Pipedream project + OAuth client at pipedream.com
+2. Saves the Pipedream API key to the lab secrets vault as `pipedream_api_key`
+3. Browses the catalog in the Integrations UI or via agent tools
+4. Connects an app by providing API keys or completing OAuth
+5. Agents can then discover and execute actions on connected integrations
+
+### Known Limitations
+
+- Requires a Pipedream account and API key (free tier works)
+- OAuth integrations require setting up a Pipedream OAuth client
+- Action execution goes through Pipedream's servers (network latency)

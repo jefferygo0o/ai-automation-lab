@@ -227,3 +227,109 @@ export const Automations = {
   runNow: (id: string) =>
     api<{ run: AutomationRun; output?: string }>(`/api/automations/${id}/run`, { method: "POST" }),
 };
+
+// ---- Integrations (Pipedream-powered) ----
+
+export interface PdApp {
+  id: string;
+  name: string;
+  name_slug: string;
+  description: string;
+  auth_type: "oauth" | "api_key" | "keys" | "none";
+  auth_description: string;
+  action_count: number;
+  trigger_count: number;
+  logo_url: string;
+  categories: string[];
+  connected?: boolean;
+}
+
+export interface PdComponent {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  type: "action" | "trigger";
+  input_schema?: Record<string, unknown>;
+  output_schema?: Record<string, unknown>;
+}
+
+export interface IntegrationConnection {
+  id: string;
+  ownerId: string;
+  app_slug: string;
+  app_name: string;
+  app_description: string;
+  auth_type: string;
+  auth_description: string;
+  logo_url: string;
+  status: "disconnected" | "connecting" | "connected" | "error";
+  has_credentials: boolean;
+  connected_account_id: string | null;
+  categories: string[];
+  action_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface IntegrationAction {
+  id: string;
+  appSlug: string;
+  actionKey: string;
+  name: string;
+  description: string;
+  type: "action" | "trigger";
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+}
+
+export const Integrations = {
+  catalog: (params?: { q?: string; page?: number; per_page?: number; category?: string }) => {
+    const p = new URLSearchParams();
+    if (params?.q) p.set("q", params.q);
+    if (params?.page) p.set("page", String(params.page));
+    if (params?.per_page) p.set("per_page", String(params.per_page));
+    if (params?.category) p.set("category", params.category);
+    const qs = p.toString();
+    return api<{ apps: PdApp[]; total: number; page: number; per_page: number; pages: number }>(
+      `/api/integrations/catalog${qs ? `?${qs}` : ""}`
+    );
+  },
+  getCatalogApp: (slug: string) =>
+    api<{ app: PdApp & { connected: boolean }; actions: PdComponent[]; triggers: PdComponent[] }>(
+      `/api/integrations/catalog/${slug}`
+    ),
+  refreshCatalogCache: (slug: string) =>
+    api<{ ok: boolean; count: number }>(`/api/integrations/catalog/${slug}/refresh`, { method: "POST" }),
+  list: () =>
+    api<{ connections: IntegrationConnection[]; total?: number }>("/api/integrations"),
+  connect: (slug: string) =>
+    api<{ connection: IntegrationConnection; warning?: string }>(
+      `/api/integrations/connect/${slug}`, { method: "POST" }
+    ),
+  setCredentials: (id: string, value: string) =>
+    api<{ ok: boolean; credentialsRef?: string }>(
+      `/api/integrations/${id}/credentials`, { method: "PUT", body: JSON.stringify({ value }) }
+    ),
+  setOAuth: (id: string, connectedAccountId: string) =>
+    api<{ ok: boolean }>(
+      `/api/integrations/${id}/oauth`, { method: "PUT", body: JSON.stringify({ connectedAccountId }) }
+    ),
+  disconnect: (id: string) =>
+    api<{ ok: boolean }>(`/api/integrations/${id}`, { method: "DELETE" }),
+  listActions: (id: string) =>
+    api<{ actions: IntegrationAction[] }>(`/api/integrations/${id}/actions`),
+  execute: (id: string, actionKey: string, input: Record<string, unknown>) =>
+    api<{ result: { id: string; status: string; outputs: Record<string, unknown>; error?: string; duration_ms: number } }>(
+      `/api/integrations/${id}/execute`,
+      { method: "POST", body: JSON.stringify({ actionKey, input }) }
+    ),
+  pipedreamStatus: () =>
+    api<{ configured: boolean; valid: boolean; message: string }>("/api/integrations/pipedream/status"),
+  setPipedreamKey: (value: string) =>
+    api<{ ok: boolean }>("/api/integrations/pipedream/key", { method: "PUT", body: JSON.stringify({ value }) }),
+  stats: () =>
+    api<{ total: number; byStatus: Record<string, number> }>("/api/integrations/stats"),
+  categories: () =>
+    api<{ categories: string[]; total: number }>("/api/integrations/categories"),
+};

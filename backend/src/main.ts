@@ -11,14 +11,18 @@ import "./security/auth.ts";
 import "./tools/builtin.ts";
 import "./tools/skill_tools.ts";
 import "./tools/lab_tools.ts";
+import "./tools/integration_tools.ts";
+import "./tools/webspace_tools.ts";
 import { Skills } from "./skills/index.ts";
 import api from "./api/server.ts";
 import { webhooksPublicApi } from "./webhooks/index.ts";
+import { AutomationScheduler } from "./automations/scheduler.ts";
 import { serve } from "bun";
 import { join } from "path";
 
 Skills.init();
 Skills.seedUserSkills();
+AutomationScheduler.start();
 
 const port = Number(process.env.PORT ?? 8787);
 const frontendDist = join(import.meta.dir, "..", "..", "frontend", "dist");
@@ -33,6 +37,16 @@ serve({
     // middleware does not intercept it.
     if (url.pathname.startsWith("/api/hooks")) {
       return webhooksPublicApi.fetch(req);
+    }
+
+    // ---- Web Space serving layer (public URLs for hosted routes) ----
+    if (url.pathname.startsWith("/ws/")) {
+      const { webSpaceServing } = await import("./webspace/serving.ts");
+      const stripped = new Request(
+        new URL(url.pathname.replace(/^\/ws/, "") + url.search, url.origin),
+        req,
+      );
+      return webSpaceServing.fetch(stripped);
     }
 
     // API routes go to the Hono app

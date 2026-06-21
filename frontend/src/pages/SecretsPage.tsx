@@ -64,7 +64,7 @@ export default function SecretsPage() {
             <label className="label">name</label>
             <input
               value={name}
-              onChange={(e) => setName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
+              onChange={(e) => setName(e.target.value.replace(/[^A-Za-z0-9_]/g, "_"))}
               placeholder="OPENAI_API_KEY"
               className="input font-mono"
             />
