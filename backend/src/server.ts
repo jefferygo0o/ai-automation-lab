@@ -8,6 +8,7 @@ import "./tools/builtin.ts";
 import "./tools/skill_tools.ts";
 import "./tools/lab_tools.ts";
 import "./tools/integration_tools.ts";
+import "./tools/lab_tools_extra.ts";
 import { Skills } from "./skills/index.ts";
 import api from "./api/server.ts";
 import { mcpManager } from "./mcp/client.ts";

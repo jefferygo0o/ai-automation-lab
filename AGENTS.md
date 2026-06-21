@@ -209,6 +209,17 @@ sqlite3 data/lab.db \
 - `backend/src/webspace/serving.ts` — auth logic, index page split for owner/anonymous
 - `backend/src/tools/webspace_tools.ts` — publish sets is_public=1, create respects isPublic
 
+### 2026-06-22: Self-contained `lab_*` tool namespace (27 new tools)
+
+**Issue:** A previous draft of `file backend/src/tools/zo_tools.ts` defined
+~20 Zo API-wrapping tools, but the file was never imported into `main.ts` or
+`server.ts` (it was dead code). The user wanted the agent to have a rich
+self-contained toolkit that does NOT depend on the Zo Computer platform.
+
+**Fix:** Created `file backend/src/tools/lab_tools_extra.ts` (1248 lines)
+registering 27 `lab_*` tools in the existing tool registry. Every tool
+runs entirely inside the lab — bun's `fetch`,
+
 ## Project Layout
 
 ```markdown
@@ -303,7 +314,7 @@ frontend/
 | Agent CRUD (create, clone, import/export) | ✅ |
 | Agent Filesystem (system.md, persona.md, skills.md, tools.md, memory.md, config.json) | ✅ |
 | Iterative Agent Runtime (max 12 steps per turn) | ✅ |
-| Tool Registry (15 built-in tools) | ✅ |
+| Tool Registry (15 built-in + 27 self-contained `lab_*` tools) | ✅ |
 | Skills System (markdown + frontmatter, 3 built-in skills) | ✅ |
 | MCP Client (stdio JSON-RPC 2.0, auto-connect) | ✅ |
 | Sandbox (local filesystem jail, timeout, output cap) | ✅ |
@@ -351,6 +362,51 @@ These tools give any agent self-service access to manage the automation lab's ow
 **File:** `file backend/src/tools/lab_tools.ts`
 
 **Architecture note:** These tools operate by calling the same Skills, DB, MCP, and Playwright modules that the API routes use. Data created by the agent via these tools appears immediately in the Skills, Automations, and MCP tabs in the UI — no manual refresh needed.
+
+### Lab Extra Tools (27 tools — added 2026-06-21)
+
+Fully self-contained `lab_*` tools. No requests to Zo Computer, Anthropic, OpenAI, or any third-party API — everything runs locally on the lab. Replaces the orphaned `zo_tools.ts` (dead code, never imported).
+
+**Tier classification:**
+- **T1** — fully implemented, lab-internal
+- **T1+** — fully implemented but requires an optional local binary (ffmpeg, d2, whisper) — returns a clear error if missing
+- **T2** — stubbed with an honest "not implemented in-lab yet" message
+
+| Tool | Tier | Description |
+| --- | --- | --- |
+| `lab_read_file` | T1 | Read text, images, PDFs, EPUBs, office docs |
+| `lab_write_file` | T1 | Write file (creates parent dirs) |
+| `lab_edit_file` | T1 | Deterministic block-level edits (replace/insert/delete/append) |
+| `lab_edit_file_llm` | T1 | LLM-style rewrites with `// ... existing code ...` placeholders |
+| `lab_copy_file` | T1 | Copy a file to a new path |
+| `lab_list_directory` | T1 | List directory contents as a tree |
+| `lab_grep_search` | T1 | ripgrep-backed filename + content search |
+| `lab_bash` | T1 | Run a single shell command |
+| `lab_run_sequential_cmds` | T1 | Run commands sequentially |
+| `lab_run_parallel_cmds` | T1 | Run commands concurrently |
+| `lab_read_webpage` | T1 | Fetch URL, return clean text (or browser-rendered if requested) |
+| `lab_save_webpage` | T1 | Save a URL to the sandbox as markdown |
+| `lab_web_search` | T1 | DuckDuckGo HTML search (no API key) |
+| `lab_web_research` | T1 | Multi-query search + result aggregation |
+| `lab_maps_search` | T1 | Google Maps HTML search (no API key) |
+| `lab_x_search` | T1 | X/Twitter via Google `site:twitter.com` (no API key) |
+| `lab_image_search` | T1 | Bing image search (no API key) |
+| `lab_find_similar_links` | T1 | Find pages similar to a URL |
+| `lab_open_webpage` | T1 | Start a persistent Playwright browser session |
+| `lab_view_webpage` | T1 | Read current page content + screenshot |
+| `lab_use_webpage` | T1 | Interact with the open page (click, fill, type, press, scroll, etc.) |
+| `lab_transcribe_audio` | T2 | Stub — needs local whisper.cpp endpoint |
+| `lab_transcribe_video` | T2 | Stub — needs local whisper.cpp endpoint |
+| `lab_generate_image` | T2 | Stub — needs local SD/SDXL endpoint |
+| `lab_edit_image` | T2 | Stub — needs local inpainting endpoint |
+| `lab_generate_video` | T2 | Stub — needs local AnimateDiff/SVD endpoint |
+| `lab_generate_d2_diagram` | T1+ | Uses `d2` CLI if installed; clear error otherwise |
+
+**File:** `file backend/src/tools/lab_tools_extra.ts`
+
+**Wiring:** Imported in both `file backend/src/main.ts` and `file backend/src/server.ts` (both entry points). Runs at server boot, registers all 27 tools in the global `toolRegistry`. They are exposed to every agent automatically — no per-agent opt-in.
+
+**Notes on the old `zo_tools.ts`:** File still exists on disk for reference but is NOT imported anywhere. The `zo_*` namespace is dead code. New work should use `lab_*` from `lab_tools_extra.ts`.
 
 ## Built-in Skills
 
