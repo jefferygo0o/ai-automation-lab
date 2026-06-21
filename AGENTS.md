@@ -163,6 +163,26 @@ and `backend/src/tools/webspace_tools.ts`.
 - Ownership is enforced by bearer token; cross-user access is blocked.
 - No Zo Computer APIs, storage, or hosting primitives are used.
 
+### 2026-06-21: Responsive shell (mobile drawer + chat sheet)
+
+**Issue:** The app shell (`App.tsx` + `Sidebar.tsx` + `Topbar.tsx`) was
+desktop-only — a 220px sidebar plus optional ChatPanel column at all viewport
+widths, which overflowed on phones.
+
+**Fix:** Added a single breakpoint (`useBreakpoint` hook, `lg` ≈ 1024px) and a
+mobile branch in `Shell`. Desktop rendering path is unchanged
+byte-for-byte; the new mobile branch is a sibling return that:
+
+- Collapses the grid to a single column.
+- Hides the persistent sidebar and renders it as a fixed-position drawer,
+  toggled by a hamburger button on the Topbar (visible only `<lg`).
+- Renders the ChatPanel as a full-width overlay sheet (with scrim) when open
+  on mobile, instead of squeezing it into the grid.
+
+**Files touched:** `frontend/src/App.tsx`, `frontend/src/components/Sidebar.tsx`,
+`frontend/src/components/Topbar.tsx`, `frontend/src/hooks/useBreakpoint.ts`
+(new). No data layer, no API routes, no other components changed.
+
 ### 2026-06-20: Web Space auth — public routes + query-param token
 
 **Issue:** Web Space routes (`/ws/<owner>/<path>`) required a Bearer token in the

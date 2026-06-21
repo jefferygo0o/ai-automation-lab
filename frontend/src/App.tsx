@@ -1,10 +1,11 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import { useAuth } from "./state/auth";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
 import ChatPanel from "./components/ChatPanel";
 import { ChatPanelProvider, useChatPanel } from "./contexts/ChatPanelContext";
+import { useBreakpoint } from "./hooks/useBreakpoint";
 import LoginPage from "./pages/LoginPage";
 import AgentsPage from "./pages/AgentsPage";
 import AgentEditPage from "./pages/AgentEditPage";
@@ -26,6 +27,14 @@ function Shell({ children }: { children: React.ReactNode }) {
   const hideTopbar = HIDE_TOPBAR.some((p) => loc.pathname.startsWith(p));
   const { isOpen, panelWidth, setPanelWidth } = useChatPanel();
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const bp = useBreakpoint();
+  const isMobile = bp === "mobile";
+
+  // Auto-close mobile drawer on route change
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [loc.pathname]);
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent) {
@@ -55,6 +64,31 @@ function Shell({ children }: { children: React.ReactNode }) {
     document.body.style.userSelect = "none";
   }, [panelWidth]);
 
+  // Mobile layout: single column, sidebar drawer, chat as full-width sheet
+  if (isMobile) {
+    return (
+      <div className="grid h-full" style={{ gridTemplateColumns: "1fr" }}>
+        <div className="flex flex-col h-full overflow-hidden min-w-0">
+          {!hideTopbar && (
+            <Topbar onOpenMobileNav={() => setMobileNavOpen(true)} />
+          )}
+          <main className={`flex-1 overflow-auto ${!hideTopbar ? "bg-paper-50" : ""}`}>
+            {children}
+          </main>
+        </div>
+        <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+        {isOpen && (
+          <div className="fixed inset-0 z-50 flex bg-ink-900/20">
+            <div className="ml-auto w-full max-w-md bg-paper-50 h-full shadow-2xl flex flex-col">
+              <ChatPanel />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Tablet + Desktop layout: original grid
   return (
     <div
       className="grid h-full"
