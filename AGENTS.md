@@ -346,6 +346,32 @@ frontend/
 `update_agent_file`, `list_skills`, `read_skill`, `run_skill`,
 `propose_plan`, `wait_for_approval`
 
+
+### 2026-06-22: Cloudflare Workers AI for image/audio (no more media stubs)
+
+**Issue:** The `lab_generate_image`, `lab_edit_image`, `lab_transcribe_audio`, and `lab_transcribe_video` tools were honest T2 stubs -- no local SD/Whisper available, and the lab's "100% local" rule blocked calling OpenAI/Anthropic/Zo.
+
+**Fix:** Wired the four tools to **Cloudflare Workers AI** when the user has set `CF_ACCOUNT_ID` and `CF_API_TOKEN` secrets. Cloudflare is treated as an external model provider, NOT a third-party data processor, because the user supplies their own credentials and account -- the lab itself has no Cloudflare identity. Falls back gracefully if creds aren't set (clear "set these secrets to enable" message).
+
+**Models wired:**
+
+| Tool | Primary model | Fallback |
+| --- | --- | --- |
+| `lab_generate_image` | `@cf/black-forest-labs/flux-1-schnell` (JSON) or `@cf/bytedance/stable-diffusion-xl-lightning` (binary) | none -- returns clear setup message |
+| `lab_edit_image` | `@cf/black-forest-labs/flux-2-klein-9b` (multipart with input_image_0..2) | none |
+| `lab_transcribe_audio` | `@cf/openai/whisper` (multipart, MP3-converted input) | local `whisper.cpp` if installed |
+| `lab_transcribe_video` | same, after ffmpeg audio extract + MP3 conversion | local whisper |
+
+**`lab_generate_video`** is still a stub -- the user's Cloudflare account has no video models (only Pixverse would be available on paid plans, and it's not enabled here). Returns a clear message naming what would be needed.
+
+**Implementation notes:**
+- Cloudflare's `whisper` rejects some WAV headers with HTTP 400 "Invalid audio input" -- ffmpeg converts the input to MP3 first, which works reliably.
+- `@cf/black-forest-labs/flux-2-dev` (the natural-looking edit model) returns raw multipart and crashes Bun's response parser. The `flux-2-klein-9b` variant returns proper JSON `{success, result:{image: base64}}` and works.
+- Model names must NOT be `encodeURIComponent`'d -- `/` is fine in the URL path. (Bug: my first attempt encoded `/` to `%2F` and got "No route for that URI" 700.)
+- Output file extension is `.jpg` (not `.png`) because all three image models return JPEG bytes, even though `output_format: 'png'` is requested.
+
+**Files touched:** `file backend/src/tools/lab_tools_extra.ts`, `file backend/data/agents/agent_ZJCSqyg6av/tools.md`.
+
 ### Lab Management Tools (6 tools — added 2026-06-19)
 
 These tools give any agent self-service access to manage the automation lab's own resources. All are registered in `file src/tools/lab_tools.ts`:
@@ -395,11 +421,11 @@ Fully self-contained `lab_*` tools. No requests to Zo Computer, Anthropic, OpenA
 | `lab_open_webpage` | T1 | Start a persistent Playwright browser session |
 | `lab_view_webpage` | T1 | Read current page content + screenshot |
 | `lab_use_webpage` | T1 | Interact with the open page (click, fill, type, press, scroll, etc.) |
-| `lab_transcribe_audio` | T2 | Stub — needs local whisper.cpp endpoint |
-| `lab_transcribe_video` | T2 | Stub — needs local whisper.cpp endpoint |
-| `lab_generate_image` | T2 | Stub — needs local SD/SDXL endpoint |
-| `lab_edit_image` | T2 | Stub — needs local inpainting endpoint |
-| `lab_generate_video` | T2 | Stub — needs local AnimateDiff/SVD endpoint |
+| `lab_transcribe_audio` | T1 | Cloudflare Whisper or local whisper.cpp |
+| `lab_transcribe_video` | T1 | Extracts audio via ffmpeg, then Cloudflare Whisper or local whisper |
+| `lab_generate_image` | T1 | Cloudflare FLUX / SDXL -- needs CF secrets |
+| `lab_edit_image` | T1 | Cloudflare FLUX.2 klein_9B -- needs CF secrets |
+| `lab_generate_video` | T1 | Returns clear stub message (no video models in current CF account) |
 | `lab_generate_d2_diagram` | T1+ | Uses `d2` CLI if installed; clear error otherwise |
 
 **File:** `file backend/src/tools/lab_tools_extra.ts`

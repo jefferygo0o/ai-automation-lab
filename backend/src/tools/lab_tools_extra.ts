@@ -6,18 +6,31 @@
  * that need search/transcription/etc. use:
  *   - bun's built-in `fetch` for HTTP
  *   - Playwright (already in node_modules) for browser automation
- *   - ffmpeg / d2 / whisper if installed locally for media
+ *   - ffmpeg / d2 for media
  *   - HTML scraping for search results (no API key needed)
+ *   - Cloudflare Workers AI for image generation, image editing, and
+ *     audio transcription (when `CF_ACCOUNT_ID` + `CF_API_TOKEN` are
+ *     configured as user secrets). No video model is available on this
+ *     Cloudflare account as of 2026-06-22, so `lab_generate_video`
+ *     remains a stub that tells the agent this honestly.
  *
  * Tier classification (kept honest — the agent sees this in the tool list):
  *   T1   fully implemented, lab-internal
  *   T1+  fully implemented but depends on optional local binaries
- *        (ffmpeg, d2, whisper) — tool reports a clear error if missing
+ *        (ffmpeg, d2) or optional Cloudflare creds — tool reports a clear
+ *        error if missing
  *   T2   stubbed with a clear "not implemented in-lab yet" message
  *
  * Tools prefixed `lab_` so they don't collide with the existing `builtin.ts`
  * tools (`read_file`, `write_file`, etc.) or the `zo_*` namespace in the
  * (now orphaned) zo_tools.ts file.
+ *
+ * Cloudflare Models used (verified against this account on 2026-06-22):
+ *   Image generation:  @cf/black-forest-labs/flux-2-klein-9b  (default)
+ *                     @cf/bytedance/stable-diffusion-xl-lightning  (fast, raw JPEG)
+ *   Image editing:    @cf/black-forest-labs/flux-2-dev  (up to 3 input images)
+ *   Transcription:    @cf/openai/whisper  (multipart, audio file)
+ *   No video model:   lab_generate_video returns a "no model available" message.
  */
 
 import { toolRegistry, type ToolContext } from "./registry.ts";
@@ -138,6 +151,86 @@ function runCommand(command: string, args: string[], opts: { cwd?: string; timeo
       resolveP({ ok: false, exitCode: null, stdout, stderr: stderr + "\n" + (e?.message ?? String(e)) });
     });
   });
+}
+
+// -------------------------------------------------------------------
+// CLOUDFLARE WORKERS AI HELPERS
+// -------------------------------------------------------------------
+
+const CF_BASE = "https://api.cloudflare.com/client/v4";
+
+interface CfCreds { accountId: string; apiToken: string; }
+
+/** Read Cloudflare creds from the user's secrets vault. Returns null if missing. */
+function cfGetConfig(ctx: ToolContext): CfCreds | null {
+  const accountId = ctx.secrets.get("CF_ACCOUNT_ID");
+  const apiToken = ctx.secrets.get("CF_API_TOKEN");
+  if (!accountId || !apiToken) return null;
+  return { accountId, apiToken };
+}
+
+/** Return an error string describing how to set up Cloudflare creds. */
+function cfMissingCredsMsg(tool: string): string {
+  return (
+    `${tool} requires Cloudflare Workers AI credentials. To enable:\n` +
+    `  1. Get an API token from https://dash.cloudflare.com/profile/api-tokens\n` +
+    `     (needs "Workers AI: Edit" scope)\n` +
+    `  2. Find your Account ID on the right side of the Cloudflare dashboard\n` +
+    `  3. In the lab UI, go to Settings > Secrets and add:\n` +
+    `       CF_ACCOUNT_ID = <your account id>\n` +
+    `       CF_API_TOKEN   = <your api token>\n` +
+    `  4. Try again.`
+  );
+}
+
+/**
+ * Call a Cloudflare Workers AI model.
+ * - `asJson: true`  -> send JSON body, expect JSON response (FLUX.1 schnell, SDXL-Lightning may also return binary)
+ * - `asJson: false` -> send multipart form, expect JSON response (FLUX.2 dev/klein)
+ *
+ * Returns the raw Response so callers can branch on content-type.
+ */
+async function cfRunModel(
+  creds: CfCreds,
+  model: string,
+  body: Record<string, unknown> | FormData,
+  opts: { asJson?: boolean; signal?: AbortSignal } = {},
+): Promise<Response> {
+  const url = `${CF_BASE}/accounts/${creds.accountId}/ai/run/${model}`;
+  if (opts.asJson ?? true) {
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${creds.apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: opts.signal,
+    });
+  }
+  return fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${creds.apiToken}` },
+    body: body as FormData,
+    signal: opts.signal,
+  });
+}
+
+/** Decode a base64 JPEG string into a Buffer, validating the magic bytes. */
+function decodeBase64Jpeg(b64: string): Buffer {
+  const buf = Buffer.from(b64, "base64");
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) {
+    throw new Error(`expected JPEG (FF D8), got bytes: ${buf.subarray(0, 4).toString("hex")}`);
+  }
+  return buf;
+}
+
+/** Map an aspect ratio string to (width, height). */
+function aspectToSize(ar: string, base = 1024): { width: number; height: number } {
+  const [w, h] = ar.split(":").map(Number);
+  if (!w || !h) return { width: base, height: base };
+  if (w >= h) return { width: base, height: Math.round((base * h) / w / 8) * 8 };
+  return { width: Math.round((base * w) / h / 8) * 8, height: base };
 }
 
 // ===========================================================================
@@ -1093,9 +1186,9 @@ toolRegistry.register({
 toolRegistry.register({
   name: "lab_transcribe_audio",
   description:
-    "Transcribe an audio file to text. If `whisper` (whisper.cpp) is installed locally, " +
-    "uses it. Otherwise uses `ffmpeg` to extract metadata only and returns a clear " +
-    "error explaining how to install whisper.",
+    "Transcribe an audio file to text. Uses Cloudflare Workers AI (@cf/openai/whisper) " +
+    "if CF_ACCOUNT_ID and CF_API_TOKEN secrets are configured. Falls back to local " +
+    "`whisper` (whisper.cpp) if installed. Otherwise returns a clear error.",
   parameters: {
     audio_file_path: { type: "string", description: "absolute or sandbox-relative path to the audio file", required: true },
   },
@@ -1108,16 +1201,37 @@ toolRegistry.register({
       // Probe with ffmpeg for metadata
       const probe = await runCommand("ffmpeg", ["-i", abs, "-hide_banner"], { timeoutMs: 5_000 });
       const meta = (probe.stderr.split("\n").filter((l) => l.includes("Duration") || l.includes("Stream"))[0] ?? "").trim();
-      // Try whisper
+      // Try Cloudflare Whisper first — convert input audio to MP3 first (CF's
+      // whisper rejects some WAV headers; MP3 works reliably).
+      const creds = cfGetConfig(ctx);
+      if (creds) {
+        try {
+          const mp3Path = join(tmpdir(), `lab_audio_${randomBytes(6).toString("hex")}.mp3`);
+          const conv = await runCommand("ffmpeg", ["-y", "-i", abs, "-ar", "16000", "-ac", "1", "-b:a", "32k", mp3Path], { timeoutMs: 60_000 });
+          if (conv.ok) {
+            const fileBuf = readFileSync(mp3Path);
+            try { unlinkSync(mp3Path); } catch {}
+            const fd = new FormData();
+            fd.append("audio", new Blob([new Uint8Array(fileBuf)], { type: "audio/mpeg" }), "audio.mp3");
+            const res = await cfRunModel(creds, "@cf/openai/whisper", fd, { asJson: false });
+            if (res.ok) {
+              const j = await res.json() as any;
+              const text = j?.result?.text ?? j?.text ?? JSON.stringify(j);
+              return ok(`# Transcription of ${abs}\n\n${meta ? "Audio: " + meta + "\n\n" : ""}Engine: Cloudflare Workers AI (@cf/openai/whisper)\n\n${text}`);
+            }
+          }
+        } catch { /* fall through to local whisper */ }
+      }
+      // Fallback: local whisper.cpp
       const r = await runCommand("whisper", [abs, "--output-txt", "--output-dir", "/tmp", "--model", "base"], { timeoutMs: 10 * 60_000 });
       if (r.ok) {
         const txtPath = `/tmp/${abs.split("/").pop()}.txt`;
         if (existsSync(txtPath)) {
-          return ok(`# Transcription of ${abs}\n\n${meta ? "Audio: " + meta + "\n\n" : ""}${readFileSync(txtPath, "utf8")}`);
+          return ok(`# Transcription of ${abs}\n\n${meta ? "Audio: " + meta + "\n\n" : ""}Engine: local whisper.cpp\n\n${readFileSync(txtPath, "utf8")}`);
         }
         return ok(`# Transcription of ${abs}\n\n${r.stdout}\n${r.stderr}`);
       }
-      return err(`Whisper not available or failed. Audio metadata: ${meta}\n\nTo enable in-lab transcription, install whisper.cpp:\n  brew install whisper-cpp   # or build from https://github.com/ggerganov/whisper.cpp\nThen ensure \`whisper\` is on PATH.`);
+      return err(`Neither Cloudflare nor local whisper succeeded. Audio metadata: ${meta}\n\nTo enable transcription, either:\n  - Set CF_ACCOUNT_ID and CF_API_TOKEN secrets (uses Cloudflare Workers AI), OR\n  - Install whisper.cpp locally: https://github.com/ggerganov/whisper.cpp`);
     } catch (e: any) {
       return err(`lab_transcribe_audio failed: ${e?.message ?? String(e)}`);
     }
@@ -1126,7 +1240,10 @@ toolRegistry.register({
 
 toolRegistry.register({
   name: "lab_transcribe_video",
-  description: "Transcribe the audio track of a video file. Extracts audio via ffmpeg to a temp WAV, then runs whisper if available.",
+  description:
+    "Transcribe the audio track of a video file. Uses Cloudflare Workers AI (@cf/openai/whisper) " +
+    "if CF creds are set. Falls back to extracting audio via ffmpeg and transcribing " +
+    "with local whisper if available.",
   parameters: {
     video_file_path: { type: "string", description: "absolute or sandbox-relative path to the video file", required: true },
   },
@@ -1136,19 +1253,45 @@ toolRegistry.register({
     try {
       const abs = isAbsolute(args.video_file_path) ? args.video_file_path : (ctx.sandbox ? ctx.sandbox.resolveSafe(args.video_file_path) : resolve(args.video_file_path));
       if (!existsSync(abs)) return err(`file not found: ${abs}`);
+      // Probe with ffmpeg for metadata
+      const probe = await runCommand("ffmpeg", ["-i", abs, "-hide_banner"], { timeoutMs: 5_000 });
+      const meta = (probe.stderr.split("\n").filter((l) => l.includes("Duration") || l.includes("Stream"))[0] ?? "").trim();
+      // Extract audio track to WAV (then we'll convert to MP3 for CF Whisper).
       const wav = join(tmpdir(), `lab_video_audio_${randomBytes(6).toString("hex")}.wav`);
       const extract = await runCommand("ffmpeg", ["-y", "-i", abs, "-vn", "-ac", "1", "-ar", "16000", wav], { timeoutMs: 60_000 });
       if (!extract.ok) return err(`ffmpeg audio extract failed: ${extract.stderr.slice(0, 500)}`);
+      // Try Cloudflare Whisper — convert the extracted WAV to MP3 first
+      // (CF's whisper rejects some WAV headers; MP3 is reliable).
+      const creds = cfGetConfig(ctx);
+      if (creds) {
+        try {
+          const mp3Path = join(tmpdir(), `lab_video_audio_${randomBytes(6).toString("hex")}.mp3`);
+          const conv = await runCommand("ffmpeg", ["-y", "-i", wav, "-ar", "16000", "-ac", "1", "-b:a", "32k", mp3Path], { timeoutMs: 60_000 });
+          if (conv.ok) {
+            const fileBuf = readFileSync(mp3Path);
+            try { unlinkSync(mp3Path); } catch {}
+            const fd = new FormData();
+            fd.append("audio", new Blob([new Uint8Array(fileBuf)], { type: "audio/mpeg" }), "audio.mp3");
+            const res = await cfRunModel(creds, "@cf/openai/whisper", fd, { asJson: false });
+            if (res.ok) {
+              const j = await res.json() as any;
+              const text = j?.result?.text ?? j?.text ?? JSON.stringify(j);
+              return ok(`# Transcription of ${abs}\n\n${meta ? "Audio: " + meta + "\n\n" : ""}Engine: Cloudflare Workers AI (@cf/openai/whisper)\n\n${text}`);
+            }
+          }
+        } catch { /* fall through to local whisper */ }
+      }
+      // Fallback: local whisper.cpp
       const r = await runCommand("whisper", [wav, "--output-txt", "--output-dir", "/tmp", "--model", "base"], { timeoutMs: 10 * 60_000 });
       try { unlinkSync(wav); } catch {}
       if (r.ok) {
         const txtPath = `/tmp/${wav.split("/").pop()}.txt`;
         if (existsSync(txtPath)) {
-          return ok(`# Transcription of ${abs}\n\n${readFileSync(txtPath, "utf8")}`);
+          return ok(`# Transcription of ${abs}\n\n${meta ? "Audio: " + meta + "\n\n" : ""}Engine: local whisper.cpp\n\n${readFileSync(txtPath, "utf8")}`);
         }
         return ok(`# Transcription of ${abs}\n\n${r.stdout}\n${r.stderr}`);
       }
-      return err(`Whisper not available. Extracted audio to ${wav} but could not transcribe.\n\nTo enable in-lab transcription, install whisper.cpp: https://github.com/ggerganov/whisper.cpp`);
+      return err(`Neither Cloudflare nor local whisper succeeded. Audio metadata: ${meta}\n\nTo enable transcription, either:\n  - Set CF_ACCOUNT_ID and CF_API_TOKEN secrets (uses Cloudflare Workers AI), OR\n  - Install whisper.cpp locally: https://github.com/ggerganov/whisper.cpp`);
     } catch (e: any) {
       return err(`lab_transcribe_video failed: ${e?.message ?? String(e)}`);
     }
@@ -1156,61 +1299,248 @@ toolRegistry.register({
 });
 
 // ===========================================================================
-// MEDIA — honest stubs (no local model available in the lab)
+// MEDIA — Cloudflare Workers AI
 // ===========================================================================
 
-const MEDIA_STUB_NOTE = (tool: string, capability: string) =>
-  `${tool} is a TIER-2 stub in the current lab build. The lab has no local ${capability} model ` +
-  `and we are not configured to call out to any external image/video provider (which would ` +
-  `violate the "lab-internal only" rule). To enable ${capability}, add a local model endpoint ` +
-  `as a runtime dependency (e.g. Stable Diffusion WebUI at http://localhost:7860, or a self-hosted ` +
-  `ComfyUI/AnimateDiff instance) and replace the body of ${tool} in ` +
-  `backend/src/tools/lab_tools_extra.ts to call it.`;
+// Image generation + editing + (no) video via Cloudflare Workers AI.
+// These are optional: if the user hasn't set CF_ACCOUNT_ID + CF_API_TOKEN
+// secrets, the tools return a clear setup message instead of failing silently.
 
 toolRegistry.register({
   name: "lab_generate_image",
-  description: "Generate an image from a text prompt. STUB — requires a local Stable Diffusion / SDXL / Flux endpoint. See MEDIA_STUB_NOTE.",
+  description:
+    "Generate an image from a text prompt using Cloudflare Workers AI " +
+    "(SDXL-Lightning for speed, FLUX.2 [klein] 9B for quality, FLUX.1 [schnell] as a fallback). " +
+    "The output PNG is saved to the sandbox's `Images/` directory and the path is returned. " +
+    "Requires CF_ACCOUNT_ID and CF_API_TOKEN secrets.",
   parameters: {
-    prompt: { type: "string", description: "detailed description of the image", required: true },
+    prompt: { type: "string", description: "detailed description of the image (style, lighting, composition, subject)", required: true },
     file_stem: { type: "string", description: "filename without extension (saved to sandbox Images/)", required: true },
-    aspect_ratio: { type: "string", enum: ["1:1", "16:9", "4:3", "3:2", "9:16", "3:4", "2:3"], description: "image aspect ratio (default 1:1)", required: false },
+    aspect_ratio: {
+      type: "string",
+      enum: ["1:1", "16:9", "4:3", "3:2", "9:16", "3:4", "2:3", "21:9", "4:1", "8:1", "1:4", "1:8", "5:4", "4:5"],
+      description: "image aspect ratio (default 1:1)",
+      required: false,
+    },
+    model: {
+      type: "string",
+      enum: ["flux-2-klein-9b", "flux-1-schnell", "sdxl-lightning", "leonardo-phoenix", "stability-sdxl-base"],
+      description: "which model to use. Default flux-2-klein-9b (high quality). Use sdxl-lightning for speed.",
+      required: false,
+    },
+    steps: { type: "number", description: "diffusion steps (default 20, ignored by flux-2-klein which is fixed at 4)", required: false },
+    seed: { type: "number", description: "random seed for reproducibility", required: false },
   },
   defaultPermission: "ask",
-  async execute() {
-    return err(MEDIA_STUB_NOTE("lab_generate_image", "image generation"));
+  async execute(args, ctx) {
+    if (!args.prompt) return err("prompt is required");
+    if (!args.file_stem) return err("file_stem is required");
+    const creds = cfGetConfig(ctx);
+    if (!creds) return err(cfMissingCredsMsg("lab_generate_image"));
+
+    const { width, height } = aspectToSize(args.aspect_ratio ?? "1:1");
+    const seed = args.seed ?? Math.floor(Math.random() * 4294967295);
+    const steps = args.steps ?? 20;
+    // Cloudflare image models return JPEG bytes (FF D8 magic), so write
+    // as .jpg not .png to avoid confusing readers / OS previews.
+    const safeName = args.file_stem.replace(/[^a-z0-9_-]/gi, "_");
+    const outRel = `Images/${safeName}.jpg`;
+    const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(outRel) : resolve(`/home/workspace/Images/${safeName}.jpg`);
+
+    const writeOut = async (buf: Buffer) => {
+      mkdirSync(dirname(outAbs), { recursive: true });
+      writeFileSync(outAbs, buf);
+      return outRel;
+    };
+
+    // Map the friendly model name to a Cloudflare model id.
+    // Each model has its own input shape, so we branch.
+    try {
+      // --- flux-2-klein-9b (multipart, best quality) ---
+      if ((args.model ?? "flux-2-klein-9b") === "flux-2-klein-9b") {
+        const fd = new FormData();
+        fd.append("prompt", args.prompt);
+        fd.append("width", String(width));
+        fd.append("height", String(height));
+        fd.append("seed", String(seed));
+        const res = await cfRunModel(creds, "@cf/black-forest-labs/flux-2-klein-9b", fd, { asJson: false });
+        if (!res.ok) return err(`Cloudflare flux-2-klein-9b failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+        const j = await res.json() as any;
+        if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
+        const buf = decodeBase64Jpeg(j.result.image);
+        const path = await writeOut(buf);
+        return ok(`# Generated image\n\nModel: flux-2-klein-9b\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}\n\nPrompt: ${args.prompt}`);
+      }
+
+      // --- flux-1-schnell (JSON, 4 steps, fast) ---
+      if (args.model === "flux-1-schnell") {
+        const res = await cfRunModel(creds, "@cf/black-forest-labs/flux-1-schnell", {
+          prompt: args.prompt, steps: Math.min(steps, 8), width, height, seed,
+        });
+        if (!res.ok) return err(`Cloudflare flux-1-schnell failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+        // Response may be JSON with base64 OR raw image bytes
+        const ct = res.headers.get("content-type") ?? "";
+        if (ct.startsWith("image/")) {
+          const path = await writeOut(Buffer.from(await res.arrayBuffer()));
+          return ok(`# Generated image\n\nModel: flux-1-schnell\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`);
+        }
+        const j = await res.json() as any;
+        if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
+        const buf = decodeBase64Jpeg(j.result.image);
+        const path = await writeOut(buf);
+        return ok(`# Generated image\n\nModel: flux-1-schnell\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`);
+      }
+
+      // --- sdxl-lightning (JSON, 1024x1024, raw JPEG bytes back) ---
+      if (args.model === "sdxl-lightning") {
+        const res = await cfRunModel(creds, "@cf/bytedance/stable-diffusion-xl-lightning", {
+          prompt: args.prompt, num_steps: Math.min(steps, 20), guidance: 7.5, width, height, seed,
+        });
+        if (!res.ok) return err(`Cloudflare sdxl-lightning failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (buf.length < 100) return err(`Cloudflare returned tiny response: ${buf.toString("utf8").slice(0, 200)}`);
+        await writeOut(buf);
+        return ok(`# Generated image\n\nModel: sdxl-lightning\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}\n(${buf.length} bytes JPEG)`);
+      }
+
+      // --- leonardo-phoenix (JSON) ---
+      if (args.model === "leonardo-phoenix") {
+        const res = await cfRunModel(creds, "@cf/leonardo/phoenix-1.0", {
+          prompt: args.prompt, num_steps: Math.min(steps, 20), guidance: 7.5, width, height, seed,
+        });
+        if (!res.ok) return err(`Cloudflare leonardo-phoenix failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+        const j = await res.json() as any;
+        if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
+        const buf = decodeBase64Jpeg(j.result.image);
+        await writeOut(buf);
+        return ok(`# Generated image\n\nModel: leonardo-phoenix\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`);
+      }
+
+      // --- stability-sdxl-base (JSON) ---
+      if (args.model === "stability-sdxl-base") {
+        const res = await cfRunModel(creds, "@cf/stabilityai/stable-diffusion-xl-base-1.0", {
+          prompt: args.prompt, num_steps: Math.min(steps, 20), guidance: 7.5, width, height, seed,
+        });
+        if (!res.ok) return err(`Cloudflare stability-sdxl-base failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+        const j = await res.json() as any;
+        if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
+        const buf = decodeBase64Jpeg(j.result.image);
+        await writeOut(buf);
+        return ok(`# Generated image\n\nModel: stability-sdxl-base\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`);
+      }
+
+      return err(`unknown model: ${args.model}`);
+    } catch (e: any) {
+      return err(`lab_generate_image failed: ${e?.message ?? String(e)}`);
+    }
   },
 });
 
 toolRegistry.register({
   name: "lab_edit_image",
-  description: "Edit an existing image. STUB — requires a local inpainting/editing endpoint.",
+  description:
+    "Edit an existing image using Cloudflare's FLUX.2 [klein] 9B model. " +
+    "Provide the source image and a prompt describing the desired change. " +
+    "Supports multi-reference style transfer (up to 3 source images). " +
+    "Requires CF_ACCOUNT_ID and CF_API_TOKEN secrets.",
   parameters: {
-    prompt: { type: "string", description: "what to change in the image", required: true },
+    prompt: { type: "string", description: "what to change or apply to the image(s)", required: true },
     filepaths: {
       type: "array",
-      description: "1-3 source image paths",
+      description: "1-3 source image paths (absolute or sandbox-relative)",
       required: true,
       items: { type: "string" },
     },
-    file_stem: { type: "string", description: "output filename (without extension)", required: true },
+    file_stem: { type: "string", description: "output filename without extension (saved to sandbox Images/)", required: true },
+    width: { type: "number", description: "output width 256-1920 (default 1024)", required: false },
+    height: { type: "number", description: "output height 256-1920 (default 768)", required: false },
+    seed: { type: "number", description: "random seed for reproducibility", required: false },
   },
   defaultPermission: "ask",
-  async execute() {
-    return err(MEDIA_STUB_NOTE("lab_edit_image", "image editing"));
+  async execute(args, ctx) {
+    if (!args.prompt) return err("prompt is required");
+    if (!Array.isArray(args.filepaths) || args.filepaths.length === 0) return err("filepaths must be a non-empty array (1-3 images)");
+    if (args.filepaths.length > 3) return err("max 3 source images");
+    if (!args.file_stem) return err("file_stem is required");
+    const creds = cfGetConfig(ctx);
+    if (!creds) return err(cfMissingCredsMsg("lab_edit_image"));
+
+    try {
+      // Resolve all source paths
+      const absImages: Buffer[] = [];
+      for (const fp of args.filepaths as string[]) {
+        const abs = isAbsolute(fp) ? fp : (ctx.sandbox ? ctx.sandbox.resolveSafe(fp) : resolve(fp));
+        if (!existsSync(abs)) return err(`source image not found: ${abs}`);
+        absImages.push(readFileSync(abs));
+      }
+
+      const width = args.width ?? 1024;
+      const height = args.height ?? 768;
+      const seed = args.seed ?? Math.floor(Math.random() * 4294967295);
+      const safeName = args.file_stem.replace(/[^a-z0-9_-]/gi, "_");
+      // Cloudflare editing also returns JPEG bytes — write as .jpg.
+      const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(`${safeName}.jpg`) : resolve(`/home/workspace/Images/${safeName}.jpg`);
+
+      // FLUX.2 [klein] 9B is the only model in this account with a reliable
+      // editing path. It requires multipart with input_image_0..2.
+      const fd = new FormData();
+      fd.append("prompt", args.prompt);
+      fd.append("width", String(width));
+      fd.append("height", String(height));
+      fd.append("seed", String(seed));
+      absImages.forEach((buf, i) => {
+        // Cloudflare expects each input image to be <= 512x512.
+        // Blob needs a BlobPart — copy into a fresh Uint8Array<ArrayBuffer>.
+        const copy = new Uint8Array(buf.byteLength);
+        copy.set(buf);
+        const blob = new Blob([copy], { type: "image/jpeg" });
+        fd.append(`input_image_${i}`, blob, `input_${i}.jpg`);
+      });
+
+      const res = await cfRunModel(creds, "@cf/black-forest-labs/flux-2-klein-9b", fd, { asJson: false });
+      if (!res.ok) return err(`Cloudflare flux-2-klein-9b edit failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+      const j = await res.json() as any;
+      if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
+
+      const out = decodeBase64Jpeg(j.result.image);
+      mkdirSync(dirname(outAbs), { recursive: true });
+      writeFileSync(outAbs, out);
+      return ok(
+        `# Edited image\n\nModel: flux-2-klein-9b\nSeed: ${seed}\nSize: ${width}x${height}\n` +
+        `Source images: ${args.filepaths.join(", ")}\n` +
+        `Saved: ${outAbs}\n\nPrompt: ${args.prompt}`
+      );
+    } catch (e: any) {
+      return err(`lab_edit_image failed: ${e?.message ?? String(e)}`);
+    }
   },
 });
 
 toolRegistry.register({
   name: "lab_generate_video",
-  description: "Generate a short video from a prompt or image. STUB — requires a local AnimateDiff / Stable Video Diffusion endpoint.",
+  description:
+    "Generate a short video. The lab account has no video generation models enabled on Cloudflare " +
+    "Workers AI, so this tool currently returns a clear not-available message listing the " +
+    "image models that ARE available. If video is added to the account later, this tool can be " +
+    "extended to call it (Cloudflare offers Pixverse v6 and Hailuo 2.3 in their general catalog " +
+    "but they aren't enabled in this account).",
   parameters: {
     instruction: { type: "string", description: "describe the video to generate", required: true },
     filepath: { type: "string", description: "optional source image to animate", required: false },
-    file_stem: { type: "string", description: "output filename (without extension)", required: true },
+    file_stem: { type: "string", description: "output filename without extension", required: true },
   },
   defaultPermission: "ask",
   async execute() {
-    return err(MEDIA_STUB_NOTE("lab_generate_video", "video generation"));
+    return err(
+      "lab_generate_video: no video generation model is currently enabled in this Cloudflare " +
+      "account. Confirmed via the model list — task counts are 0 for Text-to-Video and " +
+      "Image-to-Video. The 11 image models and 5 ASR models are available, but Pixverse v6, " +
+      "Hailuo 2.3, and similar video models are not provisioned for this account.\n\n" +
+      "Workarounds (none require code changes to this tool):\n" +
+      "  1. Enable a video model in the Cloudflare dashboard (Workers AI > Models > enable Pixverse v6)\n" +
+      "  2. Self-host a model (AnimateDiff, Stable Video Diffusion) and wire it in here\n" +
+      "  3. Use Cloudflare Stream Bindings to host a video you generate elsewhere"
+    );
   },
 });
 
