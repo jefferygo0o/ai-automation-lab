@@ -38,7 +38,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSy
 import { join, resolve, isAbsolute, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -50,7 +50,10 @@ function text(s: string) {
 function err(s: string) {
   return { content: [{ type: "text" as const, text: s }], isError: true };
 }
-function ok(s: string) {
+function ok(s: string, media?: Array<{ path: string; mime: string; kind: "image" | "video" | "audio"; alt?: string }>) {
+  if (media && media.length > 0) {
+    return { content: [{ type: "text" as const, text: s }], media };
+  }
   return { content: [{ type: "text" as const, text: s }] };
 }
 
@@ -1369,7 +1372,7 @@ toolRegistry.register({
         if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
         const buf = decodeBase64Jpeg(j.result.image);
         const path = await writeOut(buf);
-        return ok(`# Generated image\n\nModel: flux-2-klein-9b\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}\n\nPrompt: ${args.prompt}`);
+        return ok(`# Generated image\n\nModel: flux-2-klein-9b\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}\n\nPrompt: ${args.prompt}`, [{ path, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
       }
 
       // --- flux-1-schnell (JSON, 4 steps, fast) ---
@@ -1382,13 +1385,13 @@ toolRegistry.register({
         const ct = res.headers.get("content-type") ?? "";
         if (ct.startsWith("image/")) {
           const path = await writeOut(Buffer.from(await res.arrayBuffer()));
-          return ok(`# Generated image\n\nModel: flux-1-schnell\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`);
+          return ok(`# Generated image\n\nModel: flux-1-schnell\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`, [{ path, mime: ct || "image/jpeg", kind: "image", alt: args.prompt }]);
         }
         const j = await res.json() as any;
         if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
         const buf = decodeBase64Jpeg(j.result.image);
         const path = await writeOut(buf);
-        return ok(`# Generated image\n\nModel: flux-1-schnell\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`);
+        return ok(`# Generated image\n\nModel: flux-1-schnell\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`, [{ path, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
       }
 
       // --- sdxl-lightning (JSON, 1024x1024, raw JPEG bytes back) ---
@@ -1400,7 +1403,7 @@ toolRegistry.register({
         const buf = Buffer.from(await res.arrayBuffer());
         if (buf.length < 100) return err(`Cloudflare returned tiny response: ${buf.toString("utf8").slice(0, 200)}`);
         await writeOut(buf);
-        return ok(`# Generated image\n\nModel: sdxl-lightning\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}\n(${buf.length} bytes JPEG)`);
+        return ok(`# Generated image\n\nModel: sdxl-lightning\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}\n(${buf.length} bytes JPEG)`, [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
       }
 
       // --- leonardo-phoenix (JSON) ---
@@ -1413,7 +1416,7 @@ toolRegistry.register({
         if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
         const buf = decodeBase64Jpeg(j.result.image);
         await writeOut(buf);
-        return ok(`# Generated image\n\nModel: leonardo-phoenix\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`);
+        return ok(`# Generated image\n\nModel: leonardo-phoenix\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`, [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
       }
 
       // --- stability-sdxl-base (JSON) ---
@@ -1426,7 +1429,7 @@ toolRegistry.register({
         if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
         const buf = decodeBase64Jpeg(j.result.image);
         await writeOut(buf);
-        return ok(`# Generated image\n\nModel: stability-sdxl-base\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`);
+        return ok(`# Generated image\n\nModel: stability-sdxl-base\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`, [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
       }
 
       return err(`unknown model: ${args.model}`);
@@ -1508,7 +1511,8 @@ toolRegistry.register({
       return ok(
         `# Edited image\n\nModel: flux-2-klein-9b\nSeed: ${seed}\nSize: ${width}x${height}\n` +
         `Source images: ${args.filepaths.join(", ")}\n` +
-        `Saved: ${outAbs}\n\nPrompt: ${args.prompt}`
+        `Saved: ${outAbs}\n\nPrompt: ${args.prompt}`,
+        [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]
       );
     } catch (e: any) {
       return err(`lab_edit_image failed: ${e?.message ?? String(e)}`);
@@ -1519,7 +1523,8 @@ toolRegistry.register({
 toolRegistry.register({
   name: "lab_generate_video",
   description:
-    "Generate a short video. The lab account has no video generation models enabled on Cloudflare " +
+    "Generate a short MP4 video (4 seconds, 1280x720, 24fps) by animating a source image using ffmpeg. " +
+    "The lab's Cloudflare account has no video generation models enabled on Cloudflare " +
     "Workers AI, so this tool currently returns a clear not-available message listing the " +
     "image models that ARE available. If video is added to the account later, this tool can be " +
     "extended to call it (Cloudflare offers Pixverse v6 and Hailuo 2.3 in their general catalog " +
@@ -1530,19 +1535,122 @@ toolRegistry.register({
     file_stem: { type: "string", description: "output filename without extension", required: true },
   },
   defaultPermission: "ask",
-  async execute() {
-    return err(
-      "lab_generate_video: no video generation model is currently enabled in this Cloudflare " +
-      "account. Confirmed via the model list — task counts are 0 for Text-to-Video and " +
-      "Image-to-Video. The 11 image models and 5 ASR models are available, but Pixverse v6, " +
-      "Hailuo 2.3, and similar video models are not provisioned for this account.\n\n" +
-      "Workarounds (none require code changes to this tool):\n" +
-      "  1. Enable a video model in the Cloudflare dashboard (Workers AI > Models > enable Pixverse v6)\n" +
-      "  2. Self-host a model (AnimateDiff, Stable Video Diffusion) and wire it in here\n" +
-      "  3. Use Cloudflare Stream Bindings to host a video you generate elsewhere"
+  async execute(args, ctx) {
+    if (!args.instruction) return err("instruction is required");
+    if (!args.file_stem) return err("file_stem is required");
+    if (!ctx.sandbox) return err("sandbox not active — agent must be running in a sandbox");
+    if (!ffmpegAvailable()) return err("lab_generate_video: ffmpeg is not installed on this machine. Install it (apt install ffmpeg) to enable video generation.");
+
+    const safeName = String(args.file_stem).replace(/[^a-z0-9_-]/gi, "_");
+    const outRel = `Videos/${safeName}.mp4`;
+    const outAbs = ctx.sandbox.resolveSafe(outRel);
+    const dir = dirname(outAbs);
+    try { mkdirSync(dir, { recursive: true }); } catch {}
+
+    // 1. Source image: either the provided filepath, or one we generate.
+    let sourceRel: string | null = null;
+    let sourceAbs: string | null = null;
+    if (args.filepath && typeof args.filepath === "string") {
+      const fp = String(args.filepath);
+      sourceAbs = isAbsolute(fp) ? fp : ctx.sandbox.resolveSafe(fp);
+      if (!existsSync(sourceAbs)) {
+        return err(`lab_generate_video: source image not found: ${fp}`);
+      }
+      sourceRel = fp.startsWith(ctx.sandbox.workdir)
+        ? fp.slice(ctx.sandbox.workdir.length).replace(/^[/\\]+/, "")
+        : fp;
+    } else {
+      // Try to generate a base image via Cloudflare (same code path as lab_generate_image).
+      const creds = cfGetConfig(ctx);
+      if (!creds) {
+        return err(
+          "lab_generate_video: no source image supplied and no Cloudflare creds to generate one.\n" +
+          "Either pass `filepath` to animate an existing image, or set CF_ACCOUNT_ID + CF_API_TOKEN secrets."
+        );
+      }
+      try {
+        const width = 768, height = 432; // 16:9
+        const seed = Math.floor(Math.random() * 4294967295);
+        const fd = new FormData();
+        fd.append("prompt", args.instruction);
+        fd.append("width", String(width));
+        fd.append("height", String(height));
+        fd.append("seed", String(seed));
+        const res = await cfRunModel(creds, "@cf/black-forest-labs/flux-2-klein-9b", fd, { asJson: false });
+        if (!res.ok) return err(`lab_generate_video: image gen failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+        const j = await res.json() as any;
+        if (!j?.success || !j?.result?.image) return err(`lab_generate_video: image gen returned no image: ${JSON.stringify(j).slice(0, 500)}`);
+        const buf = decodeBase64Jpeg(j.result.image);
+        const tmpRel = `Videos/_src_${safeName}.jpg`;
+        const tmpAbs = ctx.sandbox.resolveSafe(tmpRel);
+        mkdirSync(dirname(tmpAbs), { recursive: true });
+        writeFileSync(tmpAbs, buf);
+        sourceRel = tmpRel;
+        sourceAbs = tmpAbs;
+      } catch (e: any) {
+        return err(`lab_generate_video: image generation failed: ${e?.message ?? String(e)}`);
+      }
+    }
+
+    // 2. Animate via ffmpeg — slow horizontal pan over 4s on a 2x-upscaled source.
+    //    Uses scale (cover-fit) + crop with time-based x/y offsets to produce
+    //    a smooth Ken-Burns-style pan. fps filter normalises frame rate.
+    const duration = 4; // seconds
+    const fps = 24;
+    const frames = duration * fps;
+    const w = 1280, h = 720;
+    // Pan window: scroll the crop window horizontally across the upscaled source
+    // over the full duration (96 frames at 24fps). Stays centred vertically.
+    // crop=out_w:out_h:x:y, with x increasing linearly from 0 to (2w-w)=w.
+    const vf = [
+      `scale=${w * 2}:${h * 2}:force_original_aspect_ratio=increase`,
+      `crop=${w}:${h}:x='min(${w}*(t/${duration}),${w})':y='(ih-${h})/2'`,
+      `fps=${fps}`,
+      `format=yuv420p`,
+    ].join(",");
+    const args2 = [
+      "-y",
+      "-loop", "1",
+      "-i", sourceAbs!,
+      "-t", String(duration),
+      "-vf", vf,
+      "-c:v", "libx264",
+      "-preset", "veryfast",
+      "-crf", "20",
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+      outAbs,
+    ];
+    try {
+      await runCommand("ffmpeg", args2, { timeoutMs: 120_000 });
+    } catch (e: any) {
+      return err(`lab_generate_video: ffmpeg failed: ${e?.message ?? String(e)}\nstderr: ${(e?.stderr ?? "").toString().slice(-1000)}`);
+    }
+    if (!existsSync(outAbs)) return err(`lab_generate_video: ffmpeg exited but output is missing at ${outAbs}`);
+
+    return ok(
+      `# Generated video\n\n` +
+      `Source: ${sourceRel ?? "(generated base image)"}\n` +
+      `Duration: ${duration}s @ ${fps}fps\n` +
+      `Size: ${w}x${h}\n` +
+      `Saved: ${outAbs}\n` +
+      `Motion: Ken Burns (slow zoom in)\n\n` +
+      `Prompt: ${args.instruction}\n\n` +
+      `Note: this is animated still-image video (true video synthesis models like Pixverse/Hailuo ` +
+      `are not enabled in the lab's Cloudflare account). Pass \`filepath\` to animate a different source image.`,
+      [{ path: outRel, mime: "video/mp4", kind: "video", alt: args.instruction }]
     );
   },
 });
+
+function ffmpegAvailable(): boolean {
+  try {
+    const r = Bun.spawnSync(["ffmpeg", "-version"], { stdout: "ignore", stderr: "ignore" });
+    return r.exitCode === 0;
+  } catch {
+    return false;
+  }
+}
 
 toolRegistry.register({
   name: "lab_generate_d2_diagram",

@@ -26,6 +26,9 @@ import {
   ListChecks,
   Brain,
   Settings2,
+  Image as ImageIcon,
+  Video,
+  Mic,
   type LucideIcon,
 } from "lucide-react";
 
@@ -41,6 +44,9 @@ export type ToolKind =
   | "mcp-list"
   | "memory"
   | "agent"
+  | "image"
+  | "video"
+  | "audio"
   | "generic";
 
 export interface ToolMeta {
@@ -150,6 +156,41 @@ export const TOOL_META: Record<string, ToolMeta> = {
     verbPast: "edited",
     kind: "edit",
     tone: TONE_EDIT,
+  },
+  lab_generate_image: {
+    icon: ImageIcon,
+    verb: "generating image",
+    verbPast: "generated image",
+    kind: "image",
+    tone: TONE_WRITE,
+  },
+  lab_edit_image: {
+    icon: ImageIcon,
+    verb: "editing image",
+    verbPast: "edited image",
+    kind: "image",
+    tone: TONE_EDIT,
+  },
+  lab_generate_video: {
+    icon: Video,
+    verb: "generating video",
+    verbPast: "generated video",
+    kind: "video",
+    tone: TONE_WRITE,
+  },
+  lab_transcribe_audio: {
+    icon: Mic,
+    verb: "transcribing audio",
+    verbPast: "transcribed audio",
+    kind: "audio",
+    tone: TONE_HTTP,
+  },
+  lab_transcribe_video: {
+    icon: Video,
+    verb: "transcribing video",
+    verbPast: "transcribed video",
+    kind: "video",
+    tone: TONE_HTTP,
   },
 };
 
@@ -275,4 +316,34 @@ export function getLineDelta(result: unknown): LineDelta | null {
     }
   }
   return null;
+}
+
+export interface ToolMediaItem {
+  path: string;
+  mime: string;
+  kind: "image" | "video" | "audio";
+  alt?: string;
+}
+
+/**
+ * Extract the `media` array from a tool result. Tools can attach
+ *   { content: [...], media: [{ path, mime, kind, alt? }] }
+ * so the chat panel can render inline previews without re-running the tool.
+ */
+export function getToolMedia(result: unknown): ToolMediaItem[] | null {
+  if (!result || typeof result !== "object") return null;
+  const r = result as Record<string, unknown>;
+  const m = r.media;
+  if (!Array.isArray(m) || m.length === 0) return null;
+  const out: ToolMediaItem[] = [];
+  for (const item of m) {
+    if (!item || typeof item !== "object") continue;
+    const i = item as Record<string, unknown>;
+    const p = typeof i.path === "string" ? i.path : null;
+    const mime = typeof i.mime === "string" ? i.mime : null;
+    const kind = i.kind === "image" || i.kind === "video" || i.kind === "audio" ? i.kind : null;
+    if (!p || !mime || !kind) continue;
+    out.push({ path: p, mime, kind, alt: typeof i.alt === "string" ? i.alt : undefined });
+  }
+  return out.length > 0 ? out : null;
 }

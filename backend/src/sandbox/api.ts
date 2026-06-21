@@ -6,7 +6,7 @@
  * so the HTTP layer never has to know about absolute workdirs.
  */
 import { createSandbox, type CommandResult, type SandboxOptions } from "./index.ts";
-import { realpathSync, rmSync } from "node:fs";
+import { realpathSync, rmSync, readFileSync, statSync } from "node:fs";
 
 export interface DirEntry {
   name: string;
@@ -30,6 +30,20 @@ export function sandboxBrowse(opts: SandboxOptions, p: string): SandboxTreeRespo
 export function sandboxRead(opts: SandboxOptions, p: string): string {
   const s = createSandbox(opts);
   return s.readFile(p);
+}
+
+/** Read a sandbox-relative file as raw bytes (for media). Returns null if missing. */
+export function sandboxReadBinary(opts: SandboxOptions, p: string): { bytes: Buffer; absPath: string; size: number; mtime: number } | null {
+  const s = createSandbox(opts);
+  const abs = s.resolveSafe(p);
+  try {
+    const st = statSync(abs);
+    if (!st.isFile()) return null;
+    const bytes = readFileSync(abs);
+    return { bytes, absPath: abs, size: st.size, mtime: st.mtimeMs };
+  } catch {
+    return null;
+  }
 }
 
 export function sandboxWrite(opts: SandboxOptions, p: string, content: string): void {

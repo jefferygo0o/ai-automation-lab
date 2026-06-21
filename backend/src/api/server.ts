@@ -23,7 +23,7 @@ import { MemoryStore } from "../memory/index.ts";
 import { readAgentConfig, AGENTS_DIR } from "../agents/files.ts";
 import { toolRegistry } from "../tools/registry.ts";
 import { RunStore } from "../runs/index.ts";
-import { sandboxBrowse, sandboxRead, sandboxWrite, sandboxExec, sandboxDelete } from "../sandbox/api.ts";
+import { sandboxBrowse, sandboxRead, sandboxReadBinary, sandboxWrite, sandboxExec, sandboxDelete } from "../sandbox/api.ts";
 import { resolveSandboxOptions } from "../agents/permissions.ts";
 import { createSandbox } from "../sandbox/index.ts";
 // ---- Web Space (routes management) ----
@@ -720,6 +720,46 @@ api.get("/api/agents/:id/sandbox/read", (c) => {
   try {
     const content = sandboxRead(opts, path);
     return c.json({ path, content });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+const sandboxFileMime = (p: string) => {
+  const lower = p.toLowerCase();
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+  if (lower.endsWith(".png")) return "image/png";
+  if (lower.endsWith(".gif")) return "image/gif";
+  if (lower.endsWith(".webp")) return "image/webp";
+  if (lower.endsWith(".svg")) return "image/svg+xml";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".mov")) return "video/quicktime";
+  if (lower.endsWith(".mp3")) return "audio/mpeg";
+  if (lower.endsWith(".wav")) return "audio/wav";
+  if (lower.endsWith(".ogg")) return "audio/ogg";
+  if (lower.endsWith(".m4a")) return "audio/mp4";
+  if (lower.endsWith(".flac")) return "audio/flac";
+  return "application/octet-stream";
+};
+
+api.get("/api/agents/:id/sandbox/file", (c) => {
+  const userId = c.get("userId") as string;
+  const agent = AgentStore.get(c.req.param("id"), userId);
+  if (!agent) return c.json({ error: "not found" }, 404);
+  const opts = resolveSandboxOptions(agent);
+  const path = c.req.query("path");
+  if (!path) return c.json({ error: "path required" }, 400);
+  try {
+    const result = sandboxReadBinary(opts, path);
+    if (!result) return c.json({ error: "file not found" }, 404);
+    return new Response(result.bytes, {
+      headers: {
+        "content-type": sandboxFileMime(path),
+        "content-length": String(result.size),
+        "cache-control": "private, max-age=60",
+      },
+    });
   } catch (e: any) {
     return c.json({ error: e?.message ?? String(e) }, 400);
   }

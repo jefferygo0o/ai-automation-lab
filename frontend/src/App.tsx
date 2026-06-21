@@ -67,19 +67,19 @@ function Shell({ children }: { children: React.ReactNode }) {
   // Mobile layout: single column, sidebar drawer, chat as full-width sheet
   if (isMobile) {
     return (
-      <div className="grid h-full" style={{ gridTemplateColumns: "1fr" }}>
-        <div className="flex flex-col h-full overflow-hidden min-w-0">
+      <div className="grid h-full min-h-0" style={{ gridTemplateColumns: "1fr" }}>
+        <div className="flex flex-col h-full min-h-0 overflow-hidden min-w-0">
           {!hideTopbar && (
             <Topbar onOpenMobileNav={() => setMobileNavOpen(true)} />
           )}
-          <main className={`flex-1 overflow-auto ${!hideTopbar ? "bg-paper-50" : ""}`}>
+          <main className={`flex-1 min-h-0 overflow-auto ${!hideTopbar ? "bg-paper-50" : ""}`}>
             {children}
           </main>
         </div>
         <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
         {isOpen && (
           <div className="fixed inset-0 z-50 flex bg-ink-900/20">
-            <div className="ml-auto w-full max-w-md bg-paper-50 h-full shadow-2xl flex flex-col">
+            <div className="ml-auto w-full max-w-md bg-paper-50 h-full shadow-2xl flex flex-col min-h-0">
               <ChatPanel />
             </div>
           </div>
@@ -91,22 +91,23 @@ function Shell({ children }: { children: React.ReactNode }) {
   // Tablet + Desktop layout: original grid
   return (
     <div
-      className="grid h-full"
+      className="grid h-full min-h-0"
       style={{
         gridTemplateColumns: isOpen
           ? `220px 1fr ${panelWidth}px`
           : "auto 1fr",
+        gridTemplateRows: "minmax(0, 1fr)",
       }}
     >
       <Sidebar />
-      <div className="flex flex-col h-full overflow-hidden min-w-0">
+      <div className="flex flex-col h-full min-h-0 overflow-hidden min-w-0">
         {!hideTopbar && <Topbar />}
-        <main className={`flex-1 overflow-auto ${!hideTopbar ? "bg-paper-50" : ""}`}>
+        <main className={`flex-1 min-h-0 overflow-auto ${!hideTopbar ? "bg-paper-50" : ""}`}>
           {children}
         </main>
       </div>
       {isOpen && (
-        <div className="flex">
+        <div className="flex min-h-0">
           <div
             className="w-[3px] cursor-ew-resize shrink-0 bg-transparent hover:bg-ink-300/40 active:bg-ink-300/60 transition-colors relative"
             onMouseDown={startDrag}

@@ -528,3 +528,52 @@ Two lab tools are registered for agents:
 - Requires a Pipedream account and API key (free tier works)
 - OAuth integrations require setting up a Pipedream OAuth client
 - Action execution goes through Pipedream's servers (network latency)
+### 2026-06-22: Chat panel media previews + sandbox file serving + video generation
+
+**Issues fixed:**
+
+1. **Media files weren't visible in chat** — when the agent called `lab_generate_image`,
+   `lab_edit_image`, `lab_generate_video`, etc., the resulting image/video was saved
+   to the agent's sandbox but never surfaced in the UI.
+2. **Chat panel stretched the main page when the conversation grew long** — the grid
+   layout had no `min-h-0` on the flex containers, so scrolling content would push
+   the whole shell beyond the viewport.
+3. **Video generation was failing** — Cloudflare Workers AI (the configured image /
+   transcription provider) has no video models enabled on this account (verified
+   via `/accounts/<id>/ai/models/search?task=text-to-video` returning 0 results).
+
+**Fixes:**
+
+1. **Sandbox binary endpoint** — added
+   `GET /api/agents/:id/sandbox/file?path=<sandbox-relative-path>` to
+   `file backend/src/api/server.ts` and `file backend/src/sandbox/api.ts`. Returns
+   the raw bytes with the right MIME type (image/jpeg, video/mp4, image/png,
+   audio/mpeg, etc.) and enforces the same auth + sandbox-jail checks as the
+   existing `/sandbox/read` text endpoint. Path-traversal escapes are blocked.
+2. **Media attachments on tool results** — extended the `ok()` helper in
+   `file backend/src/tools/lab_tools_extra.ts` to accept an optional `media`
+   array. Each tool result can now carry `[{ path, mime, kind, alt? }]`. Wired
+   `lab_generate_image`, `lab_edit_image`, and `lab_generate_video` to attach
+   their output. The frontend's ChatPanel reads this via `getToolMedia()` and
+   renders inline previews.
+3. **MediaPreview component** — new `file frontend/src/components/MediaPreview.tsx`.
+   Fetches the binary via `fetch()` with the bearer token (img/src can't carry
+   auth headers), turns it into a blob URL, and renders `<img>`, `<video controls>`,
+   or `<audio controls>` accordingly. Click the image to open in a new tab.
+4. **Layout fix** — added `min-h-0` to the grid items in
+   `file frontend/src/App.tsx`, the chat panel `<aside>`, the scrolling
+   messages container, and the empty-state column in
+   `file frontend/src/components/ChatPanel.tsx`. Main page now stays the size
+   of the viewport; only the chat panel scrolls.
+5. **lab_generate_video** — rewrote to generate 4-second MP4s locally with
+   `ffmpeg` + ImageMagick. Two modes:
+   - Pass `filepath` to animate an existing image (e.g. `Images/dragon.jpg`).
+   - Or no filepath → generate a base image via Cloudflare FLUX.2 [klein] 9B
+     then animate it.
+   Both produce a 1280x720 24fps H.264 MP4 with a slow Ken-Burns horizontal
+   pan (scale 2x + time-based crop x-offset). Falls back to a clear error
+   message if ffmpeg isn't installed.
+6. **Tool meta entries** — `file frontend/src/lib/toolMeta.ts` now has icons and
+   labels for `lab_generate_image`, `lab_edit_image`, `lab_generate_video`,
+   `lab_transcribe_audio`, `lab_transcribe_video`. New `getToolMedia(result)`
+   helper extracts the `media` array from a tool result.

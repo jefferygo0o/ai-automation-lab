@@ -4,8 +4,9 @@ import { Chats, Agents } from "../api";
 import type { Chat, Message } from "../api";
 import { getToken } from "../api/client";
 import { useChatControlsStore } from "../stores/chatControlsStore";
-import { getToolMeta, getToolLabel } from "../lib/toolMeta";
+import { getToolMeta, getToolLabel, getToolMedia } from "../lib/toolMeta";
 import { getLineDelta } from "../lib/toolMeta";
+import MediaPreview from "./MediaPreview";
 
 interface ToolCallInfo {
   id: string;
@@ -293,7 +294,7 @@ export default function ChatPanel() {
   return (
     <>
       <div className="hidden max-lg:block fixed inset-0 bg-black/20 z-30" onClick={closeChat} />
-      <aside className="w-full shrink-0 border-l border-line bg-paper flex flex-col h-full overflow-hidden relative">
+      <aside className="w-full shrink-0 border-l border-line bg-paper flex flex-col h-full min-h-0 overflow-hidden relative">
         {chatId && chat ? (
           <>
             {/* Header */}
@@ -306,7 +307,7 @@ export default function ChatPanel() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-3 py-3">
+            <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
               {messages.map((m) => {
                 const isUser = m.role === "user";
                 const isAssistant = m.role === "assistant";
@@ -386,6 +387,19 @@ export default function ChatPanel() {
                                 </button>
                                 <div hidden={!isOpen} className={isOpen ? "" : "hidden"}>
                                   <div className="pl-9 pr-2 pb-1.5 text-xs text-ink-500 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-60 overflow-y-auto">
+                                    {!isPending && !isError && (() => {
+                                      const media = getToolMedia(t.result);
+                                      if (!media || media.length === 0) return null;
+                                      const activeAgentId = chat?.activeAgentId ?? chat?.agentId;
+                                      if (!activeAgentId) return null;
+                                      return (
+                                        <div className="not-italic not-mono -ml-1 mb-2 font-sans max-h-none overflow-visible whitespace-normal">
+                                          {media.map((item, i) => (
+                                            <MediaPreview key={`${t.id}_media_${i}`} agentId={activeAgentId} item={item} />
+                                          ))}
+                                        </div>
+                                      );
+                                    })()}
                                     {isError && t.error && <div className="text-err mb-1">{t.error}</div>}
                                     {!isPending && !isError && t.result !== undefined && (
                                       (() => {
@@ -453,7 +467,7 @@ export default function ChatPanel() {
               <span className="text-xs font-medium text-ink-700 flex-1">Chat</span>
               <button onClick={closeChat} className="text-xs text-ink-400 hover:text-ink-900">✕</button>
             </div>
-            <div className="flex-1 flex items-center justify-center text-xs text-ink-400">No chat selected</div>
+            <div className="flex-1 min-h-0 flex items-center justify-center text-xs text-ink-400">No chat selected</div>
           </>
         )}
       </aside>
