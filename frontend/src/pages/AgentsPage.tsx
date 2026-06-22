@@ -67,7 +67,7 @@ export default function AgentsPage() {
   );
 
   return (
-    <div className="max-w-5xl">
+    <div className="max-w-5xl mx-auto p-3 sm:p-6">
       {/* Create new — top of page, prominent */}
       <div className="card mb-6">
         <div className="card-body">

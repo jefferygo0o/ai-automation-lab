@@ -78,8 +78,8 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
         <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
         {isOpen && (
-          <div className="fixed inset-0 z-50 flex bg-ink-900/20">
-            <div className="ml-auto w-full max-w-md bg-paper-50 h-full shadow-2xl flex flex-col min-h-0">
+          <div className="fixed inset-0 z-50 flex bg-ink-900/20" onClick={closeChat}>
+            <div className="ml-auto w-full max-w-md bg-paper-50 h-full shadow-2xl flex flex-col min-h-0" onClick={(e) => e.stopPropagation()}>
               <ChatPanel />
             </div>
           </div>

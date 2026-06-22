@@ -1,16 +1,5 @@
 import { useState } from "react";
-import {
-  Check,
-  AlertCircle,
-  ChevronRight,
-  Clock,
-} from "lucide-react";
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from "../ui/collapsible";
-import { cn } from "../../lib/utils";
+import { ChevronRight } from "lucide-react";
 import {
   getToolMeta,
   getToolLabel,
@@ -27,18 +16,14 @@ export interface ToolCallCardProps {
 }
 
 /**
- * Plain chat-row for a single tool invocation.
+ * Zo-style collapsible row for a single tool invocation.
  *
- *   ▶ reading read_file   /etc/hosts            ⏱ 142ms
- *   ▼ ran    write_file  /etc/hosts   +12 −0    ✓        142ms
+ *   ▶ ● Writing… write_file   /etc/hosts   +12   running   1.2s
+ *   ▶ ✓ Wrote    write_file   /etc/hosts   +12   ok        142ms
  *
- * No card chrome — just a single row inside the assistant's message body.
- * The whole row is clickable and toggles a small details body (args / result
- * / error) below. While running, the details are force-open; once the tool
- * settles, the row auto-collapses but stays user-togglable.
- *
- * Verbs are capitalised ("Reading", "Read", "Wrote" …) so the first letter
- * is always uppercase.
+ * Single row, no card chrome. Clickable to toggle content preview.
+ * While running the details are force-open; when done they auto-collapse
+ * but stay user-togglable.
  */
 export function ToolCallCard({
   name,
@@ -64,163 +49,110 @@ export function ToolCallCard({
   const label = getToolLabel(name, meta, args);
   const lineDelta = !isPending ? getLineDelta(result) : null;
 
+  const argsCounts =
+    meta.kind === "write" || meta.kind === "edit"
+      ? (args as any)?.content?.toString().split("\n").length
+      : null;
+
+  const liveCounts = isPending
+    ? null
+    : lineDelta && (lineDelta.added > 0 || lineDelta.removed > 0)
+      ? lineDelta
+      : argsCounts;
+
   const isDelete = meta.kind === "delete";
   const labelText = label ? (isDelete ? `from ${label}` : label) : null;
 
-  const argCount = args && typeof args === "object" ? Object.keys(args).length : 0;
-  const hasArgs = argCount > 0;
-  const resultStr = (() => {
-    if (result === undefined || result === null) return "";
-    try {
-      return JSON.stringify(result, null, 2);
-    } catch {
-      return String(result);
-    }
-  })();
+  const kindNoun = ({
+    read: "file",
+    write: "file",
+    edit: "file",
+    delete: "file",
+    list: "files",
+    exec: "bash",
+    http: "http",
+    mcp: "mcp",
+    "mcp-list": "mcp",
+    memory: "memory",
+    agent: "agent",
+    image: "image",
+    video: "video",
+    audio: "audio",
+    generic: "tool",
+  } as Record<string, string>)[meta.kind] ?? "tool";
+
+  const contentId = `radix-${name}`;
+
   const hasResult =
-    resultStr && resultStr !== "{}" && resultStr !== "[]" && resultStr !== '""';
+    result && result !== "{}" && result !== "[]" && result !== '""';
 
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className={cn(
-        "group rounded-sm transition-colors",
-        isPending && "bg-paper-100/40",
-      )}
-      data-tool-row={name}
-      data-tool-status={status ?? "pending"}
-    >
-      <CollapsibleTrigger asChild>
-        <button
+    <div className="w-full min-w-0 space-y-0.5" data-tool-row={name} data-tool-status={status ?? "pending"}>
+      <div data-state={open ? "open" : "closed"} data-slot="collapsible">
+        <div
           type="button"
-          className={cn(
-            "flex w-full items-center gap-2 px-1.5 py-1 text-left",
-            "hover:bg-paper-100/60 rounded-sm transition-colors",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent/40",
-          )}
-          aria-label={`${verb} ${name}${label ? ` ${label}` : ""}`}
+          aria-controls={contentId}
+          aria-expanded={open}
+          data-state={open ? "open" : "closed"}
+          data-slot="collapsible-trigger"
         >
-          <ChevronRight
-            className={cn(
-              "w-3 h-3 stroke-[2] text-ink-400 shrink-0 transition-transform",
-              open && "rotate-90",
-            )}
-          />
-
-          {/* Status dot: a pulsing paper-300 dot while pending, a check when ok,
-              an alert when error. NO spinning circle. */}
-          {isPending ? (
-            <span
-              className="w-2 h-2 rounded-full bg-ink-400 shrink-0"
-              aria-hidden="true"
-            />
-          ) : isError ? (
-            <AlertCircle className="w-3 h-3 stroke-[2] text-err shrink-0" />
-          ) : (
-            <Check className="w-3 h-3 stroke-[2.25] text-ok shrink-0" />
-          )}
-
-          {/* Icon (small, muted) */}
-          <Icon className="w-3 h-3 stroke-[1.75] text-ink-500 shrink-0" />
-
-          {/* Verb (capitalised, bold) */}
-          <span className="text-xs font-semibold text-ink-900 tracking-tight shrink-0">
-            {verb}
-          </span>
-
-          {/* Tool name */}
-          <span className="font-mono text-xs text-ink-700 shrink-0">{name}</span>
-
-          {/* Right-aligned label */}
-          {labelText && (
-            <span
-              className={cn(
-                "text-xs font-mono truncate min-w-0 hidden sm:inline-block",
-                isDelete ? "text-red-700/80" : "text-ink-500",
-              )}
-              title={labelText}
+          <div
+            className="grid grid-cols-1 gap-1 w-full"
+            style={{ "--tool-min-width": "100px", "--tool-icon-size": "16px" } as React.CSSProperties}
+          >
+            <button
+              type="button"
+              className="flex items-center gap-1.5 w-full min-h-7 px-2 py-0.5 cursor-pointer rounded-md hover:bg-muted/30 text-left"
+              onClick={() => setOpen((p) => !p)}
             >
-              {labelText}
-            </span>
-          )}
-
-          {/* Spacer */}
-          <span className="ml-auto flex items-center gap-2 shrink-0">
-            {lineDelta && (lineDelta.added > 0 || lineDelta.removed > 0) && (
-              <span
-                className="inline-flex items-center gap-1 text-2xs font-mono tabular-nums"
-                title={`+${lineDelta.added} lines added, −${lineDelta.removed} lines removed`}
-              >
-                <span className="text-emerald-700">+{lineDelta.added}</span>
-                <span className="text-red-600">−{lineDelta.removed}</span>
+              <Icon size={16} className="shrink-0 text-muted-foreground/50" />
+              <span className="flex items-center gap-1.5 min-w-(--tool-min-width) flex-shrink-0">
+                <span className="text-xs font-medium text-muted-foreground">
+                  {verb} {kindNoun}
+                </span>
+                {liveCounts && (
+                  <span className="text-[10px] tabular-nums flex items-center gap-0.5">
+                    {liveCounts.added > 0 && <span className="text-open-foreground">+{liveCounts.added}</span>}
+                    {liveCounts.removed > 0 && <span className="text-muted-foreground">-{liveCounts.removed}</span>}
+                  </span>
+                )}
+                <ChevronRight
+                  size={14}
+                  className={`shrink-0 text-muted-foreground/50 transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+                />
               </span>
-            )}
-            {isPending && (
-              <span className="text-2xs text-ink-400 font-mono">
-                running
-              </span>
-            )}
-            {isError && (
-              <span className="text-2xs text-err font-mono font-medium">
-                error
-              </span>
-            )}
-            {!isPending && !isError && (
-              <span className="text-2xs text-ok font-mono font-medium">ok</span>
-            )}
-            {durationMs !== undefined && (
-              <span className="inline-flex items-center gap-1 text-2xs text-ink-400 font-mono tabular-nums">
-                <Clock className="w-2.5 h-2.5 stroke-[2]" />
-                {durationMs}ms
-              </span>
-            )}
-          </span>
-        </button>
-      </CollapsibleTrigger>
-
-      <CollapsibleContent className="overflow-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=closed]:animate-out data-[state=closed]:fade-out-0">
-        <div className="pl-7 pr-1.5 py-1.5 space-y-1.5">
-          {hasArgs && (
-            <details className="text-2xs">
-              <summary className="cursor-pointer text-ink-400 font-mono uppercase tracking-wider select-none hover:text-ink-700">
-                arguments · {argCount}
-              </summary>
-              <pre className="mt-1 font-mono text-2xs text-ink-700 bg-paper-100 border border-line-soft rounded-sm px-2 py-1.5 overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">
-                {(() => {
-                  try {
-                    return JSON.stringify(args, null, 2).slice(0, 4000);
-                  } catch {
-                    return String(args);
-                  }
-                })()}
-              </pre>
-            </details>
-          )}
-
-          {isError && error && (
-            <div>
-              <div className="text-2xs font-mono uppercase tracking-wider text-err mb-0.5">
-                error
+              <div className="flex items-center justify-end gap-1.5 pl-2 min-w-0 flex-1 [&_p]:my-0 [&_p]:whitespace-nowrap [&_p]:overflow-hidden [&_p]:text-ellipsis [&_code]:whitespace-nowrap">
+                {label && (
+                  <span
+                    className="text-xs text-muted-foreground/50 font-mono truncate min-w-0 cursor-pointer hover:text-muted-foreground hover:underline transition-colors duration-150"
+                    role="button"
+                    tabIndex={0}
+                  >
+                    {labelText}
+                  </span>
+                )}
               </div>
-              <pre className="text-2xs font-mono text-err bg-err/5 border border-err/20 rounded-sm px-2 py-1.5 overflow-x-auto whitespace-pre-wrap">
-                {error.slice(0, 2000)}
-              </pre>
-            </div>
-          )}
-
-          {!isError && hasResult && (
-            <details>
-              <summary className="cursor-pointer text-2xs font-mono uppercase tracking-wider text-ink-400 select-none hover:text-ink-700">
-                result · {resultStr.length} chars
-              </summary>
-              <pre className="mt-1 text-2xs font-mono text-ink-800 bg-paper-100 border border-line-soft rounded-sm px-2 py-1.5 overflow-x-auto whitespace-pre-wrap max-h-80 overflow-y-auto">
-                {resultStr.slice(0, 8000)}
-              </pre>
-            </details>
-          )}
+            </button>
+          </div>
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+        <div
+          id={contentId}
+          data-state={open ? "open" : "closed"}
+          hidden={!open}
+          data-slot="collapsible-content"
+          className="overflow-hidden"
+          style={{}}
+        >
+          <div className="pl-7 pr-1.5 py-1.5 space-y-1.5">
+            {/* Content / result preview */}
+            {!isError && hasResult && (
+              <pre className="m-0 font-mono text-2xs whitespace-pre-wrap break-words text-ink-600 bg-paper-100 border border-line-soft rounded-sm px-2 py-1.5 overflow-x-auto max-h-60 overflow-y-auto">
+                {JSON.stringify(result, null, 2).slice(0, 4000)}
+              </pre>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -47,7 +47,7 @@ export async function runAgentTurn(
   ownerId: string,
   chatId: string,
   userMessage: string,
-  emit: (e: StreamEvent) => void,
+  emit: (e: StreamEvent) => void | Promise<void>,
   opts: RunOptions = {}
 ): Promise<void> {
   const start = Date.now();
@@ -196,9 +196,37 @@ export async function runAgentTurn(
 
   // History (includes the user message we just persisted)
   const history = ChatStore.listMessages(chatId, ownerId);
+
+  // Filter out orphaned tool responses that have no matching assistant
+  // tool_call message in the history. These accumulate when a previous
+  // run crashed before persisting the assistant message, and they cause
+  // LLM provider errors because every tool message needs a preceding
+  // assistant tool_call.
+  const pendingToolCallIds = new Set<string>();
+  const filteredHistory = history.filter((m) => {
+    if (m.role === "assistant" && m.toolCalls) {
+      for (const tc of (m.toolCalls as Array<{ id: string }>)) {
+        if (tc.id) pendingToolCallIds.add(tc.id);
+      }
+      return true;
+    }
+    if (m.role === "tool" && m.toolCallId) {
+      if (pendingToolCallIds.has(m.toolCallId)) {
+        pendingToolCallIds.delete(m.toolCallId);
+        return true;
+      }
+      // Drop orphaned tool response — no matching assistant tool_call
+      return false;
+    }
+    return true;
+  });
+  if (filteredHistory.length !== history.length) {
+    console.log("[runtime] filtered out", history.length - filteredHistory.length, "orphaned tool messages from history");
+  }
+
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
-    ...history.map((m) => ({
+    ...filteredHistory.map((m) => ({
       role: m.role as ChatMessage["role"],
       content: m.content,
       toolCalls: m.toolCalls as any,
@@ -231,6 +259,13 @@ export async function runAgentTurn(
           onChunk: (c) => {
             if (c.type === "content" && c.content) emit({ type: "token", delta: c.content });
             else if (c.type === "thinking" && c.content) emit({ type: "thinking", delta: c.content });
+            else if (c.type === "tool_call" && c.name) {
+              // Relay tool call deltas live so the frontend can show
+              // the tool card with progressively filling content.
+              // Use safeJsonParse to format args as a string for transport.
+              const argsStr = typeof c.arguments === 'string' ? c.arguments : JSON.stringify(c.arguments ?? {});
+              emit({ type: 'tool_call', name: c.name, args: argsStr });
+            }
           },
         });
         if (resp.usage) {
@@ -283,22 +318,40 @@ export async function runAgentTurn(
         (tc) => tc.name && typeof tc.name === "string" && tc.name.trim() !== ""
       );
 
-      if (validToolCalls.length === 0) {
-        // All tool calls were malformed — treat as content-only response
-        const msg = ChatStore.addMessage(chatId, { role: "assistant", content: resp.content, runId: run.id });
-        emit({ type: "message", content: resp.content, messageId: msg.id });
-        break;
+      // Push the assistant message with tool calls into the messages array
+      // BEFORE tool execution, so the next LLM call sees properly paired
+      // tool_call + tool_result messages. Without this, tool results are
+      // orphans that every provider rejects.
+      if (validToolCalls.length > 0) {
+        const assistantMsg: ChatMessage = {
+          role: "assistant",
+          content: resp.content ?? "",
+          toolCalls: validToolCalls.map(tc => ({
+            id: tc.id,
+            name: tc.name,
+            arguments: tc.arguments,
+          })),
+        };
+        // Emit tool_call events FIRST so the frontend sees the tool card
+      // immediately, before the DB write.
+      for (const tc of validToolCalls) {
+        let fnArgs: any = {};
+        try { fnArgs = typeof tc.arguments === "string" ? JSON.parse(tc.arguments) : (tc.arguments ?? {}); } catch { fnArgs = {}; }
+        await emit({ type: "tool_call", name: tc.name, args: fnArgs });
       }
-
-      // Append assistant message with only valid tool calls
-      ChatStore.addMessage(chatId, {
-        role: "assistant",
-        content: resp.content,
-        toolCalls: validToolCalls as any,
-        runId: run.id,
-      });
-      messages.push({ role: "assistant", content: resp.content, toolCalls: validToolCalls });
-      for (const tc of validToolCalls) emit({ type: "tool_call", name: tc.name, args: tc.arguments });
+        messages.push(assistantMsg);
+        // Persist to ChatStore so subsequent runs don't load orphaned tools
+        ChatStore.addMessage(chatId, {
+          role: "assistant",
+          content: resp.content ?? "",
+          toolCalls: validToolCalls.map(tc => ({
+            id: tc.id,
+            name: tc.name,
+            arguments: tc.arguments,
+          })),
+          runId: run.id,
+        });
+      }
 
       for (const tc of validToolCalls) {
         let fnArgs: any = {};
@@ -343,6 +396,20 @@ export async function runAgentTurn(
         pushToolMessage(messages, chatId, tc, resultStr, run.id);
         onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: toolDuration, at: toolStart });
         recordHistory(agent.id, tc.name, resultStr);
+      }
+
+      // No tool calls = the LLM produced a text-only final response.
+      // Persist it as an assistant message and stop looping — without this
+      // the next iteration sees the same messages and generates the same
+      // output, causing infinite repetition.
+      if (validToolCalls.length === 0 && resp.content) {
+        messages.push({ role: "assistant", content: resp.content });
+        ChatStore.addMessage(chatId, {
+          role: "assistant",
+          content: resp.content,
+          runId: run.id,
+        });
+        break;
       }
     }
   } catch (e: any) {

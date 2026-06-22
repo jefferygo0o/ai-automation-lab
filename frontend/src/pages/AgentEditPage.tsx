@@ -131,7 +131,7 @@ export default function AgentEditPage() {
   const fileTab = !!activeFile;
 
   return (
-    <div className="grid grid-cols-[220px_1fr] gap-6 h-full">
+    <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6 h-full">
       {/* ─── Left rail ─── */}
       <aside className="flex flex-col min-h-0">
         <div className="mb-4">

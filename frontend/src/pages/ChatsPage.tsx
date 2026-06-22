@@ -36,7 +36,7 @@ export default function ChatsPage() {
   }
 
   return (
-    <div className="max-w-4xl">
+    <div className="max-w-4xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
       <div className="flex items-end justify-between mb-6 pb-4 border-b border-line">
         <div>
           <div className="eyebrow mb-1">Workspace</div>
@@ -52,7 +52,7 @@ export default function ChatsPage() {
       {creating && (
         <div className="card mb-4">
           <div className="card-body">
-            <div className="grid grid-cols-[1fr_1fr_auto] gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2">
               <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="input">
                 <option value="">Select agent…</option>
                 {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}

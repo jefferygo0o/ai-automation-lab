@@ -136,10 +136,15 @@ function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
       for (const tc of delta.toolCalls) {
         const idx = tc.index ?? 0;
         const existing = ctx.toolCallAcc.get(idx) ?? { id: tc.id ?? "", name: tc.name ?? "", args: "" };
+        const nameWas = existing.name;
         if (tc.id) existing.id = tc.id;
         if (tc.name) existing.name = tc.name;
         if (tc.arguments) existing.args += tc.arguments;
         ctx.toolCallAcc.set(idx, existing);
+        // Emit tool_call when the name first becomes known. Some providers
+        // send the id in one delta and the name in the next — using `isNew`
+        // alone misses the window. Track via the name transition instead.
+        ctx.onChunk({ type: "tool_call", id: existing.id, name: existing.name, arguments: existing.args });
       }
     }
     if (delta.finishReason) ctx.finishReason = delta.finishReason as LLMResponse["finishReason"];

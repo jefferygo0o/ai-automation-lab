@@ -21,7 +21,7 @@ const ChatPanelCtx = createContext<ChatPanelState>({
 });
 
 export function ChatPanelProvider({ children }: { children: ReactNode }) {
-  const [isOpen, setOpen] = useState(true);
+  const [isOpen, setOpen] = useState(false);
   const [chatId, setChatId] = useState<string | null>(null);
   const [panelWidth, setPanelWidthState] = useState<number>(420);
 

@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { flushSync } from "react-dom";
+import { ChevronRight } from "lucide-react";
 import { useChatPanel } from "../contexts/ChatPanelContext";
 import { Chats, Agents } from "../api";
 import type { Chat, Message } from "../api";
 import { getToken } from "../api/client";
 import { useChatControlsStore } from "../stores/chatControlsStore";
-import { cn } from "../lib/utils";
 import { getToolMeta, getToolLabel, getToolMedia, getLineDelta, getLiveLineCounts, getLivePreview, getToolPreview } from "../lib/toolMeta";
 import MediaPreview from "./MediaPreview";
 import MarkdownContent from "./MarkdownContent";
@@ -20,8 +19,16 @@ interface ToolCallInfo {
   durationMs?: number;
   lineDelta?: { added: number; removed: number } | null;
   startedAt: number;
+  rawArgs?: string;
+  /** Progressive reveal - how many chars of content have been shown so far, -1 = all at once */
+  revealed?: number;
 }
 
+/**
+ * Minimum time (ms) the tool call card should show the "pending" state
+ * before transitioning to "completed". Fast synchronous tools like
+ * lab_write_file would otherwise flicker past "Writing…" in <1 frame.
+ */
 /**
  * Tool arguments can arrive in three shapes depending on whether they came
  * from a live SSE event (parsed by JSON.stringify of an object), from a
@@ -222,9 +229,18 @@ export default function ChatPanel() {
         const { done, value } = await reader.read();
         if (done) break;
         buf += dec.decode(value, { stream: true });
-        const events = buf.split("\n\n");
-        buf = events.pop() ?? "";
-        for (const evt of events) {
+
+        // Process one event at a time from the buffer, yielding the event
+        // loop between events. This mirrors how thinking events naturally
+        // arrive in separate reader.read() macrotasks — the browser gets a
+        // paint cycle between tool_call and tool_result, so the user always
+        // sees the "pending" tool card.
+        while (true) {
+          const sepIdx = buf.indexOf("\n\n");
+          if (sepIdx < 0) break;
+          const evt = buf.slice(0, sepIdx);
+          buf = buf.slice(sepIdx + 2);
+
           const lines = evt.split("\n");
           let type = "message", data = "";
           for (const line of lines) {
@@ -257,30 +273,49 @@ export default function ChatPanel() {
             // Close active thinking block
             closeThinking(aid);
             toolSeqRef.current++;
-            const tool: ToolCallInfo = {
-              id: `tool_${aid}_${toolSeqRef.current}`,
-              name: payload.name,
-              args: parseToolArgs(payload.args),
-              status: "pending",
-              startedAt: Date.now(),
-            };
-            pushBlock(aid, { type: "tool_call", tool });
-            // Expand immediately — like thinking blocks, stream live to the chat
-            setExpandedTool((p) => new Set([...p, tool.id]));
-            // Force React to commit the pending tool card to the DOM NOW.
-            // React 18+ automatically batches state updates across micro/macro
-            // tasks within the same event cycle. When tool_call and tool_result
-            // arrive in the same SSE chunk (fast tools), even a rAF yield isn't
-            // enough — the async function's microtask continuation after the rAF
-            // immediately processes tool_result and React batches both setStates
-            // into a single paint. flushSync breaks that batching so the user
-            // always sees the "Writing…" pending state.
-            flushSync();
+            // Check if this is a streaming delta for an existing tool
+            const aidBlocks = blocksRef.current[aid] ?? [];
+            const existingIdx = aidBlocks.findIndex(
+              (b) => b.type === "tool_call" && b.tool.name === payload.name && b.tool.status === "pending"
+            );
+            if (existingIdx >= 0 && payload.args) {
+              // Streaming delta — accumulate raw JSON args string
+              const existing = aidBlocks[existingIdx];
+              const oldRaw = existing.tool.rawArgs ?? '';
+              const newRaw = typeof payload.args === 'string' ? payload.args : JSON.stringify(payload.args ?? {});
+              const rawArgs = oldRaw.length >= newRaw.length ? oldRaw : newRaw;
+              // Try to parse the accumulated rawArgs into proper args fields
+              const parsedArgs = (() => {
+                try { return JSON.parse(rawArgs); } catch { return null; }
+              })();
+              const liveArgsStream = parsedArgs && typeof parsedArgs === 'object' ? parsedArgs : null;
+              const mergedArgs = {
+                ...(existing.tool.args ?? {}),
+                ...(liveArgsStream ?? {}),
+              };
+              const updatedTool = { ...existing.tool, args: mergedArgs, rawArgs };
+              const newBlocks = [...aidBlocks];
+              newBlocks[existingIdx] = { type: "tool_call", tool: updatedTool };
+              setBlocksByMessage((p) => ({ ...p, [aid]: newBlocks }));
+              blocksRef.current[aid] = newBlocks;
+            } else {
+              // New tool call
+              const tool: ToolCallInfo = {
+                id: `tool_${aid}_${toolSeqRef.current}`,
+                name: payload.name,
+                args: parseToolArgs(payload.args),
+                rawArgs: typeof payload.args === 'string' ? payload.args : undefined,
+                status: "pending",
+                startedAt: Date.now(),
+              };
+              pushBlock(aid, { type: "tool_call", tool });
+              // Expand immediately — stream live to the chat like thinking blocks
+              setExpandedTool((p) => new Set([...p, tool.id]));
+            }
+
           } else if (type === "tool_result") {
             closeThinking(aid);
-            // Update immediately — no rAF deferring, so the card is always visible
             const blocks = blocksRef.current[aid] ?? [];
-            // Walk backwards to find the tool_call with matching name
             let idx = -1;
             for (let i = blocks.length - 1; i >= 0; i--) {
               const b = blocks[i];
@@ -289,11 +324,9 @@ export default function ChatPanel() {
               }
             }
             if (idx === -1) continue;
-            const block = blocks[idx];
-            if (block.type !== "tool_call") continue;
             const updated: ToolCallInfo = {
-              ...block.tool,
-              status: payload.ok ? "ok" : "error",
+              ...blocks[idx].tool,
+              status: payload.ok ? ("ok" as const) : ("error" as const),
               result: payload.result,
               error: payload.ok ? null : (payload.error ?? payload.result?.error ?? "failed"),
               durationMs: payload.durationMs ?? 0,
@@ -301,9 +334,9 @@ export default function ChatPanel() {
             };
             const newBlocks = [...blocks];
             newBlocks[idx] = { type: "tool_call", tool: updated };
-            setBlocksByMessage((p) => ({ ...p, [aid]: newBlocks }));
+            setBlocksByMessage((ps) => ({ ...ps, [aid]: newBlocks }));
             blocksRef.current[aid] = newBlocks;
-            // Keep expanded so the user can see the result — they can collapse manually
+            setExpandedTool((ps) => { const n = new Set(ps); n.delete(updated.id); return n; });
           } else if (type === "run_started") {
             currentRunIdRef.current = payload.runId;
           } else if (type === "message") {
@@ -359,7 +392,6 @@ export default function ChatPanel() {
 
   return (
     <>
-      <div className="hidden max-lg:block fixed inset-0 bg-black/20 z-30" onClick={closeChat} />
       <aside className="w-full shrink-0 border-l border-line bg-paper-50 flex flex-col h-full min-h-0 overflow-hidden relative">
         {chatId && chat ? (
           <>
@@ -438,7 +470,7 @@ export default function ChatPanel() {
                           }
 
                           if (block.type === "tool_call") {
-                            const t = block.type === "tool_call" ? block.tool : block.tool;
+                            const t = block.tool;
                             const isPending = t.status === "pending";
                             const isError = t.status === "error";
                             const meta = getToolMeta(t.name);
@@ -451,213 +483,225 @@ export default function ChatPanel() {
                               : !isError
                                 ? (getToolPreview(t.result, t.name, t.args) ?? null)
                                 : null;
+                            const totalLen = spanContent?.length ?? 0;
+                            // For streaming tools with rawArgs, extract content from partial JSON
+                            const streamContent = (() => {
+                              if (!isPending || !t.rawArgs) return null;
+                              const m = t.rawArgs.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)/);
+                              return m ? m[1] : null;
+                            })();
+                            // Use streamContent for live preview when available
+                            const effectiveContent = streamContent ?? spanContent;
+                            const revealedContent = effectiveContent && effectiveContent.length > 0 ? effectiveContent : null;
+                            const liveAddedLines = (() => {
+                              // Check liveArgs for existing line count data first
+                              if (isPending && liveArgs) {
+                                // For write tools with content field
+                                if (typeof liveArgs.content === 'string' && liveArgs.content.length > 0) {
+                                  return liveArgs.content.split("\n").length;
+                                }
+                                // For edit tools with operations that have new_text
+                                if (Array.isArray(liveArgs.operations)) {
+                                  let added = 0;
+                                  for (const op of liveArgs.operations) {
+                                    if (typeof op?.new_text === 'string') added += op.new_text.split("\n").length;
+                                    else if (typeof op?.content === 'string') added += op.content.split("\n").length;
+                                  }
+                                  return added || (effectiveContent ? effectiveContent.split("\n").length : 0);
+                                }
+                              }
+                              // Fallback to regex-extracted content
+                              return effectiveContent ? effectiveContent.split("\n").length : 0;
+                            })();
+                            // Best-effort parse of accumulated rawArgs for live data
+                            const liveArgs = (() => {
+                              if (!isPending || !t.rawArgs) return null;
+                              try {
+                                const parsed = JSON.parse(t.rawArgs);
+                                if (parsed && typeof parsed === 'object') return parsed;
+                              } catch {}
+                              return null;
+                            })();
+                            // Live file path extracted from streaming rawArgs
+                            const livePath = (() => {
+                              if (!isPending || !t.rawArgs) return null;
+                              // Check fully parsed args first
+                              if (liveArgs) {
+                                const p = liveArgs.target_file || liveArgs.file || liveArgs.path || liveArgs.source;
+                                if (typeof p === 'string') return p;
+                              }
+                              // Fall back to regex on raw JSON
+                              const pm = t.rawArgs.match(/"(?:target_file|file|path)"\s*:\s*"((?:[^"\\]|\\.)*)/);
+                              if (pm) return pm[1];
+                              return null;
+                            })();
+                            // Live removed lines for edit tools from streaming rawArgs
+                            const liveRemovedLines = (() => {
+                              if (!isPending || !t.rawArgs) return 0;
+                              if (t.name === "edit_file" || t.name === "lab_edit_file" || t.name === "lab_edit_file_llm") {
+                                // Count "old_text" fields in the streaming operations
+                                const oldTexts = t.rawArgs.match(/"old_text"\s*:\s*"(?:\.|[^"])*"/g);
+                                if (oldTexts) {
+                                  let total = 0;
+                                  for (const ot of oldTexts) {
+                                    const val = ot.replace(/"old_text"\s*:\s*"/, '').replace(/"$/, '');
+                                    total += val.split("\n").length;
+                                  }
+                                  return total;
+                                }
+                              }
+                              return 0;
+                            })();
                             const verbWord = isPending ? meta.verb : meta.verbPast;
                             const verbCap = verbWord.charAt(0).toUpperCase() + verbWord.slice(1);
-                            const liveCountText = isPending && liveCounts
-                              ? (liveCounts.removed > 0
-                                  ? `+${liveCounts.added} −${liveCounts.removed}`
-                                  : `+${liveCounts.added}`)
-                              : null;
-                            const elapsedMs = isPending ? Date.now() - t.startedAt : (t.durationMs ?? 0);
-                            const elapsedLabel = isPending
-                              ? `${(elapsedMs / 1000).toFixed(1)}s`
-                              : elapsedMs < 1000
-                                ? `${elapsedMs}ms`
-                                : `${(elapsedMs / 1000).toFixed(2)}s`;
-
-                            // New: render write tools (lab_write_file, write_file) in thinking style —
-                            // auto-expanded while pending, shimmer verb, live cursor, collapses when done.
-                            const isThinkStyle = t.name === "lab_write_file" || t.name === "write_file";
-                            if (isThinkStyle) {
-                              const isActive = isPending;
-                              const thinkKey = t.id;
-                              const isOpen = expandedTool.has(thinkKey) || isActive;
-                              const shimmerStyle: React.CSSProperties = {
-                                backgroundImage:
-                                  "linear-gradient(90deg, transparent 0%, transparent calc(50% - 22px), #5a5a52 50%, transparent calc(50% + 22px), transparent 100%), linear-gradient(#828278, #828278)",
-                                backgroundSize: "250% 100%, auto",
-                                backgroundRepeat: "no-repeat, no-repeat",
-                                backgroundClip: "text",
-                                color: "transparent",
-                                animation: "shimmer-sweep 1.5s linear infinite",
-                              };
-                              return (
-                                <div key={thinkKey} className="max-w-4xl mx-auto w-full">
-                                  <button
-                                    type="button"
-                                    className="flex items-center gap-2 w-full min-h-7 px-3 py-0.5 cursor-pointer rounded-md hover:bg-paper-200/50 text-left"
-                                    aria-expanded={isOpen}
-                                    onClick={() => !isActive && setExpandedTool((p) => toggleSet(p, thinkKey))}
-                                  >
-                                    <span className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium text-ink-500">
-                                      <Icon size={14} className="shrink-0 text-ink-400/500" />
-                                      {isActive ? (
-                                        <span className="relative inline-block" style={shimmerStyle}>
-                                          {verbCap}...
-                                        </span>
-                                      ) : (
-                                        verbCap
-                                      )}
-                                      {label && (
-                                        <span className="text-ink-400/70 font-mono font-normal inline-flex items-center gap-1 min-w-0">
-                                          <span className="mx-0.5" aria-hidden="true">&gt;</span>
-                                          <span className="truncate min-w-0">{label}</span>
-                                        </span>
-                                      )}
-                                      <svg
-                                        xmlns="http://www.w3.org/2000/svg"
-                                        width="16"
-                                        height="16"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        color="currentColor"
-                                        className={`text-ink-400/500 transition-transform duration-150 ${isOpen ? "rotate-90" : ""}`}
-                                      >
-                                        <path
-                                          d="M9.00005 6C9.00005 6 15 10.4189 15 12C15 13.5812 9 18 9 18"
-                                          stroke="currentColor"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                          strokeWidth="1.5"
-                                        />
-                                      </svg>
-                                    </span>
-                                    {!isActive && spanContent !== null && (
-                                      <span className="min-w-0 flex-1 truncate text-xs text-ink-400/50">{spanContent.slice(0, 50)}</span>
-                                    )}
-                                    {isActive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-ink-400 animate-pulse ml-auto" />}
-                                  </button>
-                                  <div hidden={!isOpen} className={isOpen ? "" : "hidden"}>
-                                    <div className="p-3 text-sm leading-relaxed whitespace-pre-wrap break-words text-ink-600 font-sans">
-                                      {spanContent ?? null}
-                                      {isActive && <span className="inline-block w-1.5 h-4 bg-ink-400 ml-0.5 align-middle animate-pulse" />}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            }
+                            const kindNoun = ({
+                              read: "file",
+                              write: "file",
+                              edit: "file",
+                              delete: "file",
+                              list: "files",
+                              exec: "bash",
+                              http: "http",
+                              mcp: "mcp",
+                              "mcp-list": "mcp",
+                              memory: "memory",
+                              agent: "agent",
+                              image: "image",
+                              video: "video",
+                              audio: "audio",
+                              generic: "tool",
+                            } as Record<string, string>)[meta.kind] ?? "tool";
+                            const isOpen = expandedTool.has(t.id) || isPending;
+                            const contentId = 'radix-' + t.id;
+                            // Live line count: incremental during pending, final after.
+                            // For completed tools, use finalCounts (from result) when set,
+                            // otherwise fall back to liveCounts (from args) so line counts
+                            // never disappear.
+                            const displayCounts = isPending
+                              ? (liveAddedLines > 0 || liveRemovedLines > 0 ? { added: liveAddedLines, removed: liveRemovedLines } : null)
+                              : (finalCounts ?? (liveCounts && liveCounts.added > 0 ? liveCounts : null));
 
                             return (
-                              <div
-                                key={t.id}
-                                className={cn(
-                                  "rounded-md border",
-                                  isPending
-                                    ? "bg-blue-50/30 border-l-2 border-l-blue-400"
-                                    : isError
-                                      ? "bg-red-50/30 border-l-2 border-l-red-400"
-                                      : "bg-paper-50/60 border-line",
-                                )}
-                              >
-                                <button
-                                  type="button"
-                                  className={cn(
-                                    "flex items-center gap-1.5 w-full min-h-7 px-2 py-0.5 rounded-md text-left",
-                                    isPending
-                                      ? "cursor-default hover:bg-blue-100/30"
-                                      : "cursor-pointer hover:bg-paper-200/30",
-                                  )}
-                                  aria-expanded={isOpen}
-                                  onClick={() => !isPending && setExpandedTool((p) => toggleSet(p, t.id))}
-                                >
-                                  <Icon className="shrink-0 text-ink-400/500" size={16} />
-                                  <span className="text-xs font-medium text-ink-500 whitespace-nowrap">
-                                    {verbCap}
-                                    {isPending && (
-                                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse ml-1.5 align-middle" />
-                                    )}
-                                    {liveCountText && (
-                                      <span className="ml-1 text-emerald-700 font-mono tabular-nums">
-                                        {liveCountText}
-                                      </span>
-                                    )}
-                                    {label ? "" : ` ${t.name}`}
-                                    {label && (
-                                      <span className="text-ink-400/70 font-mono font-normal inline-flex items-center gap-1 min-w-0">
-                                        <span className="mx-1" aria-hidden="true">&gt;</span>
-                                        <span className="truncate min-w-0">{label}</span>
-                                      </span>
-                                    )}
-                                  </span>
-                                  {/* Line counts: live counts are shown inline for pending write/edit tools. */}
-                                  {!isPending && (liveCounts || finalCounts) && (
-                                    <span className="text-[10px] tabular-nums flex items-center gap-0.5 shrink-0">
-                                      {(() => {
-                                        const c = liveCounts ?? finalCounts!;
-                                        const onlyAdded = (c.removed ?? 0) === 0;
+                              <div key={t.id} className="w-full min-w-0 space-y-0.5">
+                                <div data-state={isOpen ? "open" : "closed"} data-slot="collapsible">
+                                  <div
+                                    type="button"
+                                    aria-controls={contentId}
+                                    aria-expanded={isOpen}
+                                    data-state={isOpen ? "open" : "closed"}
+                                    data-slot="collapsible-trigger"
+                                  >
+                                    <div
+                                      className="grid grid-cols-1 gap-1 w-full"
+                                      style={{ "--tool-min-width": "100px", "--tool-icon-size": "16px" } as React.CSSProperties}
+                                    >
+                                      <button
+                                        type="button"
+                                        className="flex items-center gap-1.5 w-full min-h-7 px-2 py-0.5 cursor-pointer rounded-md hover:bg-muted/30 text-left"
+                                        onClick={() => { setExpandedTool((p) => toggleSet(p, t.id)); }}
+                                      >
+                                        <Icon size={16} className="shrink-0 text-muted-foreground/50" />
+                                        <span className="flex items-center gap-1.5 min-w-(--tool-min-width) flex-shrink-0">
+                                          <span className="text-xs font-medium text-muted-foreground">
+                                            {verbCap} {kindNoun}
+                                          </span>
+                                          {displayCounts && (
+                                            <span className="text-[10px] tabular-nums flex items-center gap-0.5">
+                                              {displayCounts.added > 0 && <span className="text-open-foreground">+{displayCounts.added}</span>}
+                                              {displayCounts.removed > 0 && <span className="text-muted-foreground">-{displayCounts.removed}</span>}
+                                            </span>
+                                          )}
+                                          <ChevronRight
+                                            size={14}
+                                            className={"shrink-0 text-muted-foreground/50 transition-transform duration-150 " + (isOpen ? "rotate-90" : "")}
+                                          />
+                                        </span>
+                                        <div className="flex items-center justify-end gap-1.5 pl-2 min-w-0 flex-1 [&_p]:my-0 [&_p]:whitespace-nowrap [&_p]:overflow-hidden [&_p]:text-ellipsis [&_code]:whitespace-nowrap">
+                                          {(livePath || label) && (
+                                            <span
+                                              className="text-xs text-muted-foreground/50 font-mono truncate min-w-0 cursor-pointer hover:text-muted-foreground hover:underline transition-colors duration-150"
+                                              role="button"
+                                              tabIndex={0}
+                                            >
+                                              {livePath || label}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div
+                                    id={contentId}
+                                    data-state={isOpen ? "open" : "closed"}
+                                    hidden={!isOpen}
+                                    data-slot="collapsible-content"
+                                    className="overflow-hidden"
+                                    style={{}}
+                                  >
+                                    <div className="pl-7 pr-1.5 py-1.5 space-y-1.5">
+                                      {/* Media previews */}
+                                      {!isPending && !isError && (() => {
+                                        const media = getToolMedia(t.result);
+                                        if (!media || media.length === 0) return null;
+                                        const activeAgentId = chat?.activeAgentId ?? chat?.agentId;
+                                        if (!activeAgentId) return null;
                                         return (
-                                          <>
-                                            {c.added > 0 && (
-                                              <span className="text-emerald-700">{onlyAdded ? "+" : "+"}{c.added}</span>
-                                            )}
-                                            {(c.removed ?? 0) > 0 && (
-                                              <span className="text-red-600">−{c.removed}</span>
-                                            )}
-                                          </>
+                                          <div className="not-italic not-mono -ml-1 mb-2 font-sans max-h-none overflow-visible whitespace-normal">
+                                            {media.map((item, i) => (
+                                              <MediaPreview key={t.id + "_media_" + i} agentId={activeAgentId} item={item} />
+                                            ))}
+                                          </div>
                                         );
                                       })()}
-                                    </span>
-                                  )}
-                                  <span className="ml-auto flex items-center gap-1.5 shrink-0">
-                                    {/* Duration: ticks while pending, freezes to t.durationMs after. */}
-                                    {!isError && (
-                                      <span className={`text-2xs font-mono tabular-nums ${isPending ? "text-ink-500" : "text-ink-400/500"}`}>
-                                        {elapsedLabel}
-                                      </span>
-                                    )}
-                                    {isError && <span className="text-2xs text-err font-mono">error</span>}
-                                  </span>
-                                </button>
-                                <div hidden={!isOpen} className={isOpen ? "" : "hidden"}>
-                                  <div className="pl-9 pr-2 pb-1.5 text-xs text-ink-500 font-mono whitespace-pre-wrap break-words leading-relaxed max-h-60 overflow-y-auto">
-                                    {/* Media previews (images / videos / audio). Show for completed runs. */}
-                                    {!isPending && !isError && (() => {
-                                      const media = getToolMedia(t.result);
-                                      if (!media || media.length === 0) return null;
-                                      const activeAgentId = chat?.activeAgentId ?? chat?.agentId;
-                                      if (!activeAgentId) return null;
-                                      return (
-                                        <div className="not-italic not-mono -ml-1 mb-2 font-sans max-h-none overflow-visible whitespace-normal">
-                                          {media.map((item, i) => (
-                                            <MediaPreview key={`${t.id}_media_${i}`} agentId={activeAgentId} item={item} />
-                                          ))}
-                                        </div>
-                                      );
-                                    })()}
-                                    {/* Error message */}
-                                    {isError && t.error && <div className="text-err mb-1 not-italic font-sans">{t.error}</div>}
-                                    {/* Live preview while pending, result text after. */}
-                                    {spanContent !== null ? (
-                                      <pre className="m-0 font-mono whitespace-pre-wrap break-words text-ink-600">{spanContent.slice(0, 4000)}{spanContent.length > 4000 ? "\n…" : ""}</pre>
-                                    ) : !isPending && !isError && t.result !== undefined ? (
-                                      (() => {
-                                        const val = t.result;
-                                        if (val === undefined || val === null) return null;
-                                        if (typeof val === "string") return val.slice(0, 2000);
-                                        if (typeof val === "object") {
-                                          const r = val as Record<string, unknown>;
-                                          const text = r.content || r.text || r.message || r.result;
-                                          if (typeof text === "string") return text.slice(0, 2000);
-                                          if (typeof text === "object" && text !== null) return JSON.stringify(text, null, 2).slice(0, 2000);
-                                          const { ok, isError, error, ...rest } = r;
-                                          const keys = Object.keys(rest);
-                                          if (keys.length === 0) return null;
-                                          if (keys.length === 1) {
-                                            const v = rest[keys[0]];
-                                            if (typeof v === "string") return v.slice(0, 2000);
-                                          }
-                                          return JSON.stringify(r, null, 2).slice(0, 2000);
-                                        }
-                                        return String(val).slice(0, 2000);
-                                      })()
-                                    ) : null}
+                                      {/* Content preview — live stream while pending */}
+                                      {revealedContent !== null && (
+                                        <pre className="m-0 font-mono text-2xs whitespace-pre-wrap break-words text-ink-600 bg-paper-100 border border-line-soft rounded-sm px-2 py-1.5 overflow-x-auto max-h-80 overflow-y-auto">
+                                          {revealedContent.slice(0, 4000)}{revealedContent.length > 4000 ? "\n…" : ""}
+                                          {isPending && <span className="inline-block w-1 h-3.5 bg-ink-400 ml-0.5 align-middle animate-pulse" />}
+                                        </pre>
+                                      )}
+                                      {/* Fallback result display when no spanContent */}
+                                      {revealedContent === null && !isPending && !isError && t.result !== undefined && (
+                                        (() => {
+                                          const val = t.result;
+                                          if (val === undefined || val === null) return null;
+                                          let display = "";
+                                          if (typeof val === "string") display = val.slice(0, 2000);
+                                          else if (typeof val === "object") {
+                                            const r = val as Record<string, unknown>;
+                                            const text = r.content || r.text || r.message || r.result;
+                                            if (typeof text === "string") display = String(text).slice(0, 2000);
+                                            else if (typeof text === "object" && text !== null) display = JSON.stringify(text, null, 2).slice(0, 2000);
+                                            else {
+                                              const rest_keys = Object.keys(r);
+                                              const filtered: Record<string, unknown> = {};
+                                              for (const k of rest_keys) {
+                                                if (k !== "ok" && k !== "isError" && k !== "error") filtered[k] = r[k];
+                                              }
+                                              const fkeys = Object.keys(filtered);
+                                              if (fkeys.length === 1) {
+                                                const v = filtered[fkeys[0]];
+                                                if (typeof v === "string") display = v.slice(0, 2000);
+                                                else display = JSON.stringify(r, null, 2).slice(0, 2000);
+                                              } else if (fkeys.length > 0) {
+                                                display = JSON.stringify(r, null, 2).slice(0, 2000);
+                                              }
+                                            }
+                                          } else display = String(val).slice(0, 2000);
+                                          if (!display) return null;
+                                          return (
+                                            <pre className="m-0 font-mono text-2xs whitespace-pre-wrap break-words text-ink-600 bg-paper-100 border border-line-soft rounded-sm px-2 py-1.5 overflow-x-auto max-h-60 overflow-y-auto">
+                                              {display}
+                                            </pre>
+                                          );
+                                        })()
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               </div>
                             );
-                          }
-
-                          if (block.type === "text") {
+                          }                          if (block.type === "text") {
                             return (
                               <MarkdownContent key={`text_${m.id}_${bi}`} content={block.content + (isLive && bi === blocks.length - 1 ? "▍" : "")} />
                             );

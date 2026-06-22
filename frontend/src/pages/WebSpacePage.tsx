@@ -160,7 +160,7 @@ export default function WebSpacePage() {
   }, [view, selectedId]);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col p-3 sm:p-6">
       {/* Toolbar */}
       <div className="h-10 border-b border-line flex items-center justify-between px-4 shrink-0 gap-3">
         <div className="flex items-center gap-2 shrink-0">

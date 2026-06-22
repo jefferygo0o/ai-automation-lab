@@ -49,7 +49,7 @@ export default function SkillsPage() {
   const builtin = filtered.filter((s) => s.source !== "user");
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="p-3 sm:p-6 lg:p-8 max-w-7xl mx-auto">
       <div className="flex items-end justify-between mb-6">
         <div>
           <div className="eyebrow">Library</div>
