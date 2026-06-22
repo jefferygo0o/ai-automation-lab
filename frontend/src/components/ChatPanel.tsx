@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+import { flushSync } from "react-dom";
 import { useChatPanel } from "../contexts/ChatPanelContext";
 import { Chats, Agents } from "../api";
 import type { Chat, Message } from "../api";
@@ -266,14 +267,15 @@ export default function ChatPanel() {
             pushBlock(aid, { type: "tool_call", tool });
             // Expand immediately — like thinking blocks, stream live to the chat
             setExpandedTool((p) => new Set([...p, tool.id]));
-            // Yield to React so the pending tool_call card renders before any
-            // tool_result that follows in the same SSE chunk — without this,
-            // React batches both state updates into one paint and the user
-            // never sees the "Writing…" (pending) state.
-            // requestAnimationFrame guarantees a paint cycle happens before
-            // resolving (unlike setTimeout(r, 0) which may fire before the
-            // next paint, allowing the next event to process too quickly).
-            await new Promise(r => requestAnimationFrame(r));
+            // Force React to commit the pending tool card to the DOM NOW.
+            // React 18+ automatically batches state updates across micro/macro
+            // tasks within the same event cycle. When tool_call and tool_result
+            // arrive in the same SSE chunk (fast tools), even a rAF yield isn't
+            // enough — the async function's microtask continuation after the rAF
+            // immediately processes tool_result and React batches both setStates
+            // into a single paint. flushSync breaks that batching so the user
+            // always sees the "Writing…" pending state.
+            flushSync();
           } else if (type === "tool_result") {
             closeThinking(aid);
             // Update immediately — no rAF deferring, so the card is always visible
