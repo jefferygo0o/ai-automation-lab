@@ -493,6 +493,15 @@ export default function ChatPanel() {
                             // Use streamContent for live preview when available
                             const effectiveContent = streamContent ?? spanContent;
                             const revealedContent = effectiveContent && effectiveContent.length > 0 ? effectiveContent : null;
+                            // Best-effort parse of accumulated rawArgs for live data
+                            const liveArgs = (() => {
+                              if (!isPending || !t.rawArgs) return null;
+                              try {
+                                const parsed = JSON.parse(t.rawArgs);
+                                if (parsed && typeof parsed === 'object') return parsed;
+                              } catch {}
+                              return null;
+                            })();
                             const liveAddedLines = (() => {
                               // Check liveArgs for existing line count data first
                               if (isPending && liveArgs) {
@@ -512,15 +521,6 @@ export default function ChatPanel() {
                               }
                               // Fallback to regex-extracted content
                               return effectiveContent ? effectiveContent.split("\n").length : 0;
-                            })();
-                            // Best-effort parse of accumulated rawArgs for live data
-                            const liveArgs = (() => {
-                              if (!isPending || !t.rawArgs) return null;
-                              try {
-                                const parsed = JSON.parse(t.rawArgs);
-                                if (parsed && typeof parsed === 'object') return parsed;
-                              } catch {}
-                              return null;
                             })();
                             // Live file path extracted from streaming rawArgs
                             const livePath = (() => {

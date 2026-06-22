@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" width="800" height="500">
+  <defs>
+    <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0f0f1a;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#d4a843;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#f5d77c;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#b8860b;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="windshield" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8bb8e0;stop-opacity:0.7" />
+      <stop offset="100%" style="stop-color:#4a7aa8;stop-opacity:0.8" />
+    </linearGradient>
+    <linearGradient id="groundReflect" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#2a2a3e;stop-opacity:0.3" />
+      <stop offset="100%" style="stop-color:#1a1a2e;stop-opacity:0" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="8"/>
+      <feOffset dx="0" dy="12"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="500" fill="#1e1e2f"/>
+  
+  <!-- Ground -->
+  <rect x="0" y="380" width="800" height="120" fill="#151525"/>
+  <line x1="0" y1="380" x2="800" y2="380" stroke="#2a2a40" stroke-width="1"/>
+  
+  <!-- Ground reflection/shine -->
+  <rect x="0" y="380" width="800" height="30" fill="url(#groundReflect)"/>
+
+  <!-- Car shadow on ground -->
+  <ellipse cx="400" cy="390" rx="280" ry="20" fill="rgba(0,0,0,0.5)" filter="url(#shadow)"/>
+
+  <!-- === CAR BODY === -->
+  <g filter="url(#shadow)">
+    
+    <!-- Lower body / undercarriage -->
+    <rect x="120" y="310" width="560" height="55" rx="8" fill="#0d0d18"/>
+    
+    <!-- Main body -->
+    <path d="M130,310 L130,270 Q130,250 150,250 L240,250 L270,200 Q280,180 300,180 L540,180 Q560,180 570,200 L600,250 L670,250 Q690,250 690,270 L690,310 Z" 
+          fill="url(#bodyGrad)" stroke="#25253a" stroke-width="1"/>
+    
+    <!-- Body highlight line -->
+    <path d="M150,260 L250,260 L275,210 Q285,192 300,192 L540,192 Q555,192 565,210 L595,260 L680,260" 
+          fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="2"/>
+
+    <!-- Hood line -->
+    <line x1="130" y1="270" x2="240" y2="270" stroke="#25253a" stroke-width="1"/>
+
+    <!-- Trunk line -->
+    <line x1="600" y1="250" x2="670" y2="250" stroke="#25253a" stroke-width="1"/>
+
+    <!-- === WINDOWS === -->
+    <!-- Front window / windshield -->
+    <path d="M272,205 Q280,190 300,190 L440,190 L440,245 L272,245 Q265,245 265,238 Z" 
+          fill="url(#windshield)" stroke="#1a1a2e" stroke-width="2"/>
+    
+    <!-- Rear window -->
+    <path d="M450,190 L540,190 Q555,190 562,205 L562,245 L450,245 Z" 
+          fill="url(#windshield)" stroke="#1a1a2e" stroke-width="2"/>
+    
+    <!-- B-pillar -->
+    <rect x="440" y="188" width="12" height="60" fill="#0d0d18"/>
+    
+    <!-- Window trim -->
+    <path d="M272,205 Q280,190 300,190 L540,190 Q555,190 562,205" 
+          fill="none" stroke="#2a2a40" stroke-width="1.5"/>
+
+    <!-- === FRONT GRILLE === -->
+    <rect x="128" y="275" width="15" height="35" rx="3" fill="#111122" stroke="#2a2a40" stroke-width="1"/>
+    <line x1="130" y1="282" x2="141" y2="282" stroke="#3a3a50" stroke-width="1"/>
+    <line x1="130" y1="288" x2="141" y2="288" stroke="#3a3a50" stroke-width="1"/>
+    <line x1="130" y1="294" x2="141" y2="294" stroke="#3a3a50" stroke-width="1"/>
+    <line x1="130" y1="300" x2="141" y2="300" stroke="#3a3a50" stroke-width="1"/>
+
+    <!-- Headlight -->
+    <rect x="125" y="260" width="18" height="14" rx="4" fill="#d4d4e8" opacity="0.9"/>
+    <rect x="125" y="260" width="18" height="14" rx="4" fill="#ffffcc" opacity="0.4"/>
+    
+    <!-- Tail light -->
+    <rect x="685" y="260" width="18" height="14" rx="4" fill="#cc2222" opacity="0.8"/>
+
+    <!-- === "ESQUIRE LAW LTD" ON DOOR === -->
+    <rect x="290" y="258" width="220" height="46" rx="6" fill="rgba(0,0,0,0.5)" stroke="url(#goldGrad)" stroke-width="1.5"/>
+    
+    <text x="400" y="276" font-family="Georgia, 'Times New Roman', serif" font-size="16" 
+          fill="url(#goldGrad)" text-anchor="middle" font-weight="bold" letter-spacing="4">ESQUIRE</text>
+    <text x="400" y="295" font-family="Georgia, 'Times New Roman', serif" font-size="11" 
+          fill="url(#goldGrad)" text-anchor="middle" letter-spacing="3" font-weight="normal">LAW LTD</text>
+    
+    <!-- Small decorative line under text -->
+    <line x1="340" y1="298" x2="460" y2="298" stroke="url(#goldGrad)" stroke-width="0.5" opacity="0.6"/>
+
+    <!-- === WHEELS === -->
+    <!-- Rear wheel -->
+    <circle cx="260" cy="355" r="45" fill="#0a0a0a" stroke="#1a1a2e" stroke-width="3"/>
+    <circle cx="260" cy="355" r="35" fill="#111" stroke="#222" stroke-width="1"/>
+    <circle cx="260" cy="355" r="25" fill="#1a1a2e" stroke="#2a2a40" stroke-width="1"/>
+    <circle cx="260" cy="355" r="12" fill="#2a2a40"/>
+    <circle cx="260" cy="355" r="5" fill="#3a3a50"/>
+    <!-- Spokes -->
+    <line x1="260" y1="325" x2="260" y2="385" stroke="#2a2a40" stroke-width="1.5"/>
+    <line x1="230" y1="355" x2="290" y2="355" stroke="#2a2a40" stroke-width="1.5"/>
+    <line x1="239" y1="334" x2="281" y2="376" stroke="#2a2a40" stroke-width="1.5"/>
+    <line x1="239" y1="376" x2="281" y2="334" stroke="#2a2a40" stroke-width="1.5"/>
+    
+    <!-- Front wheel -->
+    <circle cx="560" cy="355" r="45" fill="#0a0a0a" stroke="#1a1a2e" stroke-width="3"/>
+    <circle cx="560" cy="355" r="35" fill="#111" stroke="#222" stroke-width="1"/>
+    <circle cx="560" cy="355" r="25" fill="#1a1a2e" stroke="#2a2a40" stroke-width="1"/>
+    <circle cx="560" cy="355" r="12" fill="#2a2a40"/>
+    <circle cx="560" cy="355" r="5" fill="#3a3a50"/>
+    <!-- Spokes -->
+    <line x1="560" y1="325" x2="560" y2="385" stroke="#2a2a40" stroke-width="1.5"/>
+    <line x1="530" y1="355" x2="590" y2="355" stroke="#2a2a40" stroke-width="1.5"/>
+    <line x1="539" y1="334" x2="581" y2="376" stroke="#2a2a40" stroke-width="1.5"/>
+    <line x1="539" y1="376" x2="581" y2="334" stroke="#2a2a40" stroke-width="1.5"/>
+
+    <!-- Wheel arches -->
+    <path d="M200,310 Q215,270 260,270 Q305,270 320,310" fill="none" stroke="#0d0d18" stroke-width="4"/>
+    <path d="M500,310 Q515,270 560,270 Q605,270 620,310" fill="none" stroke="#0d0d18" stroke-width="4"/>
+
+    <!-- Chrome trim line along body -->
+    <line x1="130" y1="312" x2="690" y2="312" stroke="#3a3a50" stroke-width="1.5"/>
+
+    <!-- Side mirror -->
+    <rect x="250" y="205" width="18" height="12" rx="3" fill="#0d0d18" stroke="#2a2a40" stroke-width="1"/>
+    <rect x="268" y="207" width="4" height="8" rx="1" fill="#1a1a2e"/>
+    
+    <!-- Door handle -->
+    <rect x="310" y="310" width="22" height="4" rx="2" fill="#3a3a50"/>
+    <rect x="500" y="310" width="22" height="4" rx="2" fill="#3a3a50"/>
+
+  </g>
+
+  <!-- Ambient light on ground from headlight -->
+  <ellipse cx="140" cy="410" rx="60" ry="15" fill="rgba(255,255,200,0.05)"/>
+  
+  <!-- Subtle city light glow in background -->
+  <circle cx="700" cy="100" r="3" fill="rgba(255,255,200,0.3)"/>
+  <circle cx="720" cy="130" r="2" fill="rgba(255,255,200,0.2)"/>
+  <circle cx="100" cy="120" r="2" fill="rgba(255,200,200,0.2)"/>
+
+</svg>

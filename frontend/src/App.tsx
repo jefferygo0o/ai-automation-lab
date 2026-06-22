@@ -25,7 +25,7 @@ const HIDE_TOPBAR = ["/browser"];
 function Shell({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
   const hideTopbar = HIDE_TOPBAR.some((p) => loc.pathname.startsWith(p));
-  const { isOpen, panelWidth, setPanelWidth } = useChatPanel();
+  const { isOpen, panelWidth, setPanelWidth, closeChat } = useChatPanel();
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const bp = useBreakpoint();
@@ -78,8 +78,19 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
         <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
         {isOpen && (
-          <div className="fixed inset-0 z-50 flex bg-ink-900/20" onClick={closeChat}>
-            <div className="ml-auto w-full max-w-md bg-paper-50 h-full shadow-2xl flex flex-col min-h-0" onClick={(e) => e.stopPropagation()}>
+          <div 
+            className="fixed inset-0 z-50 flex"
+            style={{ pointerEvents: "none" }}
+          >
+            <div 
+              className="flex-1 h-full bg-ink-900/20" 
+              style={{ pointerEvents: "auto" }}
+              onClick={closeChat} 
+            />
+            <div 
+              className="w-full max-w-md bg-paper-50 h-full shadow-2xl flex flex-col min-h-0 overflow-hidden"
+              style={{ pointerEvents: "auto" }}
+            >
               <ChatPanel />
             </div>
           </div>
@@ -94,7 +105,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       className="grid h-full min-h-0"
       style={{
         gridTemplateColumns: isOpen
-          ? `220px 1fr ${panelWidth}px`
+          ? `auto 1fr ${panelWidth}px`
           : "auto 1fr",
         gridTemplateRows: "minmax(0, 1fr)",
       }}
