@@ -270,7 +270,10 @@ export default function ChatPanel() {
             // tool_result that follows in the same SSE chunk — without this,
             // React batches both state updates into one paint and the user
             // never sees the "Writing…" (pending) state.
-            await new Promise(r => setTimeout(r, 0));
+            // requestAnimationFrame guarantees a paint cycle happens before
+            // resolving (unlike setTimeout(r, 0) which may fire before the
+            // next paint, allowing the next event to process too quickly).
+            await new Promise(r => requestAnimationFrame(r));
           } else if (type === "tool_result") {
             closeThinking(aid);
             // Update immediately — no rAF deferring, so the card is always visible
