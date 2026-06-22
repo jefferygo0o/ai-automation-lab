@@ -24,6 +24,7 @@ export default function WebSpacePage() {
   const [view, setView] = useState<ViewMode>("preview");
   const [previewKey, setPreviewKey] = useState(0);
   const [previewFullscreen, setPreviewFullscreen] = useState(false);
+  const [mobileRoutesOpen, setMobileRoutesOpen] = useState(false);
 
   const selected = routes.find((r) => r.id === selectedId) ?? null;
 
@@ -130,6 +131,7 @@ export default function WebSpacePage() {
     setSelectedId(route.id);
     setView(route.type === "page" ? "preview" : "code");
     if (route.type === "page") setPreviewKey((k) => k + 1);
+    setMobileRoutesOpen(false);
   };
 
   const copyToClipboard = (text: string, id: string) => {
@@ -164,6 +166,14 @@ export default function WebSpacePage() {
       {/* Toolbar */}
       <div className="h-10 border-b border-line flex items-center justify-between px-4 shrink-0 gap-3">
         <div className="flex items-center gap-2 shrink-0">
+          {/* Mobile: hamburger */}
+          <button
+            onClick={() => setMobileRoutesOpen(true)}
+            className="lg:hidden btn btn-ghost btn-icon shrink-0"
+            title="Show routes"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+          </button>
           <Globe className="w-4 h-4 text-ink-400" />
           <span className="text-sm font-medium text-ink-900">
             Routes {routes.length > 0 && <span className="text-ink-400 font-normal">({routes.length})</span>}
@@ -292,9 +302,63 @@ export default function WebSpacePage() {
         </div>
       )}
 
+              {/* Mobile route drawer — overlay */}
+        {mobileRoutesOpen && (
+          <>
+            <div
+              className="fixed inset-0 bg-black/30 z-40 lg:hidden"
+              onClick={() => setMobileRoutesOpen(false)}
+            />
+            <div className="fixed left-0 top-0 bottom-0 w-72 z-50 bg-paper-50 border-r border-line shadow-xl lg:hidden flex flex-col">
+              <div className="h-10 border-b border-line flex items-center justify-between px-3 shrink-0">
+                <span className="text-xs font-medium">Routes</span>
+                <button
+                  onClick={() => setMobileRoutesOpen(false)}
+                  className="btn btn-ghost btn-icon"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 space-y-px">
+                {loading ? (
+                  <div className="p-4 text-xs text-ink-400">Loading routes...</div>
+                ) : routes.length === 0 ? (
+                  <div className="p-4 text-xs text-ink-400 text-center">
+                    <Globe className="w-6 h-6 mx-auto mb-2 opacity-40" />
+                    No routes yet.
+                  </div>
+                ) : (
+                  routes.map((route) => (
+                    <div
+                      key={route.id}
+                      className={`flex items-center gap-2 px-2.5 py-2 rounded-sm cursor-pointer text-sm transition-colors ${
+                        selectedId === route.id
+                          ? "bg-paper-200 text-ink-900"
+                          : "text-ink-500 hover:text-ink-900 hover:bg-paper-200/40"
+                      }`}
+                      onClick={() => handleSelect(route)}
+                    >
+                      <FileCode className="w-3.5 h-3.5 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate font-mono text-xs">{route.path || "/"}</div>
+                        <div className="text-2xs text-ink-400 flex items-center gap-1.5 mt-0.5">
+                          <span className={`badge ${route.public ? "badge-ok" : "badge-mute"} text-2xs`}>
+                            {route.public ? "public" : "private"}
+                          </span>
+                          <span className="uppercase tracking-wider">{route.type}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </>
+        )}
+
       <div className="flex-1 flex overflow-hidden">
-        {/* Route list */}
-        <div className="w-64 border-r border-line overflow-y-auto shrink-0">
+        {/* Route list — desktop sidebar */}
+        <div className="hidden lg:block w-64 border-r border-line overflow-y-auto shrink-0">
           {loading ? (
             <div className="p-4 text-xs text-ink-400">Loading routes...</div>
           ) : routes.length === 0 ? (
