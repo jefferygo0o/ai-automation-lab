@@ -6,3 +6,4 @@ data/*.db-*
 .env.local
 .DS_Store
 *.log
+backend/server

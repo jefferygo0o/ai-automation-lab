@@ -8,7 +8,7 @@ import { readAgentConfig } from "./files.ts";
 import type { AgentRecord } from "./registry.ts";
 import type { SandboxOptions } from "../sandbox/index.ts";
 
-const BACKEND_ROOT = resolve(import.meta.dir, "..");
+const BACKEND_ROOT = resolve(import.meta.dir, "..", "..");
 
 export function resolveSandboxOptions(agent: AgentRecord): SandboxOptions {
   const cfg = readAgentConfig(agent.id);
