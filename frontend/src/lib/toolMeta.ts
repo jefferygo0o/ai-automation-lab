@@ -157,6 +157,77 @@ export const TOOL_META: Record<string, ToolMeta> = {
     kind: "edit",
     tone: TONE_EDIT,
   },
+  // lab_* tools (backend's file/sandbox tools)
+  lab_read_file: {
+    icon: FileText,
+    verb: "reading",
+    verbPast: "read",
+    kind: "read",
+    tone: TONE_READ,
+  },
+  lab_write_file: {
+    icon: FilePlus2,
+    verb: "writing",
+    verbPast: "wrote",
+    kind: "write",
+    tone: TONE_WRITE,
+  },
+  lab_edit_file: {
+    icon: FileEdit,
+    verb: "editing",
+    verbPast: "edited",
+    kind: "edit",
+    tone: TONE_EDIT,
+  },
+  lab_edit_file_llm: {
+    icon: FileEdit,
+    verb: "editing",
+    verbPast: "edited",
+    kind: "edit",
+    tone: TONE_EDIT,
+  },
+  lab_copy_file: {
+    icon: FilePlus2,
+    verb: "copying",
+    verbPast: "copied",
+    kind: "write",
+    tone: TONE_WRITE,
+  },
+  lab_list_directory: {
+    icon: FolderOpen,
+    verb: "listing",
+    verbPast: "listed",
+    kind: "list",
+    tone: TONE_LIST,
+  },
+  lab_grep_search: {
+    icon: ListChecks,
+    verb: "searching",
+    verbPast: "searched",
+    kind: "list",
+    tone: TONE_LIST,
+  },
+  lab_bash: {
+    icon: Terminal,
+    verb: "running",
+    verbPast: "ran",
+    kind: "exec",
+    tone: TONE_EXEC,
+  },
+  lab_run_sequential_cmds: {
+    icon: Terminal,
+    verb: "running",
+    verbPast: "ran",
+    kind: "exec",
+    tone: TONE_EXEC,
+  },
+  lab_run_parallel_cmds: {
+    icon: Terminal,
+    verb: "running",
+    verbPast: "ran",
+    kind: "exec",
+    tone: TONE_EXEC,
+  },
   lab_generate_image: {
     icon: ImageIcon,
     verb: "generating image",
@@ -231,13 +302,17 @@ export function getToolLabel(
   const meta_kind = meta.kind;
 
   if (meta_kind === "read" || meta_kind === "write" || meta_kind === "edit" || meta_kind === "list") {
-    const p = typeof a.path === "string" ? a.path : null;
+    const p = typeof a.path === "string" ? a.path
+      : typeof a.target_file === "string" ? a.target_file
+      : null;
     if (p) return p;
     if (meta_kind === "list" && typeof a.source === "string") return a.source;
     return null;
   }
   if (meta_kind === "delete") {
-    const p = typeof a.path === "string" ? a.path : null;
+    const p = typeof a.path === "string" ? a.path
+      : typeof a.target_file === "string" ? a.target_file
+      : null;
     return p;
   }
   if (meta_kind === "exec") {
@@ -314,6 +389,159 @@ export function getLineDelta(result: unknown): LineDelta | null {
         return { added: i.added, removed: i.removed };
       }
     }
+  }
+  return null;
+}
+
+/**
+ * Extract a readable "preview" string from a tool's result (used after the
+ * tool has finished). Mirrors the shape used by the lab_* tools so the chat
+ * panel can show the file contents in the expanded span.
+ *
+ *   { content: [{ type: "text", text: "..." }] }  → text
+ *   { content: "..." }                              → content
+ *   string                                          → string
+ */
+export function getToolPreview(
+  result: unknown,
+  name?: string,
+  args?: Record<string, unknown> | null
+): string | null {
+  // For write/edit tools the user actually wants to see the file content
+  // they wrote/edited, not the tool's "wrote /path (N chars)" confirmation.
+  // Fall back to the args the call was made with first.
+  if (name === "write_file" || name === "lab_write_file") {
+    const argContent = typeof args?.content === "string" ? args.content : null;
+    if (argContent !== null) return argContent;
+  }
+  if (name === "edit_file" || name === "lab_edit_file") {
+    const ops = Array.isArray(args?.operations) ? (args!.operations as unknown[]) : null;
+    if (ops && ops.length > 0) {
+      const out: string[] = [];
+      for (const op of ops) {
+        if (!op || typeof op !== "object") continue;
+        const o = op as Record<string, unknown>;
+        const opName = typeof o.op === "string" ? o.op : "?";
+        out.push(`# ${opName}`);
+        const oldText = typeof o.old_text === "string" ? o.old_text : "";
+        const newText = typeof o.new_text === "string" ? o.new_text : "";
+        if (oldText) out.push("- " + oldText.split("\n").join("\n- "));
+        if (newText) out.push("+ " + newText.split("\n").join("\n+ "));
+      }
+      return out.join("\n");
+    }
+  }
+
+  if (result == null) return null;
+  if (typeof result === "string") return result;
+  if (typeof result !== "object") return null;
+  const r = result as Record<string, unknown>;
+  if (Array.isArray(r.content)) {
+    const parts: string[] = [];
+    for (const c of r.content) {
+      if (c && typeof c === "object") {
+        const t = (c as Record<string, unknown>).text;
+        if (typeof t === "string") parts.push(t);
+      }
+    }
+    if (parts.length > 0) return parts.join("\n");
+  }
+  if (typeof r.content === "string") return r.content;
+  return null;
+}
+
+/**
+ * Compute a "live" line-count badge from the tool's arguments (used while
+ * the tool is still pending, before the result is available).
+ *
+ *   write_file / lab_write_file   → args.content    line count
+ *   edit_file / lab_edit_file     → args.operations → +added / −removed
+ *
+ * Returns null when the tool name isn't a write/edit or args aren't usable.
+ */
+export interface LiveLineCounts {
+  /** lines being added (writes, edit additions, appends) */
+  added: number;
+  /** lines being removed (edit deletions, replacements) */
+  removed: number;
+  /** total content lines for pure writes (no remove count) */
+  total?: number;
+}
+
+export function getLiveLineCounts(
+  name: string,
+  args: Record<string, unknown> | null | undefined,
+): LiveLineCounts | null {
+  const a = (args ?? {}) as Record<string, unknown>;
+  if (name === "write_file" || name === "lab_write_file") {
+    if (typeof a.content !== "string") return null;
+    const total = a.content.length === 0 ? 0 : a.content.split("\n").length;
+    return { added: total, removed: 0, total };
+  }
+  if (name === "edit_file" || name === "lab_edit_file") {
+    if (!Array.isArray(a.operations)) return null;
+    let added = 0;
+    let removed = 0;
+    for (const op of a.operations) {
+      if (!op || typeof op !== "object") continue;
+      const o = op as Record<string, unknown>;
+      const newText = typeof o.new_text === "string" ? o.new_text : "";
+      const oldText = typeof o.old_text === "string" ? o.old_text : "";
+      const newLines = newText.length === 0 ? 0 : newText.split("\n").length;
+      const oldLines = oldText.length === 0 ? 0 : oldText.split("\n").length;
+      switch (o.op) {
+        case "replace_block":
+          added += newLines;
+          removed += oldLines;
+          break;
+        case "insert_after":
+        case "insert_before":
+          added += newLines;
+          break;
+        case "delete_block":
+          removed += oldLines;
+          break;
+        case "append_line":
+          added += newLines;
+          break;
+      }
+    }
+    return { added, removed };
+  }
+  return null;
+}
+
+/**
+ * Build a live preview from the tool's *arguments* (used while the tool is
+ * still pending). For write tools this is the content being written; for
+ * edit tools this is a diff-like summary of each operation.
+ */
+export function getLivePreview(
+  name: string,
+  args: Record<string, unknown> | null | undefined,
+): string | null {
+  const a = (args ?? {}) as Record<string, unknown>;
+  if (name === "write_file" || name === "lab_write_file") {
+    return typeof a.content === "string" ? a.content : null;
+  }
+  if (name === "edit_file" || name === "lab_edit_file") {
+    if (!Array.isArray(a.operations)) return null;
+    const out: string[] = [];
+    for (const op of a.operations) {
+      if (!op || typeof op !== "object") continue;
+      const o = op as Record<string, unknown>;
+      const opName = typeof o.op === "string" ? o.op : "?";
+      const oldText = typeof o.old_text === "string" ? o.old_text : "";
+      const newText = typeof o.new_text === "string" ? o.new_text : "";
+      out.push(`# ${opName}`);
+      if (oldText) {
+        out.push("- " + oldText.split("\n").join("\n- "));
+      }
+      if (newText) {
+        out.push("+ " + newText.split("\n").join("\n+ "));
+      }
+    }
+    return out.join("\n");
   }
   return null;
 }

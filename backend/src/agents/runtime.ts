@@ -32,7 +32,7 @@ export type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "thinking"; delta: string }
   | { type: "tool_call"; name: string; args: any }
-  | { type: "tool_result"; name: string; result: any; ok: boolean }
+  | { type: "tool_result"; name: string; result: any; ok: boolean; durationMs: number; error?: string }
   | { type: "message"; content: string; messageId?: string }
   | { type: "run_started"; runId: string }
   | { type: "error"; message: string }
@@ -310,7 +310,7 @@ export async function runAgentTurn(
         const tool = toolRegistry.get(tc.name);
         if (!tool) {
           const result = { error: `unknown tool: ${tc.name}` };
-          emit({ type: "tool_result", name: tc.name, result, ok: false });
+          emit({ type: "tool_result", name: tc.name, result, ok: false, durationMs: 0, error: String(result.error) });
           pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
           continue;
         }
@@ -338,9 +338,10 @@ export async function runAgentTurn(
           RunStore.recordToolFinish(inv.id, ok ? "ok" : "error", result, ok ? null : String(result?.error ?? ""));
         }
         const resultStr = normalizeToolResult(result, ok);
-        emit({ type: "tool_result", name: tc.name, result, ok });
+        const toolDuration = Date.now() - toolStart;
+        emit({ type: "tool_result", name: tc.name, result, ok, durationMs: toolDuration, error: ok ? undefined : String(result?.error ?? "failed") });
         pushToolMessage(messages, chatId, tc, resultStr, run.id);
-        onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: Date.now() - toolStart, at: toolStart });
+        onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: toolDuration, at: toolStart });
         recordHistory(agent.id, tc.name, resultStr);
       }
     }
