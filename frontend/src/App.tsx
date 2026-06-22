@@ -165,66 +165,75 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 export default function App() {
   const { token } = useAuth();
   return (
-    <ShellWithProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/"
-          element={<Navigate to={token ? "/chats" : "/login"} replace />}
-        />
-        <Route
-          path="/chats"
-          element={<RequireAuth><ChatsPage /></RequireAuth>}
-        />
-        <Route
-          path="/agents"
-          element={<RequireAuth><AgentsPage /></RequireAuth>}
-        />
-        <Route
-          path="/agents/:id"
-          element={<RequireAuth><AgentEditPage /></RequireAuth>}
-        />
-        <Route
-          path="/web-space"
-          element={<RequireAuth><WebSpacePage /></RequireAuth>}
-        />
-        <Route
-          path="/files"
-          element={<RequireAuth><FilesPage /></RequireAuth>}
-        />
-        <Route
-          path="/automations"
-          element={<RequireAuth><AutomationsPage /></RequireAuth>}
-        />
-        <Route
-          path="/skills"
-          element={<RequireAuth><SkillsPage /></RequireAuth>}
-        />
-        <Route
-          path="/mcp"
-          element={<RequireAuth><McpPage /></RequireAuth>}
-        />
-        <Route
-          path="/secrets"
-          element={<RequireAuth><SecretsPage /></RequireAuth>}
-        />
-        <Route
-          path="/runs"
-          element={<RequireAuth><RunsPage /></RequireAuth>}
-        />
-        <Route
-          path="/browser"
-          element={<RequireAuth><BrowserPage /></RequireAuth>}
-        />
-        <Route
-          path="/integrations"
-          element={<RequireAuth><IntegrationsPage /></RequireAuth>}
-        />
-        <Route
-          path="*"
-          element={<Navigate to={token ? "/chats" : "/login"} replace />}
-        />
-      </Routes>
-    </ShellWithProvider>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/*"
+        element={
+          <RequireAuth>
+            <ShellWithProvider>
+              <Routes>
+                <Route
+                  path="/"
+                  element={<Navigate to="/chats" replace />}
+                />
+                <Route
+                  path="/chats"
+                  element={<ChatsPage />}
+                />
+                <Route
+                  path="/agents"
+                  element={<AgentsPage />}
+                />
+                <Route
+                  path="/agents/:id"
+                  element={<AgentEditPage />}
+                />
+                <Route
+                  path="/web-space"
+                  element={<WebSpacePage />}
+                />
+                <Route
+                  path="/files"
+                  element={<FilesPage />}
+                />
+                <Route
+                  path="/automations"
+                  element={<AutomationsPage />}
+                />
+                <Route
+                  path="/skills"
+                  element={<SkillsPage />}
+                />
+                <Route
+                  path="/mcp"
+                  element={<McpPage />}
+                />
+                <Route
+                  path="/secrets"
+                  element={<SecretsPage />}
+                />
+                <Route
+                  path="/runs"
+                  element={<RunsPage />}
+                />
+                <Route
+                  path="/browser"
+                  element={<BrowserPage />}
+                />
+                <Route
+                  path="/integrations"
+                  element={<IntegrationsPage />}
+                />
+                <Route
+                  path="*"
+                  element={<Navigate to="/chats" replace />}
+                />
+              </Routes>
+            </ShellWithProvider>
+          </RequireAuth>
+        }
+      />
+    </Routes>
   );
 }
