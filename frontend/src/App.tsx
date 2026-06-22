@@ -30,6 +30,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const bp = useBreakpoint();
   const isMobile = bp === "mobile";
+  const [chatCollapsed, setChatCollapsed] = useState(false);
 
   // Auto-close mobile drawer on route change
   useEffect(() => {
@@ -99,13 +100,13 @@ function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Tablet + Desktop layout: original grid
+  // Tablet + Desktop layout with collapsible chat sidebar
   return (
     <div
       className="grid h-full min-h-0"
       style={{
         gridTemplateColumns: isOpen
-          ? `auto 1fr ${panelWidth}px`
+          ? `auto 1fr ${chatCollapsed ? "52px" : panelWidth + "px"}`
           : "auto 1fr",
         gridTemplateRows: "minmax(0, 1fr)",
       }}
@@ -118,13 +119,27 @@ function Shell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
       {isOpen && (
-        <div className="flex min-h-0">
-          <div
-            className="w-[3px] cursor-ew-resize shrink-0 bg-transparent hover:bg-ink-300/40 active:bg-ink-300/60 transition-colors relative"
-            onMouseDown={startDrag}
-          />
-          <ChatPanel />
-        </div>
+        chatCollapsed ? (
+          <aside className="w-[52px] shrink-0 border-l border-line bg-paper-50 flex flex-col items-center">
+            <button
+              onClick={() => setChatCollapsed(false)}
+              className="mt-3 w-8 h-8 flex items-center justify-center text-ink-400 hover:text-ink-900 hover:bg-paper-200/60 rounded-md"
+              title="Expand chat panel"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </button>
+          </aside>
+        ) : (
+          <div className="flex min-h-0">
+            <div
+              className="w-[3px] cursor-ew-resize shrink-0 bg-transparent hover:bg-ink-300/40 active:bg-ink-300/60 transition-colors relative"
+              onMouseDown={startDrag}
+            />
+            <ChatPanel onCollapse={() => setChatCollapsed(true)} />
+          </div>
+        )
       )}
     </div>
   );

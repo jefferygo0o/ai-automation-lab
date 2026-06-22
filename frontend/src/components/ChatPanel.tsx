@@ -54,7 +54,7 @@ interface MessageBlocks {
   blocks: Block[];
 }
 
-export default function ChatPanel() {
+export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = {}) {
   const { isOpen, chatId, closeChat, openChat } = useChatPanel();
 
   const [chat, setChat] = useState<Chat | null>(null);
@@ -398,6 +398,7 @@ export default function ChatPanel() {
             {/* Header */}
             <div className="h-10 shrink-0 border-b border-line flex items-center gap-2 px-3">
               <button onClick={closeChat} className="text-xs text-ink-400 hover:text-ink-900">✕</button>
+              {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
               <span className="text-xs font-medium text-ink-900 truncate flex-1">{chat.title || "Chat"}</span>
               <select value={chat.activeAgentId ?? chat.agentId} onChange={(e) => { const v = e.target.value; if (chatId) Chats.setActiveAgent(chatId, v); }} className="text-xs max-w-[120px] bg-transparent border border-line rounded-sm px-1 py-0.5">
                 {agentsList.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
@@ -731,7 +732,9 @@ export default function ChatPanel() {
           <>
             <div className="h-10 shrink-0 border-b border-line flex items-center gap-2 px-3">
               <span className="text-xs font-medium text-ink-700 flex-1">Chat</span>
+              {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
               <button onClick={closeChat} className="text-xs text-ink-400 hover:text-ink-900">✕</button>
+              {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
             </div>
             <div className="flex-1 min-h-0 flex items-center justify-center text-xs text-ink-400">No chat selected</div>
           </>
