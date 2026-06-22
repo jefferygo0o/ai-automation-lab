@@ -40,6 +40,9 @@ import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 
+const LAB_BACKEND_ROOT = "/home/workspace/Projects/ai-automation-lab/backend";
+const DATA_DIR = join(LAB_BACKEND_ROOT, "data");
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -257,7 +260,7 @@ toolRegistry.register({
     try {
       let abs: string;
       if (isAbsolute(args.target_file)) abs = args.target_file;
-      else abs = resolve(args.target_file);
+      else abs = resolve(LAB_BACKEND_ROOT, args.target_file);
       if (!existsSync(abs)) return err(`file not found: ${abs}`);
       const stat = statSync(abs);
       if (stat.isDirectory()) return err(`path is a directory, use lab_list_directory: ${abs}`);
@@ -470,7 +473,7 @@ toolRegistry.register({
   defaultPermission: "always",
   async execute(args, ctx) {
     try {
-      const target = args.path ?? ".";
+      const target = args.path ?? "workspace";
       const abs = isAbsolute(target) ? target : (ctx.sandbox ? ctx.sandbox.resolveSafe(target) : resolve(target));
       if (!existsSync(abs)) return err(`path not found: ${abs}`);
       const st = statSync(abs);
@@ -514,7 +517,7 @@ toolRegistry.register({
   async execute(args, ctx) {
     if (!args.query) return err("query is required");
     try {
-      const target = args.path ?? ".";
+      const target = args.path ?? "/home/workspace/Projects/ai-automation-lab/backend/data";
       const abs = isAbsolute(target) ? target : (ctx.sandbox ? ctx.sandbox.resolveSafe(target) : resolve(target));
       const max = args.max_results ?? 200;
       // Prefer ripgrep if present
@@ -572,7 +575,7 @@ toolRegistry.register({
 
 toolRegistry.register({
   name: "lab_bash",
-  description: "Run a shell command in the agent's sandbox. Captures stdout/stderr, enforces timeout and output cap.",
+  description: "Run a shell command inside the lab data directory (backend/data). Use for file operations, git, scripts, and system tools. Working directory: /home/workspace/Projects/ai-automation-lab/backend/data. Enforces timeout and output cap.",
   parameters: {
     command: { type: "string", description: "shell command to execute (can include pipes, redirects, env vars)", required: true },
     timeoutMs: { type: "number", description: "max wall time in ms (default 30000)", required: false },
@@ -582,7 +585,8 @@ toolRegistry.register({
     if (!args.command) return err("command is required");
     if (!ctx.sandbox) return err("sandbox not active — agent must run inside a sandbox");
     try {
-      const r = await ctx.sandbox.run("bash", ["-c", args.command]);
+      const wrapped = `cd ${DATA_DIR} && ${args.command}`;
+      const r = await ctx.sandbox.run("bash", ["-c", wrapped]);
       const body = `exit=${r.exitCode ?? r.signal} duration=${r.durationMs}ms\n--- stdout ---\n${r.stdout}${r.truncated ? "\n... (truncated)\n" : ""}--- stderr ---\n${r.stderr}`;
       return r.ok ? ok(body) : { content: [{ type: "text" as const, text: body }], isError: true };
     } catch (e: any) {
@@ -613,7 +617,7 @@ toolRegistry.register({
     let failed = 0;
     for (let i = 0; i < args.commands.length; i++) {
       const c = args.commands[i];
-      const r = await ctx.sandbox.run("bash", ["-c", c]);
+      const r = await ctx.sandbox.run("bash", ["-c", `cd ${DATA_DIR} && ${c}`]);
       results.push(`# [${i + 1}/${args.commands.length}] ${c}\nexit=${r.exitCode ?? r.signal} duration=${r.durationMs}ms\n${r.stdout}${r.truncated ? "\n... (truncated)" : ""}${r.stderr ? "\nstderr: " + r.stderr : ""}`);
       if (!r.ok) {
         failed++;
@@ -1348,7 +1352,7 @@ toolRegistry.register({
     // as .jpg not .png to avoid confusing readers / OS previews.
     const safeName = args.file_stem.replace(/[^a-z0-9_-]/gi, "_");
     const outRel = `Images/${safeName}.jpg`;
-    const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(outRel) : resolve(`/home/workspace/Images/${safeName}.jpg`);
+    const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(outRel) : resolve(LAB_BACKEND_ROOT + `/Images/${safeName}.jpg`);
 
     const writeOut = async (buf: Buffer) => {
       mkdirSync(dirname(outAbs), { recursive: true });
@@ -1482,7 +1486,7 @@ toolRegistry.register({
       const seed = args.seed ?? Math.floor(Math.random() * 4294967295);
       const safeName = args.file_stem.replace(/[^a-z0-9_-]/gi, "_");
       // Cloudflare editing also returns JPEG bytes — write as .jpg.
-      const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(`${safeName}.jpg`) : resolve(`/home/workspace/Images/${safeName}.jpg`);
+      const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(`${safeName}.jpg`) : resolve(LAB_BACKEND_ROOT + `/Images/${safeName}.jpg`);
 
       // FLUX.2 [klein] 9B is the only model in this account with a reliable
       // editing path. It requires multipart with input_image_0..2.

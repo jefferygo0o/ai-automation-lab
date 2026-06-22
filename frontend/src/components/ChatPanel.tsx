@@ -574,13 +574,26 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                             } as Record<string, string>)[meta.kind] ?? "tool";
                             const isOpen = expandedTool.has(t.id) || isPending;
                             const contentId = 'radix-' + t.id;
-                            // Live line count: incremental during pending, final after.
-                            // For completed tools, use finalCounts (from result) when set,
-                            // otherwise fall back to liveCounts (from args) so line counts
-                            // never disappear.
+                            // Live line count: during pending use streamed data, after completion use
+                            // args-derived counts (present for write/edit) or finalCounts from result.
+                            const argsLineCounts = (() => {
+                              if (meta.kind === "write" && t.args && typeof t.args.content === "string") {
+                                const lines = t.args.content.split("\n").length;
+                                return { added: lines, removed: 0 };
+                              }
+                              if (meta.kind === "edit" && t.args && Array.isArray(t.args.operations)) {
+                                let added = 0, removed = 0;
+                                for (const op of t.args.operations) {
+                                  if (op?.new_text) added += op.new_text.split("\n").length;
+                                  if (op?.old_text) removed += op.old_text.split("\n").length;
+                                }
+                                return (added > 0 || removed > 0) ? { added, removed } : null;
+                              }
+                              return null;
+                            })();
                             const displayCounts = isPending
                               ? (liveAddedLines > 0 || liveRemovedLines > 0 ? { added: liveAddedLines, removed: liveRemovedLines } : null)
-                              : (finalCounts ?? (liveCounts && liveCounts.added > 0 ? liveCounts : null));
+                              : (finalCounts ?? argsLineCounts);
 
                             return (
                               <div key={t.id} className="w-full min-w-0 space-y-0.5">

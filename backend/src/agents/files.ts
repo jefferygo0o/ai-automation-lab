@@ -169,6 +169,7 @@ export function ensureAgentDir(agentId: string): string {
     mkdirSync(dir, { recursive: true });
     mkdirSync(join(dir, "skills"), { recursive: true });
     mkdirSync(join(dir, "workdir"), { recursive: true });
+    mkdirSync(join(dir, "..", "..", "sandboxes", agentId, "workspace"), { recursive: true });
     for (const [name, content] of Object.entries(STARTER_FILES)) {
       writeFileSync(join(dir, name), content);
     }
