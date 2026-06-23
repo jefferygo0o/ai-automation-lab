@@ -429,7 +429,7 @@ api.delete("/api/skills/:id", async (c) => {
 });
 
 // ---- MCP ----
-api.get("/api/mcp/servers", (c) => {
+api.get("/api/mcp/servers", async (c) => {
   return c.json({ servers: await McpStore.list() });
 });
 

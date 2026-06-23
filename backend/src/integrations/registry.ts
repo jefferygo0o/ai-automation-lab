@@ -162,27 +162,27 @@ function rowToCatalogApp(r: CatalogAppRow): CachedCatalogApp {
 export const IntegrationRegistry = {
   // ---- Connections CRUD ----
 
-  list(ownerId: string): IntegrationConnection[] {
+  async list(ownerId: string): IntegrationConnection[] {
     return await (await db.prepare(
       `SELECT * FROM integration_connections WHERE owner_id = ? ORDER BY updated_at DESC`
     ).all(ownerId) as IntegrationRow[]).map(rowToConnection);
   },
 
-  get(id: string, ownerId: string): IntegrationConnection | null {
+  async get(id: string, ownerId: string): IntegrationConnection | null {
     const r = await db.prepare(
       `SELECT * FROM integration_connections WHERE id = ? AND owner_id = ?`
     ).get(id, ownerId) as IntegrationRow | undefined;
     return r ? rowToConnection(r) : null;
   },
 
-  getByApp(ownerId: string, appSlug: string): IntegrationConnection | null {
+  async getByApp(ownerId: string, appSlug: string): IntegrationConnection | null {
     const r = await db.prepare(
       `SELECT * FROM integration_connections WHERE owner_id = ? AND app_slug = ?`
     ).get(ownerId, appSlug) as IntegrationRow | undefined;
     return r ? rowToConnection(r) : null;
   },
 
-  create(
+  async create(
     ownerId: string,
     opts: {
       appSlug: string;
@@ -211,7 +211,7 @@ export const IntegrationRegistry = {
     return this.get(id, ownerId)!;
   },
 
-  updateStatus(
+  async updateStatus(
     id: string,
     ownerId: string,
     status: IntegrationConnection["status"],
@@ -268,7 +268,7 @@ export const IntegrationRegistry = {
     }
   },
 
-  listCachedActions(appSlug: string): CachedAction[] {
+  async listCachedActions(appSlug: string): CachedAction[] {
     return await (await db.prepare(
       `SELECT * FROM integration_action_cache WHERE app_slug = ? ORDER BY type, name`
     ).all(appSlug) as ActionRow[]).map((r) => ({
@@ -283,7 +283,7 @@ export const IntegrationRegistry = {
     }));
   },
 
-  getCachedAction(appSlug: string, actionKey: string): CachedAction | null {
+  async getCachedAction(appSlug: string, actionKey: string): CachedAction | null {
     const r = await db.prepare(
       `SELECT * FROM integration_action_cache WHERE app_slug = ? AND action_key = ?`
     ).get(appSlug, actionKey) as ActionRow | undefined;
@@ -301,14 +301,14 @@ export const IntegrationRegistry = {
   },
 
   /** List all unique app slugs that have cached actions. */
-  listCachedApps(): string[] {
+  async listCachedApps(): string[] {
     return await (await db.prepare(
       `SELECT DISTINCT app_slug FROM integration_action_cache ORDER BY app_slug`
     ).all() as { app_slug: string }[]).map((r) => r.app_slug);
   },
 
   /** Get cache timestamp for an app (most recent action). */
-  getCacheTimestamp(appSlug: string): number | null {
+  async getCacheTimestamp(appSlug: string): number | null {
     const r = await db.prepare(
       `SELECT MAX(created_at) as ts FROM integration_action_cache WHERE app_slug = ?`
     ).get(appSlug) as { ts: number } | undefined;
@@ -316,7 +316,7 @@ export const IntegrationRegistry = {
   },
 
   /** Count connections by status for dashboard. */
-  countByStatus(ownerId: string): Record<string, number> {
+  async countByStatus(ownerId: string): Record<string, number> {
     const rows = await db.prepare(
       `SELECT status, COUNT(*) as count FROM integration_connections
        WHERE owner_id = ? GROUP BY status`
@@ -328,7 +328,7 @@ export const IntegrationRegistry = {
 
   // ---- Catalog App Cache ----
 
-  getCachedApps(ownerId: string): CachedCatalogApp[] {
+  async getCachedApps(ownerId: string): CachedCatalogApp[] {
     return await (await db.prepare(
       `SELECT * FROM catalog_app_cache WHERE owner_id = ? ORDER BY name ASC`
     ).all(ownerId) as CatalogAppRow[]).map(rowToCatalogApp);
@@ -341,15 +341,15 @@ export const IntegrationRegistry = {
     return r?.count ?? 0;
   },
 
-  getCachedAppsPage(ownerId: string, page: number, perPage: number): CachedCatalogApp[] {
-    const offset = async (page - 1) * perPage;
+  async getCachedAppsPage(ownerId: string, page: number, perPage: number): CachedCatalogApp[] {
+    const offset = (page - 1) * perPage;
     return await (await db.prepare(
       `SELECT * FROM catalog_app_cache WHERE owner_id = ? ORDER BY name ASC LIMIT ? OFFSET ?`
     ).all(ownerId, perPage, offset) as CatalogAppRow[]).map(rowToCatalogApp);
   },
 
-  searchCachedApps(ownerId: string, query: string, page: number, perPage: number): { apps: CachedCatalogApp[]; total: number } {
-    const offset = async (page - 1) * perPage;
+  async searchCachedApps(ownerId: string, query: string, page: number, perPage: number): { apps: CachedCatalogApp[]; total: number } {
+    const offset = (page - 1) * perPage;
     const like = `%${query}%`;
     const total = await (await db.prepare(
       `SELECT COUNT(*) as count FROM catalog_app_cache WHERE owner_id = ? AND (name LIKE ? OR description LIKE ? OR app_slug LIKE ?)`
@@ -360,14 +360,14 @@ export const IntegrationRegistry = {
     return { apps: rows.map(rowToCatalogApp), total };
   },
 
-  getCachedAppBySlug(ownerId: string, slug: string): CachedCatalogApp | null {
+  async getCachedAppBySlug(ownerId: string, slug: string): CachedCatalogApp | null {
     const r = await db.prepare(
       `SELECT * FROM catalog_app_cache WHERE owner_id = ? AND app_slug = ?`
     ).get(ownerId, slug) as CatalogAppRow | undefined;
     return r ? rowToCatalogApp(r) : null;
   },
 
-  getCachedCategories(ownerId: string): string[] {
+  async getCachedCategories(ownerId: string): string[] {
     const rows = await db.prepare(
       `SELECT DISTINCT categories_json FROM catalog_app_cache WHERE owner_id = ?`
     ).all(ownerId) as { categories_json: string }[];
@@ -424,7 +424,7 @@ export const IntegrationRegistry = {
     });
   },
 
-  getCatalogSyncState(ownerId: string): { status: string; total: number; errorMessage: string | null; startedAt: number; completedAt: number | null } | null {
+  async getCatalogSyncState(ownerId: string): { status: string; total: number; errorMessage: string | null; startedAt: number; completedAt: number | null } | null {
     const r = await db.prepare(
       `SELECT * FROM catalog_sync_state WHERE owner_id = ?`
     ).get(ownerId) as { owner_id: string; status: string; total: number; error_message: string | null; started_at: number; completed_at: number | null } | undefined;
