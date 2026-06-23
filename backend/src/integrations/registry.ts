@@ -381,7 +381,7 @@ export const IntegrationRegistry = {
     return Array.from(cats).sort();
   },
 
-  cacheAppCatalog(ownerId: string, apps: PdApp[]): void {
+  async cacheAppCatalog(ownerId: string, apps: PdApp[]): Promise<void> {
     const now = Date.now();
     const batch = apps.map((a) => ({
       id: `cat_${nanoid(8)}`,
@@ -400,12 +400,12 @@ export const IntegrationRegistry = {
     if (batch.length === 0) return;
 
     await db.transaction(async () => {
-      for (const item of items) {
-        db.prepare(
-          `INSERT OR REPLACE INTO catalog_app_cache
+      for (const item of batch) {
+        await db.prepare(
+          `INSERT INTO catalog_app_cache
            (id, owner_id, app_slug, name, description, auth_type, auth_description,
             action_count, trigger_count, logo_url, categories_json, fetched_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
         ).run(
           item.id,
           ownerId,
@@ -422,7 +422,6 @@ export const IntegrationRegistry = {
         );
       }
     });
-    doInsert(batch);
   },
 
   getCatalogSyncState(ownerId: string): { status: string; total: number; errorMessage: string | null; startedAt: number; completedAt: number | null } | null {
