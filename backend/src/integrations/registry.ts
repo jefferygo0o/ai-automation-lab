@@ -399,7 +399,7 @@ export const IntegrationRegistry = {
 
     if (batch.length === 0) return;
 
-    const doInsert = db.transaction((items: typeof batch) => {
+    await db.transaction(async () => {
       for (const item of items) {
         db.prepare(
           `INSERT OR REPLACE INTO catalog_app_cache
