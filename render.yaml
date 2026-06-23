@@ -25,6 +25,5 @@ services:
       - key: LAB_SANDBOX_ROOT
         value: /var/data/lab/sandboxes
       - key: LAB_MASTER_KEY
-        sync: false
         generateValue: true
         description: "Master key for encrypting secrets. Render auto-generates and persists this."
