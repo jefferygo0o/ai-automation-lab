@@ -1,28 +1,44 @@
 # Render build for AI Automation Lab (Bun runtime).
 # Builds the React SPA, copies it into the backend image, and starts the
 # Bun server which serves both the API and the static SPA.
+#
+# Layered for cache efficiency:
+#   1. Copy backend manifest + lockfile, install backend deps
+#   2. Copy frontend manifest + lockfile, install frontend deps, build SPA
+#   3. Copy the rest of the source (changes here don't bust dep layers)
 
 FROM oven/bun:1.3.11 AS base
 WORKDIR /app
 
-# Install backend deps. We deliberately drop --frozen-lockfile because the
-# lockfile may drift when package.json changes between pushes, and Render's
-# build environment will exit non-zero on mismatch instead of producing a
-# fresh lockfile.
+# --- Backend deps ---
+# Copy the manifest and lockfile first so dep installs are cached unless
+# either file changes. `bun.lock` is the text lockfile, no `bun.lockb` here.
 COPY backend/package.json backend/bun.lock* ./backend/
-RUN cd backend && bun install --production=false
+RUN cd backend && bun install --omit=dev
 
-# Frontend deps + build
+# --- Frontend deps + build ---
 COPY frontend/package.json frontend/bun.lock* ./frontend/
-RUN cd frontend && bun install
+RUN cd frontend && bun install --omit=dev
 COPY frontend/ ./frontend/
 RUN cd frontend && bun run build
 
-# Backend source (now that node_modules is populated)
+# --- Backend source ---
 COPY backend/ ./backend/
 
-# Copy built SPA into backend/dist-spa (matches server.ts LAB_DIST default)
-RUN mkdir -p backend/dist-spa && cp -r frontend/dist/. backend/dist-spa/
+# Stage the built SPA into a path the server already knows how to serve.
+RUN mkdir -p /app/backend/dist-spa && cp -r /app/frontend/dist/* /app/backend/dist-spa/
+
+# Install Playwright system deps (for the lab_browser_* tools) and
+# chromium browser. The base image doesn't have these by default.
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+        ca-certificates fonts-liberation libasound2 libatk-bridge2.0-0 \
+        libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 \
+        libgbm1 libgcc-s1 libglib2.0-0 libgtk-3-0 libnspr4 libnss3 libstdc++6 \
+        libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 \
+        libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 lsb-release \
+        xdg-utils \
+    && cd backend && bun add playwright@^1.61.0 && bunx playwright install chromium --with-deps \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV PORT=10000
@@ -31,5 +47,4 @@ ENV LAB_DIST=/app/backend/dist-spa
 ENV LAB_DATA_DIR=/app/backend/data
 EXPOSE 10000
 
-WORKDIR /app/backend
 CMD ["bun", "run", "src/server.ts"]
