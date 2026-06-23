@@ -581,14 +581,14 @@ api.delete("/api/agents/:id/memory", async (c) => {
 // ---- Secrets ----
 api.get("/api/secrets", async (c) => {
   const userId = c.get("userId") as string;
-  return c.json({ secrets: SecretStore.list(userId) });
+  return c.json({ secrets: await SecretStore.list(userId) });
 });
 
 api.put("/api/secrets/:name", async (c) => {
   const userId = c.get("userId") as string;
   const name = c.req.param("name");
   const { value } = (await c.req.json()) as { value: string };
-  const secret = SecretStore.set(userId, name, value);
+  const secret = await SecretStore.set(userId, name, value);
   Audit.record({ ownerId: userId, actor: "user", action: "secret.set", targetId: name, targetType: "secret" });
   return c.json({ secret });
 });
@@ -596,7 +596,7 @@ api.put("/api/secrets/:name", async (c) => {
 api.delete("/api/secrets/:name", async (c) => {
   const userId = c.get("userId") as string;
   const name = c.req.param("name");
-  const ok = SecretStore.delete(userId, name);
+  const ok = await SecretStore.delete(userId, name);
   if (ok) Audit.record({ ownerId: userId, actor: "user", action: "secret.delete", targetId: name, targetType: "secret" });
   return c.json({ ok });
 });
