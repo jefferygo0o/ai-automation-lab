@@ -81,7 +81,7 @@ export const MemoryStore = {
     ).all(...params) as Row[]).map(rowToItem);
   },
 
-  get(id: string, ownerUserId: string): MemoryItem | null {
+  async get(id: string, ownerUserId: string): Promise<MemoryItem | null> {
     const row = await db.prepare(
       `SELECT * FROM memory_items WHERE id = ? AND owner_user_id = ?`
     ).get(id, ownerUserId) as Row | undefined;
