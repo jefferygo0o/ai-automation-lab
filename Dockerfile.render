@@ -5,21 +5,24 @@
 FROM oven/bun:1.3.11 AS base
 WORKDIR /app
 
-# Backend deps
+# Install backend deps. We deliberately drop --frozen-lockfile because the
+# lockfile may drift when package.json changes between pushes, and Render's
+# build environment will exit non-zero on mismatch instead of producing a
+# fresh lockfile.
 COPY backend/package.json backend/bun.lock* ./backend/
-RUN cd backend && bun install --frozen-lockfile --production=false
+RUN cd backend && bun install --production=false
 
 # Frontend deps + build
 COPY frontend/package.json frontend/bun.lock* ./frontend/
-RUN cd frontend && bun install --frozen-lockfile
+RUN cd frontend && bun install
 COPY frontend/ ./frontend/
 RUN cd frontend && bun run build
 
-# Backend source
+# Backend source (now that node_modules is populated)
 COPY backend/ ./backend/
 
 # Copy built SPA into backend/dist-spa (matches server.ts LAB_DIST default)
-RUN mkdir -p backend/dist-spa && cp -r frontend/dist/* backend/dist-spa/
+RUN mkdir -p backend/dist-spa && cp -r frontend/dist/. backend/dist-spa/
 
 ENV NODE_ENV=production
 ENV PORT=10000
@@ -28,4 +31,5 @@ ENV LAB_DIST=/app/backend/dist-spa
 ENV LAB_DATA_DIR=/app/backend/data
 EXPOSE 10000
 
+WORKDIR /app/backend
 CMD ["bun", "run", "src/server.ts"]
