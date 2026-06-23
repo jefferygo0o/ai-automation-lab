@@ -434,8 +434,8 @@ api.get("/api/mcp/servers", async (c) => {
 });
 
 // ---- MCP Marketplace (curated catalog) ----
-api.get("/api/mcp/marketplace", (c) => {
-  const installedNames = new Set(await McpStore.list().map((s) => s.name));
+api.get("/api/mcp/marketplace", async (c) => {
+  const installedNames = new Set((await McpStore.list()).map((s) => s.name));
   const entries = MCP_MARKETPLACE.map((e) => ({
     ...e,
     installed: installedNames.has(e.name),
@@ -443,10 +443,10 @@ api.get("/api/mcp/marketplace", (c) => {
   return c.json({ entries, total: entries.length });
 });
 
-api.get("/api/mcp/marketplace/:id", (c) => {
+api.get("/api/mcp/marketplace/:id", async (c) => {
   const entry = findMarketplaceEntry(c.req.param("id"));
   if (!entry) return c.json({ error: "marketplace entry not found" }, 404);
-  const installedNames = new Set(await McpStore.list().map((s) => s.name));
+  const installedNames = new Set((await McpStore.list()).map((s) => s.name));
   return c.json({ ...entry, installed: installedNames.has(entry.name) });
 });
 
