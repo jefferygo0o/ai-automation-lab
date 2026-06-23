@@ -26,7 +26,7 @@ export async function createUser(email: string, password: string): Promise<{ id:
   const now = Date.now();
   // Upsert into our users table — id is the Supabase Auth UUID
   await db.prepare(
-    `INSERT OR IGNORE INTO users (id, email, password_hash, role, created_at) VALUES (?, ?, '', 'user', ?)`
+    `INSERT INTO users (id, email, role, created_at) VALUES (?, ?, 'user', ?) ON CONFLICT (id) DO NOTHING`
   ).run(uid, email.toLowerCase(), now);
   return { id: uid, email: email.toLowerCase() };
 }
