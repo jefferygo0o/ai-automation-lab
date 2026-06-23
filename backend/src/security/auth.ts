@@ -18,9 +18,9 @@ export async function createUser(email: string, password: string): Promise<{ id:
     password,
     email_confirm: true,
   });
-  if (error) {
+  if (error || !data.user) {
     console.error("[auth] Supabase create user failed:", JSON.stringify(error));
-    throw new Error(`Supabase error: ${error.message || JSON.stringify(error)}`);
+    throw new Error(`Supabase error:  ${error?.message ?? "no user returned"}`);
   }
   if (!data.user) {
     throw new Error("Supabase returned no user object");

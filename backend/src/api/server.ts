@@ -61,7 +61,6 @@ api.use("/api/*", async (c, next) => {
 });
 
 api.get("/api/health", (c) => c.json({ ok: true, time: Date.now() }));
-});
 
 // ---- Auth ----
 api.post("/api/auth/login", async (c) => {
