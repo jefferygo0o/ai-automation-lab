@@ -61,10 +61,11 @@ api.use("/api/*", async (c, next) => {
 });
 
 api.get("/api/health", (c) => c.json({ ok: true, time: Date.now() }));
+});
 
 // ---- Auth ----
 api.post("/api/auth/login", async (c) => {
-  const body = async (await c.req.json().catch(() => ({}))) as { email?: string; password?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string };
   if (!body.email || !body.password) return c.json({ error: "email and password required" }, 400);
   const session = await login(body.email, body.password);
   if (!session) return c.json({ error: "invalid credentials" }, 401);
@@ -85,7 +86,9 @@ api.post("/api/auth/register", async (c) => {
   }
   try {
     const user = await createUser(body.email, body.password);
-    if (!user) return c.json({ error: "registration failed — check Supabase config" }, 500);
+    if (!user) {
+      return c.json({ error: "registration failed - supabase did not create the user" }, 500);
+    }
     Audit.record({
       ownerId: user.id,
       actor: "user",
@@ -107,7 +110,7 @@ api.get("/api/agents", async (c) => {
 
 api.post("/api/agents", async (c) => {
   const userId = c.get("userId") as string;
-  const body = async (await c.req.json().catch(() => ({}))) as { name?: string; description?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { name?: string; description?: string };
   if (!body.name) return c.json({ error: "name required" }, 400);
   const agent = await AgentStore.create(userId, body.name, body.description ?? "");
   Audit.record({ ownerId: userId, actor: "user", action: "agent.create", targetId: agent.id, targetType: "agent", metadata: { name: agent.name } });
@@ -131,7 +134,7 @@ api.delete("/api/agents/:id", async (c) => {
 
 api.post("/api/agents/:id/clone", async (c) => {
   const userId = c.get("userId") as string;
-  const body = async (await c.req.json().catch(() => ({}))) as { name?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { name?: string };
   const a = await AgentStore.clone(c.req.param("id"), userId, body.name);
   if (!a) return c.json({ error: "not found" }, 404);
   return c.json({ agent: a });
@@ -247,7 +250,7 @@ api.get("/api/agents/:id/export", async (c) => {
 
 api.post("/api/agents/import", async (c) => {
   const userId = c.get("userId") as string;
-  const body = async (await c.req.json()) as any;
+  const body = (await c.req.json()) as any;
   return c.json({ agent: await AgentStore.importPack(userId, body) });
 });
 
@@ -259,7 +262,7 @@ api.get("/api/chats", async (c) => {
 
 api.post("/api/chats", async (c) => {
   const userId = c.get("userId") as string;
-  const body = async (await c.req.json().catch(() => ({}))) as { agentId: string; title?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { agentId: string; title?: string };
   if (!body.agentId) return c.json({ error: "agentId required" }, 400);
   return c.json({ chat: await ChatStore.create(userId, body.agentId, body.title) });
 });
@@ -375,7 +378,7 @@ api.post("/api/chats/:id/feedback", async (c) => {
   const userId = c.get("userId") as string;
   const chat = await ChatStore.get(c.req.param("id"), userId);
   if (!chat) return c.json({ error: "chat not found" }, 404);
-  const body = async (await c.req.json().catch(() => ({}))) as { messageId?: string; rating?: number; comment?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { messageId?: string; rating?: number; comment?: string };
   if (!body.messageId) return c.json({ error: "messageId required" }, 400);
   if (body.rating !== 1 && body.rating !== -1 && body.rating !== 0) return c.json({ error: "rating must be 1, -1, or 0" }, 400);
   const r = await db.prepare("UPDATE messages SET feedback_rating = ?, feedback_comment = ? WHERE id = ? AND chat_id = ?")
@@ -491,7 +494,7 @@ api.post("/api/mcp/marketplace/:id/install", async (c) => {
 
 api.post("/api/mcp/servers", async (c) => {
   const userId = c.get("userId") as string;
-  const body = async (await c.req.json()) as { name: string; command: string; args?: string[]; env?: Record<string, string> };
+  const body = (await c.req.json()) as { name: string; command: string; args?: string[]; env?: Record<string, string> };
   const server = await McpStore.upsert(body, userId);
   Audit.record({ ownerId: userId, actor: "user", action: "mcp.create", targetId: server.id, targetType: "mcp_server", metadata: { name: server.name, command: server.command } });
   return c.json({ server });
@@ -543,7 +546,7 @@ api.post("/api/agents/:id/memory", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "agent not found" }, 404);
-  const body = async (await c.req.json().catch(() => ({}))) as { kind?: string; key?: string; value?: string; source?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { kind?: string; key?: string; value?: string; source?: string };
   if (!body.kind || !body.key) return c.json({ error: "kind and key required" }, 400);
   const id = await MemoryStore.upsert(agent.id, userId, body.kind as any, body.key, body.value ?? "", body.source ?? "user");
   return c.json({ id });
@@ -553,7 +556,7 @@ api.put("/api/agents/:id/memory/:memId", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "agent not found" }, 404);
-  const body = async (await c.req.json().catch(() => ({}))) as { value?: string; source?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { value?: string; source?: string };
   const ok = await MemoryStore.update(c.req.param("memId"), userId, body.value ?? "", body.source);
   if (!ok) return c.json({ error: "memory item not found" }, 404);
   return c.json({ ok: true });
@@ -628,7 +631,7 @@ api.get("/api/tools", async (c) => {
 
 // ---- Models (presets + all agent models discovered from disk) ----
 api.post("/api/models/fetch", async (c) => {
-  const body = async (await c.req.json()) as { provider: string; baseUrl: string; apiKey: string };
+  const body = (await c.req.json()) as { provider: string; baseUrl: string; apiKey: string };
   let models: Array<{ id: string; name: string }> = [];
   if (body.provider === "mock") {
     models = [

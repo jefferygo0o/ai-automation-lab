@@ -11,20 +11,22 @@ export interface Session {
 export async function createUser(email: string, password: string): Promise<{ id: string; email: string } | null> {
   if (!supabaseAdmin) {
     console.error("[auth] Supabase not configured");
-    return null;
+    throw new Error("Supabase not configured - check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY env vars");
   }
   const { data, error } = await supabaseAdmin.auth.admin.createUser({
     email: email.toLowerCase(),
     password,
     email_confirm: true,
   });
-  if (error || !data.user) {
-    console.error("[auth] Supabase create user failed:", error?.message);
-    return null;
+  if (error) {
+    console.error("[auth] Supabase create user failed:", JSON.stringify(error));
+    throw new Error(`Supabase error: ${error.message || JSON.stringify(error)}`);
+  }
+  if (!data.user) {
+    throw new Error("Supabase returned no user object");
   }
   const uid = data.user.id;
   const now = Date.now();
-  // Upsert into our users table — id is the Supabase Auth UUID
   await db.prepare(
     `INSERT INTO users (id, email, role, created_at) VALUES (?, ?, 'user', ?) ON CONFLICT (id) DO NOTHING`
   ).run(uid, email.toLowerCase(), now);
@@ -36,7 +38,6 @@ export async function login(email: string, password: string): Promise<Session | 
     console.error("[auth] Supabase not configured");
     return null;
   }
-  // Sign in with Supabase
   const { data, error } = await supabaseAdmin.auth.signInWithPassword({
     email: email.toLowerCase(),
     password,
