@@ -1,0 +1,31 @@
+# Render build for AI Automation Lab (Bun runtime).
+# Builds the React SPA, copies it into the backend image, and starts the
+# Bun server which serves both the API and the static SPA.
+
+FROM oven/bun:1.3.11 AS base
+WORKDIR /app
+
+# Backend deps
+COPY backend/package.json backend/bun.lock* ./backend/
+RUN cd backend && bun install --frozen-lockfile --production=false
+
+# Frontend deps + build
+COPY frontend/package.json frontend/bun.lock* ./frontend/
+RUN cd frontend && bun install --frozen-lockfile
+COPY frontend/ ./frontend/
+RUN cd frontend && bun run build
+
+# Backend source
+COPY backend/ ./backend/
+
+# Copy built SPA into backend/dist-spa (matches server.ts LAB_DIST default)
+RUN mkdir -p backend/dist-spa && cp -r frontend/dist/* backend/dist-spa/
+
+ENV NODE_ENV=production
+ENV PORT=10000
+ENV LAB_PROJECT_ROOT=/app
+ENV LAB_DIST=/app/backend/dist-spa
+ENV LAB_DATA_DIR=/app/backend/data
+EXPOSE 10000
+
+CMD ["bun", "run", "src/server.ts"]

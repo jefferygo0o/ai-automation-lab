@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
-import { Agent, Agents, FileEntry, Memory, MemoryItem, SandboxEntry } from "../api";
+import { Agent, Agents, FileEntry, Memory, MemoryItem, SandboxEntry, Secrets, SecretMeta } from "../api";
 import {
   ArrowLeft, Save, History, Trash2, Plus, Folder, File, Terminal,
   Database, RotateCcw, MessageSquare, Play,
@@ -35,6 +35,17 @@ export default function AgentEditPage() {
   const [memVal, setMemVal] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+  const [configForm, setConfigForm] = useState({
+    provider: "mock",
+    baseUrl: "",
+    model: "",
+    apiKeySecret: "",
+    temperature: 0.7,
+    maxTokens: 2048,
+  });
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
 
   async function loadAll() {
     const { agent } = await Agents.get(id);
@@ -48,6 +59,23 @@ export default function AgentEditPage() {
     }
     setFileContents(out);
     setDirty({});
+    // Load secrets for the config form
+    Secrets.list().then(({ secrets }) => setSecrets(secrets)).catch(() => {});
+    // Parse config.json into the form
+    const raw = out["config.json"] || "{}";
+    try {
+      const parsed = JSON.parse(raw);
+      setConfigForm({
+        provider: parsed.provider || "mock",
+        baseUrl: parsed.baseUrl || "",
+        model: parsed.model || "",
+        apiKeySecret: parsed.apiKeySecret || "",
+        temperature: parsed.temperature ?? 0.7,
+        maxTokens: parsed.maxTokens ?? 2048,
+      });
+    } catch {
+      setConfigForm({ provider: "mock", baseUrl: "", model: "", apiKeySecret: "", temperature: 0.7, maxTokens: 2048 });
+    }
     const { history } = await Agents.history(id);
     setHistory(history);
     const { entries } = await Agents.sandboxBrowse(id, ".");
@@ -72,6 +100,95 @@ export default function AgentEditPage() {
     } finally { setSaving(false); }
   }
   function flash(m: string) { setMessage(m); setTimeout(() => setMessage(null), 1800); }
+  function updateCfg<K extends keyof typeof configForm>(field: K, value: (typeof configForm)[K]) {
+    setConfigForm((p) => ({ ...p, [field]: value }));
+    setDirty((p) => ({ ...p, ["config.json"]: true }));
+  }
+  async function saveConfig() {
+    setSaving(true);
+    try {
+      // Preserve existing sandbox, permissions, mcpServers from current config
+      const raw = fileContents["config.json"] || "{}";
+      let existing: any = {};
+      try { existing = JSON.parse(raw); } catch {}
+      const merged = {
+        provider: configForm.provider,
+        baseUrl: configForm.baseUrl,
+        apiKeySecret: configForm.apiKeySecret || null,
+        model: configForm.model,
+        temperature: configForm.temperature,
+        maxTokens: configForm.maxTokens,
+        sandbox: existing.sandbox || { backend: "local", workdir: "/workspace", timeoutMs: 30000, memoryMb: 512, cpus: 1, network: "egress", allowHosts: [] },
+        permissions: existing.permissions || { read_file: "always", list_files: "always", write_file: "ask", execute_command: "ask", http_request: "ask", list_mcp_tools: "always", call_mcp_tool: "ask", update_memory: "always" },
+        mcpServers: existing.mcpServers || [],
+      };
+      const json = JSON.stringify(merged, null, 2);
+      setFileContents((p) => ({ ...p, ["config.json"]: json }));
+      await Agents.writeFile(id, "config.json", json);
+      setDirty((p) => ({ ...p, ["config.json"]: false }));
+      flash("Saved config.json");
+    } finally { setSaving(false); }
+  }
+
+  const PROVIDER_DEFAULTS: Record<string, string> = {
+    openai: "https://api.openai.com/v1",
+    anthropic: "https://api.anthropic.com",
+    groq: "https://api.groq.com/openai/v1",
+    nvidia: "https://integrate.api.nvidia.com/v1",
+    ollama: "http://localhost:11434",
+  };
+
+  const fetchProviderModels = useCallback(async (provider: string, baseUrl: string, apiKey: string) => {
+    if (provider === "mock") {
+      setAvailableModels(["mock"]);
+      return;
+    }
+    let url = "";
+    if (provider === "anthropic") {
+      url = `${baseUrl.replace(/\/$/, "")}/v1/models`;
+    } else if (provider === "ollama") {
+      url = `${baseUrl.replace(/\/$/, "")}/api/tags`;
+    } else {
+      url = `${baseUrl.replace(/\/$/, "")}/models`;
+    }
+    setLoadingModels(true);
+    try {
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (apiKey) {
+        headers["authorization"] = `Bearer ${apiKey}`;
+      } else if (provider === "anthropic") {
+        headers["x-api-key"] = apiKey;
+      }
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+      if (!res.ok) { setAvailableModels([]); return; }
+      const json = await res.json();
+      let models: string[] = [];
+      if (json.data && Array.isArray(json.data)) {
+        models = json.data.map((m: any) => m.id || m.model || "").filter(Boolean);
+      } else if (json.models && Array.isArray(json.models)) {
+        models = json.models.map((m: any) => m.name || m.model || m.id || "").filter(Boolean);
+      }
+      models.sort();
+      setAvailableModels(models);
+    } catch {
+      setAvailableModels([]);
+    } finally {
+      setLoadingModels(false);
+    }
+  }, []);
+
+  // Auto-fetch models when provider or baseUrl changes
+  useEffect(() => {
+    if (configForm.provider === "mock") {
+      setAvailableModels(["mock"]);
+      return;
+    }
+    if (!configForm.baseUrl) return;
+    // Resolve the api key value from secrets or use empty
+    const secret = secrets.find(s => s.name === configForm.apiKeySecret);
+    const apiKey = configForm.apiKeySecret || "";
+    fetchProviderModels(configForm.provider, configForm.baseUrl, apiKey);
+  }, [configForm.provider, configForm.baseUrl]);
 
   async function loadSandbox(path: string) {
     setSandboxPath(path);
@@ -234,12 +351,143 @@ export default function AgentEditPage() {
                 <span>Save</span>
               </button>
             </div>
-            <textarea
-              value={fileContents[activeFile.key] ?? ""}
-              onChange={(e) => markDirty(activeFile.key, e.target.value)}
-              className="textarea-mono flex-1 min-h-[500px]"
-              spellCheck={false}
-            />
+            {active === "config.json" && activeFile ? (
+              <div className="flex-1 max-w-xl space-y-4">
+
+                {/* Provider */}
+                <div className="flex flex-col gap-1">
+                  <label className="label">Provider</label>
+                  <select
+                    className="input"
+                    value={configForm.provider}
+                    onChange={(e) => {
+                      const provider = e.target.value;
+                      const defaultUrl = PROVIDER_DEFAULTS[provider] || "";
+                      setConfigForm((p) => ({ ...p, provider, baseUrl: defaultUrl }));
+                      setDirty((p) => ({ ...p, ["config.json"]: true }));
+                    }}
+                  >
+                    <option value="mock">mock</option>
+                    <option value="openai">openai</option>
+                    <option value="anthropic">anthropic</option>
+                    <option value="groq">groq</option>
+                    <option value="nvidia">nvidia</option>
+                    <option value="ollama">ollama</option>
+                    <option value="custom">custom</option>
+                  </select>
+                </div>
+
+                {/* Base URL */}
+                <div className="flex flex-col gap-1">
+                  <label className="label">Base URL</label>
+                  <input
+                    className="input font-mono"
+                    value={configForm.baseUrl}
+                    onChange={(e) => updateCfg("baseUrl", e.target.value)}
+                    placeholder="https://api.openai.com/v1"
+                  />
+                </div>
+
+                {/* API Key Secret */}
+                <div className="flex flex-col gap-1">
+                  <label className="label">API Key Secret</label>
+                  <select
+                    className="input"
+                    value={configForm.apiKeySecret}
+                    onChange={(e) => updateCfg("apiKeySecret", e.target.value)}
+                  >
+                    <option value="">(none — use env var)</option>
+                    {secrets.length === 0 && <option value="" disabled>— no secrets yet —</option>}
+                    {secrets.map((s) => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Model */}
+                <div className="flex flex-col gap-1">
+                  <label className="label">Model</label>
+                  {configForm.provider === "mock" ? (
+                    <input
+                      className="input font-mono"
+                      value={configForm.model}
+                      onChange={(e) => updateCfg("model", e.target.value)}
+                      placeholder="mock"
+                    />
+                  ) : (
+                    <div className="relative">
+                      <select
+                        className="input pr-8"
+                        value={availableModels.includes(configForm.model) ? configForm.model : ""}
+                        onChange={(e) => updateCfg("model", e.target.value)}
+                      >
+                        {loadingModels && <option value="">Loading models…</option>}
+                        {!loadingModels && availableModels.length === 0 && (
+                          <option value="">(type model name below)</option>
+                        )}
+                        {!loadingModels && availableModels.map((m) => (
+                          <option key={m} value={m}>{m}</option>
+                        ))}
+                      </select>
+                      {loadingModels && (
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2">
+                          <span className="spinner w-3 h-3" />
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {/* Manual override — always visible */}
+                  <input
+                    className="input font-mono mt-1"
+                    value={configForm.model}
+                    onChange={(e) => updateCfg("model", e.target.value)}
+                    placeholder={loadingModels ? "Loading…" : 'Type a model name'}
+                  />
+                </div>
+
+                {/* Temperature + Max Tokens */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="flex flex-col gap-1">
+                    <label className="label">Temperature</label>
+                    <input
+                      className="input"
+                      type="number" min={0} max={2} step={0.1}
+                      value={configForm.temperature}
+                      onChange={(e) => updateCfg("temperature", parseFloat(e.target.value) || 0.7)}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <label className="label">Max Tokens</label>
+                    <input
+                      className="input"
+                      type="number" min={1} step={1}
+                      value={configForm.maxTokens}
+                      onChange={(e) => updateCfg("maxTokens", parseInt(e.target.value) || 2048)}
+                    />
+                  </div>
+                </div>
+
+                {/* Save */}
+                <div className="pt-4 border-t border-line flex items-center gap-3">
+                  <button
+                    onClick={saveConfig}
+                    disabled={!dirty["config.json"] || saving}
+                    className="btn btn-primary"
+                  >
+                    {saving ? <span className="spinner" /> : <Save className="w-3.5 h-3.5 stroke-[1.75]" />}
+                    <span>Save Config</span>
+                  </button>
+                  {message && <span className="text-xs text-moss-600">{message}</span>}
+                </div>
+              </div>
+            ) : (
+              <textarea
+                value={fileContents[activeFile.key] ?? ""}
+                onChange={(e) => markDirty(activeFile.key, e.target.value)}
+                className="textarea-mono flex-1 min-h-[500px]"
+                spellCheck={false}
+              />
+            )}
             <div className="mt-2 text-2xs font-mono text-ink-300 flex items-center gap-3">
               <span>{(fileContents[activeFile.key] ?? "").length} chars</span>
               <span>•</span>

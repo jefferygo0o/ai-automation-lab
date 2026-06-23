@@ -1,1 +1,0 @@
-export default (c) => c.json({ ok: true, ts: Date.now() });

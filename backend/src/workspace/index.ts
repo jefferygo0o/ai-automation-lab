@@ -5,7 +5,7 @@ import { readdirSync, existsSync, lstatSync, readFileSync, writeFileSync, unlink
 import { join, relative, basename } from "path";
 import { Hono } from "hono";
 
-const WORKSPACE_ROOT = "/home/workspace/Projects/ai-automation-lab";
+const WORKSPACE_ROOT = process.env.LAB_PROJECT_ROOT ?? "/home/workspace/Projects/ai-automation-lab";
 
 export interface FileEntry {
   name: string;

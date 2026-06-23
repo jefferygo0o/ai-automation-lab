@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { ChevronRight } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
 import { useChatPanel } from "../contexts/ChatPanelContext";
 import { Chats, Agents } from "../api";
 import type { Chat, Message } from "../api";
@@ -8,6 +8,13 @@ import { useChatControlsStore } from "../stores/chatControlsStore";
 import { getToolMeta, getToolLabel, getToolMedia, getLineDelta, getLiveLineCounts, getLivePreview, getToolPreview } from "../lib/toolMeta";
 import MediaPreview from "./MediaPreview";
 import MarkdownContent from "./MarkdownContent";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "./ui/dropdown-menu";
+import { cn } from "../lib/utils";
 
 interface ToolCallInfo {
   id: string;
@@ -67,6 +74,10 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
   const [expandedRun, setExpandedRun] = useState<Set<string>>(new Set());
   const [expandedTool, setExpandedTool] = useState<Set<string>>(new Set());
+  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<Array<{preview: string; name: string; file: File}>>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -184,7 +195,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
   }
 
   async function send() {
-    if (!input.trim() || streaming || !chatId) return;
+    if ((!input.trim() && attachedFiles.length === 0) || streaming || !chatId) return;
     const text = input;
     setInput(""); setStreaming(true);
     // Ensure fresh state for this new message
@@ -198,12 +209,26 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
 
     const controller = new AbortController();
     streamAbortRef.current = controller;
-    const res = await fetch(`/api/chats/${chatId}/messages`, {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${getToken()}` },
-      body: JSON.stringify({ content: text }),
-      signal: controller.signal,
-    });
+    const useFormData = attachedFiles.length > 0;
+    const res = useFormData
+      ? await (() => {
+          const fd = new FormData();
+          if (text.trim()) fd.append("content", text);
+          for (const af of attachedFiles) fd.append(af.name, af.file);
+          setAttachedFiles([]);
+          return fetch(`/api/chats/${chatId}/messages`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${getToken()}` },
+            body: fd,
+            signal: controller.signal,
+          });
+        })()
+      : await fetch(`/api/chats/${chatId}/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${getToken()}` },
+          body: JSON.stringify({ content: text }),
+          signal: controller.signal,
+        });
     if (!res.ok || !res.body) { setStreaming(false); return; }
     const reader = res.body.getReader();
     const dec = new TextDecoder();
@@ -400,9 +425,6 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
               <button onClick={closeChat} className="text-xs text-ink-400 hover:text-ink-900">✕</button>
               {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
               <span className="text-xs font-medium text-ink-900 truncate flex-1">{chat.title || "Chat"}</span>
-              <select value={chat.activeAgentId ?? chat.agentId} onChange={(e) => { const v = e.target.value; if (chatId) Chats.setActiveAgent(chatId, v); }} className="text-xs max-w-[120px] bg-transparent border border-line rounded-sm px-1 py-0.5">
-                {agentsList.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
             </div>
 
             {/* Messages */}
@@ -616,7 +638,17 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                       >
                                         <Icon size={16} className="shrink-0 text-muted-foreground/50" />
                                         <span className="flex items-center gap-1.5 min-w-(--tool-min-width) flex-shrink-0">
-                                          <span className="text-xs font-medium text-muted-foreground">
+                                          <span
+                                            className={`text-xs font-medium ${isPending ? "text-transparent bg-clip-text relative inline-block" : "text-muted-foreground"}`}
+                                            style={isPending ? {
+                                              backgroundImage: "linear-gradient(90deg, transparent 0%, transparent calc(50% - 22px), #5a5a52 50%, transparent calc(50% + 22px), transparent 100%), linear-gradient(#828278, #828278)",
+                                              backgroundSize: "250% 100%, auto",
+                                              backgroundRepeat: "no-repeat, no-repeat",
+                                              backgroundClip: "text",
+                                              color: "transparent",
+                                              animation: "shimmer-sweep 1.5s linear infinite",
+                                            } as React.CSSProperties : undefined}
+                                          >
                                             {verbCap} {kindNoun}
                                           </span>
                                           {displayCounts && (
@@ -733,11 +765,175 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
 
             {/* Input */}
             <div className="border-t border-line px-3 py-2">
-              <div className="flex items-end gap-2">
-                <textarea ref={inputRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} disabled={streaming} placeholder={streaming ? "…" : "Type message…"} rows={2} className="flex-1 bg-transparent border border-line rounded-sm px-2 py-1.5 text-sm text-ink-900 placeholder:text-ink-300 resize-none outline-none font-sans" />
-                <button onClick={hasRunningTools ? () => streamAbortRef.current?.abort() : send} disabled={!hasRunningTools && !input.trim()} className="shrink-0 px-3 py-1.5 text-xs border border-line rounded-sm text-ink-700 hover:bg-paper-200 disabled:opacity-30">
-                  {hasRunningTools ? "Stop" : "Send"}
-                </button>
+              <div className="bg-paper-100 border border-line rounded-xl overflow-hidden">
+                {/* Attached file previews */}
+                {attachedFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 px-3 pt-3">
+                    {attachedFiles.map((af, i) => (
+                      <div key={i} className="relative group">
+                        {af.file.type.startsWith("image/") ? (
+                          <img
+                            src={af.preview}
+                            alt={af.name}
+                            className="w-16 h-16 object-cover rounded-lg border border-line"
+                          />
+                        ) : (
+                          <div className="w-16 h-16 flex items-center justify-center rounded-lg border border-line bg-paper-200 text-[10px] text-ink-500 truncate px-1 text-center">
+                            {af.name}
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            URL.revokeObjectURL(af.preview);
+                            setAttachedFiles((prev) => prev.filter((_, j) => j !== i));
+                          }}
+                          className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-ink-800 text-paper-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="overflow-y-auto" style={{ maxHeight: "400px" }}>
+                  <textarea
+                    ref={inputRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                    onPaste={(e) => {
+                      const items = e.clipboardData?.items;
+                      if (!items) return;
+                      const newFiles: Array<{preview: string; name: string; file: File}> = [];
+                      for (let i = 0; i < items.length; i++) {
+                        const item = items[i];
+                        if (item.type.startsWith("image/")) {
+                          const file = item.getAsFile();
+                          if (file) {
+                            const ext = file.name.split('.').pop() || 'png';
+                            newFiles.push({
+                              preview: URL.createObjectURL(file),
+                              name: `pasted-image-${Date.now()}.${ext}`,
+                              file,
+                            });
+                          }
+                        }
+                      }
+                      if (newFiles.length > 0) {
+                        e.preventDefault();
+                        setAttachedFiles((prev) => [...prev, ...newFiles]);
+                      }
+                    }}
+                    disabled={streaming}
+                    placeholder={streaming ? "…" : "Type message…"}
+                    className="w-full bg-transparent px-4 py-3 text-sm text-ink-900 placeholder:text-ink-400 resize-none outline-none font-sans min-h-[72px]"
+                    style={{ height: "auto" }}
+                    rows={2}
+                  />
+                </div>
+                <div className="h-12 bg-paper-100 rounded-b-xl flex items-center px-3">
+                  <div className="w-full flex items-center justify-between">
+                    <div className="flex items-center gap-1">
+                      {/* Hidden file input */}
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        multiple
+                        accept="image/*,.pdf,.doc,.docx,.txt,.csv,.json,.md"
+                        className="hidden"
+                        onChange={(e) => {
+                          const files = e.target.files;
+                          if (!files) return;
+                          const newFiles: Array<{preview: string; name: string; file: File}> = [];
+                          for (let i = 0; i < files.length; i++) {
+                            const f = files[i];
+                            newFiles.push({
+                              preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : "",
+                              name: f.name,
+                              file: f,
+                            });
+                          }
+                          setAttachedFiles((prev) => [...prev, ...newFiles]);
+                          e.target.value = "";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="rounded-lg p-2 hover:bg-paper-200 text-ink-400 hover:text-ink-700 transition-colors"
+                        aria-label="Attach files"
+                        title="Attach files or images"
+                      >
+                        <Plus size={18} />
+                      </button>
+                      <div className="h-4 w-px bg-line ml-1" />
+                      {hasRunningTools && (
+                        <div className="flex items-center gap-2" title="AI active">
+                          <div className="text-ink-400/70 leading-none w-6 h-6 flex items-center justify-center">
+                            <span className="font-mono text-sm">⠔</span>
+                          </div>
+                        </div>
+                      )}
+                      <DropdownMenu open={agentDropdownOpen} onOpenChange={setAgentDropdownOpen}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 h-8 pl-1.5 pr-2 text-xs rounded-md text-ink-500 hover:bg-paper-200 transition-colors"
+                          >
+                            <Bot size={13} className="shrink-0 text-ink-400" />
+                            <span className="max-w-[70px] truncate">
+                              {agentsList.find((a) => a.id === (selectedAgentId || chat?.activeAgentId || chat?.agentId))?.name ?? "Agent"}
+                            </span>
+                            <ChevronDown size={11} className="shrink-0 text-ink-400 opacity-40" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" side="top" sideOffset={6} className="min-w-[10rem]">
+                          {agentsList.map((a) => (
+                            <DropdownMenuItem
+                              key={a.id}
+                              onSelect={() => {
+                                setSelectedAgentId(a.id);
+                                if (chatId) Chats.setActiveAgent(chatId, a.id);
+                              }}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Bot size={14} className="shrink-0 text-ink-400" />
+                                <span>{a.name}</span>
+                              </div>
+                              {(selectedAgentId || chat?.activeAgentId || chat?.agentId) === a.id && (
+                                <Check size={14} className="text-ink-700" />
+                              )}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={hasRunningTools ? () => streamAbortRef.current?.abort() : send}
+                      disabled={!hasRunningTools && !input.trim() && attachedFiles.length === 0}
+                      className={cn(
+                        "rounded-lg p-2 hover:bg-paper-200 transition-colors",
+                        "disabled:opacity-30 disabled:hover:bg-transparent"
+                      )}
+                      aria-label="Send message"
+                    >
+                      {hasRunningTools ? (
+                        <span className="text-xs font-medium text-err">■</span>
+                      ) : (
+                        <ArrowRight
+                          size={18}
+                          className={cn(
+                            "text-ink-700 transition-opacity duration-200",
+                            input.trim() || attachedFiles.length > 0 ? "opacity-100" : "opacity-30"
+                          )}
+                        />
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </>

@@ -9,7 +9,7 @@ import { Database } from "bun:sqlite";
 import { readFileSync, existsSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
 
-const DB_PATH = process.env.LAB_DB_PATH ?? "/home/workspace/Projects/ai-automation-lab/backend/data/lab.db";
+const DB_PATH = process.env.LAB_DB_PATH;
 
 const dir = resolve(import.meta.dir || ".");
 // Resolve schema from the source tree — works in dev and relative to the project root

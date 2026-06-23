@@ -298,7 +298,7 @@ function buildChatUrl(cfg: LLMConfig): string {
 }
 
 function buildHeaders(cfg: LLMConfig): Record<string, string> {
-  const h: Record<string, string> = { "content-type": "application/json" };
+  const h: Record<string, string> = { "content-type": "application/json", "accept": "text/event-stream" };
   if (cfg.provider === "anthropic") {
     h["x-api-key"] = cfg.apiKey;
     h["anthropic-version"] = "2023-06-01";
@@ -414,10 +414,12 @@ function parseDelta(json: any): {
       (typeof c?.delta?.reasoning_content === "string" && c.delta.reasoning_content) ||
       (typeof c?.delta?.reasoning === "string" && c.delta.reasoning) ||
       undefined;
-    if (c?.delta?.content !== undefined) {
-      return { reasoning: r, content: c.delta.content as string };
-    }
-    if (r) return { reasoning: r };
+
+    // 🐛 FIX: Check tool_calls BEFORE content. When the model transitions
+    // from text to calling tools, the delta contains content:null (which
+    // passes !== undefined) AND tool_calls in the same chunk. The old code
+    // returned { content: null } on the first check and silently dropped
+    // the tool calls. This reorder ensures tool_calls win when present.
     if (c?.delta?.tool_calls) {
       const calls: Array<{ index: number; id: string; name: string; arguments: string }> = [];
       for (const tc of c.delta.tool_calls) {
@@ -430,6 +432,10 @@ function parseDelta(json: any): {
       }
       return { toolCalls: calls };
     }
+    if (c?.delta?.content !== undefined) {
+      return { reasoning: r, content: c.delta.content as string };
+    }
+    if (r) return { reasoning: r };
     if (c?.finish_reason) return { finishReason: c.finish_reason };
     if (json.usage) return { usage: json.usage };
   }

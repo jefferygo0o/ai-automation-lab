@@ -34,10 +34,10 @@ process.on("uncaughtException", (err) => {
 
 const port = Number(process.env.PORT ?? 7777);
 
-// Resolve dist path — env override, then project-relative
+// Resolve dist path — env override, then derive from project root
 const DIST = process.env.LAB_DIST
   ? process.env.LAB_DIST
-  : "/home/workspace/Projects/ai-automation-lab/frontend/dist";
+  : `${process.env.LAB_PROJECT_ROOT}/frontend/dist`;
 
 // SPA index fallback — read once and keep in memory
 let indexHtml = "";

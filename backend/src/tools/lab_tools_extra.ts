@@ -34,13 +34,13 @@
  */
 
 import { toolRegistry, type ToolContext } from "./registry.ts";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync, unlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync, unlinkSync, realpathSync } from "node:fs";
 import { join, resolve, isAbsolute, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 
-const LAB_BACKEND_ROOT = "/home/workspace/Projects/ai-automation-lab/backend";
+const LAB_BACKEND_ROOT = process.env.LAB_BACKEND_ROOT ?? "/home/workspace/Projects/ai-automation-lab/backend";
 const DATA_DIR = join(LAB_BACKEND_ROOT, "data");
 
 // ---------------------------------------------------------------------------
@@ -60,11 +60,23 @@ function ok(s: string, media?: Array<{ path: string; mime: string; kind: "image"
   return { content: [{ type: "text" as const, text: s }] };
 }
 
-/** Resolve a path inside the agent's sandbox. Throws on escape. */
+/** Resolve a path against the sandbox. Throws on escape. */
 function resolveInSandbox(ctx: ToolContext, p: string): string {
   if (!ctx.sandbox) throw new Error("sandbox not active — agent must be running in a sandbox");
-  if (isAbsolute(p)) return ctx.sandbox.resolveSafe(p);
   return ctx.sandbox.resolveSafe(p);
+}
+
+/** Resolve an absolute path, restricting to DATA_DIR when no sandbox is active. */
+function resolveLabPath(ctx: ToolContext, p: string): string {
+  if (ctx.sandbox) return resolveInSandbox(ctx, p);
+  // No sandbox: restrict to DATA_DIR
+  const abs = isAbsolute(p) ? p : resolve(DATA_DIR, p);
+  const real = realpathSync(abs);
+  const root = realpathSync(DATA_DIR);
+  if (real !== root && !real.startsWith(root + sep)) {
+    throw new Error(`path escapes lab workspace: ${p}`);
+  }
+  return real;
 }
 
 /** Write content into the sandbox at a sandbox-relative path. */
@@ -255,12 +267,10 @@ toolRegistry.register({
     read_entire_file: { type: "boolean", description: "set true to ignore line limits", required: false },
   },
   defaultPermission: "always",
-  async execute(args) {
+  async execute(args, ctx) {
     if (!args.target_file) return err("target_file is required");
     try {
-      let abs: string;
-      if (isAbsolute(args.target_file)) abs = args.target_file;
-      else abs = resolve(LAB_BACKEND_ROOT, args.target_file);
+      const abs = resolveLabPath(ctx, args.target_file);
       if (!existsSync(abs)) return err(`file not found: ${abs}`);
       const stat = statSync(abs);
       if (stat.isDirectory()) return err(`path is a directory, use lab_list_directory: ${abs}`);
@@ -295,16 +305,9 @@ toolRegistry.register({
     if (!args.target_file) return err("target_file is required");
     if (typeof args.content !== "string") return err("content is required (string)");
     try {
-      let abs: string;
-      if (isAbsolute(args.target_file)) {
-        abs = args.target_file;
-        mkdirSync(dirname(abs), { recursive: true });
-        writeFileSync(abs, args.content, "utf8");
-      } else {
-        if (!ctx.sandbox) return err("sandbox not active and path is relative — use an absolute path or run inside a sandbox");
-        ctx.sandbox.writeFile(args.target_file, args.content);
-        abs = ctx.sandbox.resolveSafe(args.target_file);
-      }
+      const abs = resolveLabPath(ctx, args.target_file);
+      mkdirSync(dirname(abs), { recursive: true });
+      writeFileSync(abs, args.content, "utf8");
       return ok(`wrote ${abs} (${args.content.length} chars)`);
     } catch (e: any) {
       return err(`lab_write_file failed: ${e?.message ?? String(e)}`);
@@ -332,17 +335,9 @@ toolRegistry.register({
     if (!args.target_file) return err("target_file is required");
     if (!Array.isArray(args.operations) || args.operations.length === 0) return err("operations must be a non-empty array");
     try {
-      let abs: string;
-      let content: string;
-      if (isAbsolute(args.target_file)) {
-        abs = args.target_file;
-        if (!existsSync(abs)) return err(`file not found: ${abs}`);
-        content = readFileSync(abs, "utf8");
-      } else {
-        if (!ctx.sandbox) return err("sandbox not active and path is relative");
-        content = ctx.sandbox.readFile(args.target_file);
-        abs = ctx.sandbox.resolveSafe(args.target_file);
-      }
+      const abs = resolveLabPath(ctx, args.target_file);
+      if (!existsSync(abs)) return err(`file not found: ${abs}`);
+      let content = readFileSync(abs, "utf8");
       let applied = 0;
       for (const op of args.operations) {
         if (op.op === "replace_block") {
@@ -364,11 +359,7 @@ toolRegistry.register({
         }
         applied++;
       }
-      if (isAbsolute(args.target_file)) {
-        writeFileSync(abs, content, "utf8");
-      } else {
-        ctx.sandbox!.writeFile(args.target_file, content);
-      }
+      writeFileSync(abs, content, "utf8");
       return ok(`applied ${applied} edit(s) to ${abs}`);
     } catch (e: any) {
       return err(`lab_edit_file failed: ${e?.message ?? String(e)}`);
@@ -396,17 +387,9 @@ toolRegistry.register({
     const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
     const model = args.model ?? process.env.OLLAMA_EDIT_MODEL ?? "qwen2.5-coder:7b";
     try {
-      let abs: string;
-      let content: string;
-      if (isAbsolute(args.target_file)) {
-        abs = args.target_file;
-        if (!existsSync(abs)) return err(`file not found: ${abs}`);
-        content = readFileSync(abs, "utf8");
-      } else {
-        if (!ctx.sandbox) return err("sandbox not active and path is relative");
-        content = ctx.sandbox.readFile(args.target_file);
-        abs = ctx.sandbox.resolveSafe(args.target_file);
-      }
+      const abs = resolveLabPath(ctx, args.target_file);
+      if (!existsSync(abs)) return err(`file not found: ${abs}`);
+      const content = readFileSync(abs, "utf8");
       // Ollama /api/generate with the file content + instructions as the prompt.
       const prompt = `You are a code editor. Apply the following instruction to the file and return the FULL new file contents with no commentary, no markdown fences, no preamble.\n\nINSTRUCTION:\n${args.instructions}\n\nFILE (${abs}):\n\`\`\`\n${content}\n\`\`\`\n\nReturn ONLY the new file contents.`;
       const res = await fetch(`${baseUrl}/api/generate`, {
@@ -418,11 +401,7 @@ toolRegistry.register({
       const data = (await res.json()) as { response?: string };
       const newContent = (data.response ?? "").trim();
       if (!newContent) return err("Ollama returned an empty response");
-      if (isAbsolute(args.target_file)) {
-        writeFileSync(abs, newContent, "utf8");
-      } else {
-        ctx.sandbox!.writeFile(args.target_file, newContent);
-      }
+      writeFileSync(abs, newContent, "utf8");
       return ok(`rewrote ${abs} via ${model} (${content.length} -> ${newContent.length} chars)`);
     } catch (e: any) {
       return err(`lab_edit_file_llm failed: ${e?.message ?? String(e)}`);
@@ -441,17 +420,13 @@ toolRegistry.register({
   async execute(args, ctx) {
     if (!args.source_path || !args.dest_path) return err("source_path and dest_path are required");
     try {
-      const src = isAbsolute(args.source_path) ? args.source_path : (ctx.sandbox ? ctx.sandbox.resolveSafe(args.source_path) : resolve(args.source_path));
+      const src = resolveLabPath(ctx, args.source_path);
       if (!existsSync(src)) return err(`source not found: ${src}`);
       const data = readFileSync(src);
-      if (isAbsolute(args.dest_path)) {
-        mkdirSync(dirname(args.dest_path), { recursive: true });
-        writeFileSync(args.dest_path, data);
-      } else {
-        if (!ctx.sandbox) return err("sandbox not active and dest_path is relative");
-        ctx.sandbox.writeFile(args.dest_path, data.toString("utf8"));
-      }
-      return ok(`copied ${src} -> ${args.dest_path}`);
+      const dest = resolveLabPath(ctx, args.dest_path);
+      mkdirSync(dirname(dest), { recursive: true });
+      writeFileSync(dest, data);
+      return ok(`copied ${src} -> ${dest}`);
     } catch (e: any) {
       return err(`lab_copy_file failed: ${e?.message ?? String(e)}`);
     }
@@ -474,7 +449,7 @@ toolRegistry.register({
   async execute(args, ctx) {
     try {
       const target = args.path ?? "workspace";
-      const abs = isAbsolute(target) ? target : (ctx.sandbox ? ctx.sandbox.resolveSafe(target) : resolve(target));
+      const abs = resolveLabPath(ctx, target);
       if (!existsSync(abs)) return err(`path not found: ${abs}`);
       const st = statSync(abs);
       if (!st.isDirectory()) return err(`not a directory: ${abs}`);
@@ -518,7 +493,7 @@ toolRegistry.register({
     if (!args.query) return err("query is required");
     try {
       const target = args.path ?? "/home/workspace/Projects/ai-automation-lab/backend/data";
-      const abs = isAbsolute(target) ? target : (ctx.sandbox ? ctx.sandbox.resolveSafe(target) : resolve(target));
+      const abs = resolveLabPath(ctx, target);
       const max = args.max_results ?? 200;
       // Prefer ripgrep if present
       const rgArgs = ["--line-number", "--no-heading", "--color=never"];
@@ -650,7 +625,7 @@ toolRegistry.register({
     if (!Array.isArray(args.commands) || args.commands.length === 0) return err("commands must be a non-empty array");
     const t = args.timeoutMs ?? 30_000;
     const run = async (c: string, idx: number) => {
-      const r = await ctx.sandbox!.run("bash", ["-c", c]);
+      const r = await ctx.sandbox!.run("bash", ["-c", `cd ${DATA_DIR} && ${c}`]);
       return { idx, c, r };
     };
     const out: { idx: number; c: string; r: Awaited<ReturnType<typeof ctx.sandbox.run>> }[] = [];
@@ -1203,7 +1178,7 @@ toolRegistry.register({
   async execute(args, ctx) {
     if (!args.audio_file_path) return err("audio_file_path is required");
     try {
-      const abs = isAbsolute(args.audio_file_path) ? args.audio_file_path : (ctx.sandbox ? ctx.sandbox.resolveSafe(args.audio_file_path) : resolve(args.audio_file_path));
+      const abs = resolveLabPath(ctx, args.audio_file_path);
       if (!existsSync(abs)) return err(`file not found: ${abs}`);
       // Probe with ffmpeg for metadata
       const probe = await runCommand("ffmpeg", ["-i", abs, "-hide_banner"], { timeoutMs: 5_000 });
@@ -1258,7 +1233,7 @@ toolRegistry.register({
   async execute(args, ctx) {
     if (!args.video_file_path) return err("video_file_path is required");
     try {
-      const abs = isAbsolute(args.video_file_path) ? args.video_file_path : (ctx.sandbox ? ctx.sandbox.resolveSafe(args.video_file_path) : resolve(args.video_file_path));
+      const abs = resolveLabPath(ctx, args.video_file_path);
       if (!existsSync(abs)) return err(`file not found: ${abs}`);
       // Probe with ffmpeg for metadata
       const probe = await runCommand("ffmpeg", ["-i", abs, "-hide_banner"], { timeoutMs: 5_000 });
@@ -1476,7 +1451,7 @@ toolRegistry.register({
       // Resolve all source paths
       const absImages: Buffer[] = [];
       for (const fp of args.filepaths as string[]) {
-        const abs = isAbsolute(fp) ? fp : (ctx.sandbox ? ctx.sandbox.resolveSafe(fp) : resolve(fp));
+        const abs = resolveLabPath(ctx, fp);
         if (!existsSync(abs)) return err(`source image not found: ${abs}`);
         absImages.push(readFileSync(abs));
       }
@@ -1556,7 +1531,7 @@ toolRegistry.register({
     let sourceAbs: string | null = null;
     if (args.filepath && typeof args.filepath === "string") {
       const fp = String(args.filepath);
-      sourceAbs = isAbsolute(fp) ? fp : ctx.sandbox.resolveSafe(fp);
+      sourceAbs = resolveLabPath(ctx, fp);
       if (!existsSync(sourceAbs)) {
         return err(`lab_generate_video: source image not found: ${fp}`);
       }

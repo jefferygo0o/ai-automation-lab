@@ -287,19 +287,59 @@ api.post("/api/chats/:id/active-agent", async (c) => {
   return c.json({ ok: ChatStore.setActiveAgent(c.req.param("id"), userId, agentId) });
 });
 
-// SSE chat streaming
+// SSE chat streaming -- supports JSON ({ content }) and multipart/form-data (content + files[])
 api.post("/api/chats/:id/messages", async (c) => {
   const userId = c.get("userId") as string;
-  const { content } = (await c.req.json()) as { content: string };
-  if (!content) return c.json({ error: "content required" }, 400);
   incrementHourly(userId);
-
+  const chat = ChatStore.get(c.req.param("id"), userId);
+  if (!chat) return c.json({ error: "chat not found" }, 404);
+  const agent = AgentStore.get(chat.activeAgentId ?? chat.agentId, userId);
+  if (!agent) return c.json({ error: "agent not found" }, 404);
+  let content = "";
+  let files: Array<{ name: string; data: string; mime: string }> = [];
+  const ct = c.req.header("content-type") ?? "";
+  if (ct.includes("multipart/form-data")) {
+    const form = await c.req.parseBody();
+    content = (form["content"] as string) ?? "";
+    for (const [key, val] of Object.entries(form)) {
+      if (key === "content") continue;
+      if (val && typeof val === "object" && "name" in val) {
+        const file = val as any;
+        if (file.size && file.size > 0) {
+          const buf = await file.arrayBuffer();
+          const b64 = Buffer.from(buf).toString("base64");
+          files.push({ name: file.name ?? key, data: b64, mime: file.type ?? "application/octet-stream" });
+        }
+      }
+    }
+  } else {
+    const body = (await c.req.json().catch(() => ({}))) as { content?: string };
+    content = body.content ?? "";
+  }
+  if (!content && files.length === 0) {
+    return c.json({ error: "content or files required" }, 400);
+  }
+  if (files.length > 0) {
+    const sandboxOpts = resolveSandboxOptions(agent);
+    const sandbox = createSandbox(sandboxOpts);
+    const { processAttachments } = await import("../chat/attachments.ts");
+    const result = await processAttachments(userId, content, files, sandboxOpts.workdir);
+    content = result.content;
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const safeName = f.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const absPath = sandbox.resolveSafe(safeName);
+      const { writeFileSync, mkdirSync } = await import("node:fs");
+      const { dirname } = await import("node:path");
+      mkdirSync(dirname(absPath), { recursive: true });
+      writeFileSync(absPath, Buffer.from(f.data, "base64"));
+    }
+  }
+  if (!content) content = "(user sent files)";
   const { readable, writable } = new TransformStream();
   const writer = writable.getWriter();
   const encoder = new TextEncoder();
-
   let isDone = false;
-
   const send = async (e: StreamEvent) => {
     try {
       await writer.write(
@@ -308,30 +348,18 @@ api.post("/api/chats/:id/messages", async (c) => {
       if (e.type === "done" || e.type === "error") isDone = true;
     } catch {}
   };
-
-  // Heartbeat — emit a keepalive event every 10s so proxies and the frontend
-  // know the connection is still alive during long thinking phases.
   const heartbeat = setInterval(async () => {
     if (isDone) return;
     try {
       await writer.write(
         encoder.encode(`event: keepalive\ndata: {}\n\n`)
       );
-    } catch {
-      clearInterval(heartbeat);
-    }
+    } catch { clearInterval(heartbeat); }
   }, 10_000);
-
-  // Cancel heartbeat when stream ends
   const clearHb = () => { clearInterval(heartbeat); };
-
   runAgentTurn(userId, c.req.param("id"), content, send)
     .catch((e: any) => send({ type: "error", message: e?.message ?? String(e) }))
-    .finally(() => {
-      clearHb();
-      writer.close().catch(() => {});
-    });
-
+    .finally(() => { clearHb(); writer.close().catch(() => {}); });
   return new Response(readable, {
     headers: {
       "Content-Type": "text/event-stream",
@@ -341,7 +369,6 @@ api.post("/api/chats/:id/messages", async (c) => {
     },
   });
 });
-
 // ---- Chat feedback (thumbs up/down on assistant messages) ----
 api.post("/api/chats/:id/feedback", async (c) => {
   const userId = c.get("userId") as string;
@@ -599,7 +626,61 @@ api.get("/api/tools", (c) => {
 });
 
 // ---- Models (presets + all agent models discovered from disk) ----
-api.get("/api/models", (c) => {
+api.post("/api/models/fetch", async (c) => {
+  const body = (await c.req.json()) as { provider: string; baseUrl: string; apiKey: string };
+  let models: Array<{ id: string; name: string }> = [];
+  if (body.provider === "mock") {
+    models = [
+      { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+      { id: "gpt-4o", name: "GPT-4o" },
+      { id: "o3-mini", name: "o3-mini" },
+      { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
+      { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" },
+      { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+      { id: "llama-3.3-70b-versatile", name: "Llama 3.3 70B" },
+      { id: "deepseek-reasoner", name: "DeepSeek R1" },
+    ];
+  } else if (body.provider === "openai" || body.provider === "groq" || body.provider === "custom") {
+    try {
+      const url = `${body.baseUrl.replace(/\/+$/, "")}/models`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${body.apiKey}` },
+      });
+      if (res.ok) {
+        const data = await res.json() as any;
+        models = (data.data ?? data.models ?? []).map((m: any) => ({
+          id: m.id || m.name,
+          name: m.name || m.id,
+        }));
+      }
+    } catch {}
+  } else if (body.provider === "anthropic") {
+    try {
+      const url = `${body.baseUrl.replace(/\/+$/, "")}/v1/models`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${body.apiKey}` },
+      });
+      if (res.ok) {
+        const data = await res.json() as any;
+        models = (data.data ?? []).map((m: any) => ({ id: m.id, name: m.display_name || m.id }));
+      }
+    } catch {}
+  } else if (body.provider === "ollama") {
+    try {
+      const url = `${body.baseUrl.replace(/\/+$/, "")}/api/tags`;
+      const res = await fetch(url, {
+        headers: { Authorization: `Bearer ${body.apiKey}` },
+      });
+      if (res.ok) {
+        const data = await res.json() as any;
+        models = (data.models ?? []).map((m: any) => ({ id: m.name, name: m.name }));
+      }
+    } catch {}
+  }
+  return c.json({ models });
+});api.get("/api/models", (c) => {
   const MODELS = [
     { id: "mock", name: "Mock (local test)", provider: "mock", model: "mock" },
     { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", provider: "openai", model: "gpt-4.1-mini" },

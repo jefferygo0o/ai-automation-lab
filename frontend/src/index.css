@@ -240,3 +240,13 @@
   0% { background-position: 200% center; }
   100% { background-position: -200% center; }
 }
+
+.shimmer-text {
+  animation: shimmer-pulse 1.6s ease-in-out infinite;
+  color: inherit;
+}
+
+@keyframes shimmer-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}

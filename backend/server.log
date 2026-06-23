@@ -1,0 +1,47 @@
+[db] open /home/workspace/Projects/ai-automation-lab/backend/data/lab.sqlite
+[lab] API + UI on :7777 (dist=/home/workspace/Projects/ai-automation-lab/frontend/dist)
+[sse] write run_started
+[runtime] LLM config baseUrl=https://opencode.ai/zen/v1 model=big-pickle hasKey=yes (sk-h44NU...eQ65)
+[runtime] step= 0
+[runtime] calling LLM...
+[sse] write token
+[sse] write message
+[runtime] FINALLY
+[sse] write done
+[sse] write run_started
+[runtime] LLM config baseUrl=https://opencode.ai/zen/v1 model=big-pickle hasKey=yes (sk-h44NU...eQ65)
+[runtime] step= 0
+[runtime] calling LLM...
+[sse] write token
+[sse] write message
+[runtime] FINALLY
+[sse] write done
+[sse] write run_started
+[runtime] LLM config baseUrl=https://opencode.ai/zen/v1 model=big-pickle hasKey=yes (sk-h44NU...eQ65)
+[runtime] step= 0
+[runtime] calling LLM...
+[sse] write token
+[sse] write message
+[runtime] FINALLY
+[sse] write done
+[sse] write run_started
+[runtime] LLM config baseUrl=https://opencode.ai/zen/v1 model=big-pickle hasKey=yes (sk-h44NU...eQ65)
+[runtime] step= 0
+[runtime] calling LLM...
+[sse] write token
+[sse] write tool_call
+[sse] write tool_call
+[sse] write tool_call
+[sse] write tool_call
+[sse] write tool_call
+[sse] write tool_result
+[sse] write tool_result
+[sse] write tool_result
+[sse] write tool_result
+[sse] write tool_result
+[runtime] step= 1
+[runtime] calling LLM...
+[sse] write token
+[sse] write message
+[runtime] FINALLY
+[sse] write done
