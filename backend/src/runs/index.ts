@@ -153,20 +153,20 @@ export const RunStore = {
     ).run(usage.promptTokens ?? 0, usage.completionTokens ?? 0, usage.totalTokens ?? 0, id);
   },
 
-  get(id: string, userId?: string): Run | null {
+  async get(id: string, userId?: string): Run | null {
     const row = userId
       ? (await db.prepare(`SELECT * FROM runs WHERE id = ? AND user_id = ?`).get(id, userId) as RunRow | undefined)
       : (await db.prepare(`SELECT * FROM runs WHERE id = ?`).get(id) as RunRow | undefined);
     return row ? rowToRun(row) : null;
   },
 
-  listForChat(chatId: string, limit = 50): Run[] {
+  async listForChat(chatId: string, limit = 50): Run[] {
     return await (await db.prepare(
       `SELECT * FROM runs WHERE chat_id = ? ORDER BY started_at DESC LIMIT ?`,
     ).all(chatId, limit) as RunRow[]).map(rowToRun);
   },
 
-  listForUser(userId: string, limit = 100): Run[] {
+  async listForUser(userId: string, limit = 100): Run[] {
     return await (await db.prepare(
       `SELECT * FROM runs WHERE user_id = ? ORDER BY started_at DESC LIMIT ?`,
     ).all(userId, limit) as RunRow[]).map(rowToRun);
@@ -193,7 +193,7 @@ export const RunStore = {
     ).run(status, JSON.stringify(result ?? null), error, now, dur, id);
   },
 
-  listForRun(runId: string): ToolInvocation[] {
+  async listForRun(runId: string): ToolInvocation[] {
     return await (await db.prepare(
       `SELECT * FROM tool_invocations WHERE run_id = ? ORDER BY started_at ASC`,
     ).all(runId) as ToolRow[]).map(rowToTool);

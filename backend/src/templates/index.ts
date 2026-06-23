@@ -36,7 +36,7 @@ export interface AgentTemplate {
 const BUILTIN_DIR = resolve(import.meta.dir, "builtin");
 
 export const Templates = {
-  list(): AgentTemplate[] {
+  async list(): AgentTemplate[] {
     const out: AgentTemplate[] = [];
     if (existsSync(BUILTIN_DIR)) {
       for (const f of readdirSync(BUILTIN_DIR)) {
@@ -64,7 +64,7 @@ export const Templates = {
     return out;
   },
 
-  get(id: string): AgentTemplate | null {
+  async get(id: string): AgentTemplate | null {
     return Templates.list().find((t) => t.id === id) ?? null;
   },
 
@@ -88,7 +88,7 @@ export const Templates = {
   },
 
   /** Apply a template to a fresh agent directory + record metadata. */
-  materialize(templateId: string, agentId: string) {
+  async materialize(templateId: string, agentId: string) {
     const t = Templates.get(templateId);
     if (!t) throw new Error(`template not found: ${templateId}`);
     return t;

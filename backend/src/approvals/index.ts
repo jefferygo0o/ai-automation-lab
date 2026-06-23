@@ -74,7 +74,7 @@ function rowToApproval(r: Row): ApprovalRequest {
 const DEFAULT_TTL_MS = 5 * 60_000; // 5 min to approve before auto-expire
 
 export const Approvals = {
-  create(input: {
+  async create(input: {
     ownerId: string;
     chatId: string;
     runId: string;
@@ -107,24 +107,24 @@ export const Approvals = {
     return Approvals.get(id)!;
   },
 
-  get(id: string): ApprovalRequest | null {
+  async get(id: string): ApprovalRequest | null {
     const row = await db.prepare(`SELECT * FROM approval_requests WHERE id = ?`).get(id) as Row | undefined;
     return row ? rowToApproval(row) : null;
   },
 
-  getForRun(runId: string): ApprovalRequest[] {
+  async getForRun(runId: string): ApprovalRequest[] {
     return await (await db.prepare(
       `SELECT * FROM approval_requests WHERE run_id = ? ORDER BY created_at DESC`
     ).all(runId) as Row[]).map(rowToApproval);
   },
 
-  listPending(ownerId: string): ApprovalRequest[] {
+  async listPending(ownerId: string): ApprovalRequest[] {
     return await (await db.prepare(
       `SELECT * FROM approval_requests WHERE owner_id = ? AND status = 'pending' AND expires_at > ? ORDER BY created_at DESC`
     ).all(ownerId, Date.now()) as Row[]).map(rowToApproval);
   },
 
-  resolve(id: string, decision: "approved" | "rejected" | "auto-approved", response?: string): ApprovalRequest | null {
+  async resolve(id: string, decision: "approved" | "rejected" | "auto-approved", response?: string): ApprovalRequest | null {
     const now = Date.now();
     const r = await db.prepare(
       `UPDATE approval_requests SET status = ?, response = ?, resolved_at = ? WHERE id = ? AND status = 'pending'`

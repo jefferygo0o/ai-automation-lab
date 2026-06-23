@@ -68,7 +68,7 @@ export const MemoryStore = {
     return id;
   },
 
-  list(agentId: string, ownerUserId: string, kind?: MemoryKind | string, limit = 50): MemoryItem[] {
+  async list(agentId: string, ownerUserId: string, kind?: MemoryKind | string, limit = 50): MemoryItem[] {
     const params: (string | number)[] = [agentId, ownerUserId];
     let where = `agent_id = ? AND owner_user_id = ?`;
     if (kind) {
