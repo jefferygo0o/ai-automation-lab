@@ -147,8 +147,8 @@ export const ChatStore = {
     return { id, chatId, createdAt: now, ...m };
   },
 
-  listMessages(chatId: string, ownerId: string): Message[] {
-    const chat = ChatStore.get(chatId, ownerId);
+  async listMessages(chatId: string, ownerId: string): Promise<Message[]> {
+    const chat = await ChatStore.get(chatId, ownerId);
     if (!chat) return [];
     return await (await db.prepare(
       `SELECT id, chat_id, role, content, tool_calls, tool_call_id, name, run_id, created_at
