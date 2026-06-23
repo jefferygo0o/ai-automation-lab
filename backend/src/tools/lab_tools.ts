@@ -230,7 +230,7 @@ toolRegistry.register({
     try {
       switch (args.action) {
         case "list": {
-          const rows = db.query("SELECT * FROM automations WHERE owner_id = ? ORDER BY created_at DESC").all(userId) as any[];
+          const rows = await db.query("SELECT * FROM automations WHERE owner_id = ? ORDER BY created_at DESC").all(userId) as any[];
           if (!rows.length) return text("(no automations)");
           const lines = rows.map((r) => {
             const a = formatAutoRow(r);
@@ -240,7 +240,7 @@ toolRegistry.register({
         }
         case "get": {
           if (!args.id) return err("id required for get");
-          const row = db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?").get(args.id, userId) as any;
+          const row = await db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?").get(args.id, userId) as any;
           if (!row) return err("automation not found");
           const a = formatAutoRow(row);
           return text(
@@ -253,7 +253,7 @@ toolRegistry.register({
           const now = Date.now();
           const agentId = args.agentId ?? "";
           const rrule = args.rrule ?? "FREQ=DAILY;INTERVAL=1";
-          db.query(
+          await db.query(
             `INSERT INTO automations (id, owner_id, name, agent_id, rrule, prompt, active, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
           ).run(id, userId, args.name, agentId, rrule, args.instruction, 1, now, now);
@@ -261,7 +261,7 @@ toolRegistry.register({
         }
         case "edit": {
           if (!args.id) return err("id required for edit");
-          const existing = db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?").get(args.id, userId) as any;
+          const existing = await db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?").get(args.id, userId) as any;
           if (!existing) return err("automation not found");
           const sets: string[] = [];
           const vals: any[] = [];
@@ -273,20 +273,20 @@ toolRegistry.register({
           if (sets.length === 0) return err("nothing to update");
           sets.push("updated_at = ?");
           vals.push(Date.now(), args.id, userId);
-          db.query(`UPDATE automations SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals);
+          await db.query(`UPDATE automations SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals);
           return text(`Updated automation: ${args.id}`);
         }
         case "delete": {
           if (!args.id) return err("id required for delete");
-          const result = db.query("DELETE FROM automations WHERE id = ? AND owner_id = ?").run(args.id, userId);
+          const result = await db.query("DELETE FROM automations WHERE id = ? AND owner_id = ?").run(args.id, userId);
           return text(result.changes > 0 ? `Deleted automation: ${args.id}` : "automation not found");
         }
         case "toggle": {
           if (!args.id) return err("id required for toggle");
-          const row = db.query("SELECT active FROM automations WHERE id = ? AND owner_id = ?").get(args.id, userId) as any;
+          const row = await db.query("SELECT active FROM automations WHERE id = ? AND owner_id = ?").get(args.id, userId) as any;
           if (!row) return err("automation not found");
           const newActive = args.active !== undefined ? (args.active ? 1 : 0) : row.active ? 0 : 1;
-          db.query("UPDATE automations SET active = ?, updated_at = ? WHERE id = ?").run(newActive, Date.now(), args.id);
+          await db.query("UPDATE automations SET active = ?, updated_at = ? WHERE id = ?").run(newActive, Date.now(), args.id);
           return text(`Toggled automation ${args.id}: ${newActive ? "ACTIVE" : "PAUSED"}`);
         }
         default:

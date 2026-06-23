@@ -69,7 +69,7 @@ toolRegistry.register({
     try {
       switch (args.action) {
         case "list": {
-          const rows = db.query(
+          const rows = await db.query(
             "SELECT id, owner_id, path, type, code, is_public, updated_at FROM space_routes WHERE owner_id = ? ORDER BY updated_at DESC"
           ).all(userId) as any[];
           return text(
@@ -81,7 +81,7 @@ toolRegistry.register({
         }
         case "read": {
           if (!args.id) return err("id required for read");
-          const row = db.query(
+          const row = await db.query(
             "SELECT id, owner_id, path, type, code, is_public, updated_at FROM space_routes WHERE id = ? AND owner_id = ?"
           ).get(args.id, userId) as any;
           if (!row) return err(`route not found: ${args.id}`);
@@ -92,20 +92,20 @@ toolRegistry.register({
           if (!args.type) return err("type required for create (page or api)");
           if (args.code === undefined) return err("code required for create");
           if (args.type !== "page" && args.type !== "api") return err("type must be 'page' or 'api'");
-          const existing = db.query(
+          const existing = await db.query(
             "SELECT id FROM space_routes WHERE owner_id = ? AND path = ?"
           ).get(userId, args.path);
           if (existing) return err(`route already exists at path: ${args.path}`);
           const id = `route_${nanoid()}`;
           const now = Date.now();
-          db.query(
+          await db.query(
             "INSERT INTO space_routes (id, owner_id, path, type, code, is_public, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
           ).run(id, userId, args.path, args.type, args.code, args.isPublic ? 1 : 0, now, now);
           return text(`Created ${args.type} route at ${args.path}${args.isPublic ? ' (public)' : ''}\nLive URL: ${liveUrl(userId, args.path)}\nid: ${id}`);
         }
         case "update": {
           if (!args.id) return err("id required for update");
-          const existing = db.query(
+          const existing = await db.query(
             "SELECT id FROM space_routes WHERE id = ? AND owner_id = ?"
           ).get(args.id, userId);
           if (!existing) return err(`route not found: ${args.id}`);
@@ -121,15 +121,15 @@ toolRegistry.register({
           if (sets.length === 0) return err("nothing to update — provide path, code, type, or isPublic");
           sets.push("updated_at = ?"); vals.push(Date.now());
           vals.push(args.id, userId);
-          db.query(`UPDATE space_routes SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals);
+          await db.query(`UPDATE space_routes SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals);
           invalidateApiCache(args.id);
-          const row = db.query("SELECT owner_id, path FROM space_routes WHERE id = ?").get(args.id) as any;
+          const row = await db.query("SELECT owner_id, path FROM space_routes WHERE id = ?").get(args.id) as any;
           return text(`Updated route ${args.id}\nLive URL: ${liveUrl(row.owner_id, row.path)}`);
         }
         case "delete": {
           if (!args.id) return err("id required for delete");
           invalidateApiCache(args.id);
-          const result = db.query(
+          const result = await db.query(
             "DELETE FROM space_routes WHERE id = ? AND owner_id = ?"
           ).run(args.id, userId);
           if (!result.changes) return err(`route not found: ${args.id}`);
@@ -137,14 +137,14 @@ toolRegistry.register({
         }
         case "publish": {
           if (!args.id) return err("id required for publish");
-          const row = db.query(
+          const row = await db.query(
             "SELECT id, owner_id, path, type, is_public FROM space_routes WHERE id = ? AND owner_id = ?"
           ).get(args.id, userId) as any;
           if (!row) return err(`route not found: ${args.id}`);
 
           // Set is_public=1 so the route is accessible without auth.
           const now = Date.now();
-          db.query(
+          await db.query(
             "UPDATE space_routes SET is_public = 1, updated_at = ? WHERE id = ? AND owner_id = ?"
           ).run(now, args.id, userId);
 
@@ -174,7 +174,7 @@ toolRegistry.register({
   defaultPermission: "ask",
   async execute(args, ctx) {
     const userId = ctx.ownerId;
-    const row = db.query(
+    const row = await db.query(
       "SELECT owner_id, path, type FROM space_routes WHERE id = ? AND owner_id = ?"
     ).get(args.id, userId) as any;
     if (!row) return err(`route not found: ${args.id}`);

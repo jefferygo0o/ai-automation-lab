@@ -33,7 +33,7 @@ templatesApi.post("/:id/instantiate", async (c) => {
 
   const body = (await c.req.json().catch(() => ({}))) as { name?: string; installSkills?: boolean };
   const agentName = body.name?.trim() || t.name;
-  const agent = AgentStore.create(userId, agentName, t.description);
+  const agent = await AgentStore.create(userId, agentName, t.description);
 
   // Write the markdown files
   const files: Array<[string, string]> = [
@@ -49,7 +49,7 @@ templatesApi.post("/:id/instantiate", async (c) => {
 
   // Apply config
   if (t.config && Object.keys(t.config).length) {
-    AgentStore.updateConfig(agent.id, userId, t.config);
+    await AgentStore.updateConfig(agent.id, userId, t.config);
   }
 
   Audit.record({ ownerId: userId, actor: "user", action: "agent.create", targetId: agent.id, targetType: "agent", metadata: { source: "template", templateId: t.id } });

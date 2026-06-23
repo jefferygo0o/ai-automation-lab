@@ -51,14 +51,14 @@ export async function runAgentTurn(
   opts: RunOptions = {}
 ): Promise<void> {
   const start = Date.now();
-  const chat = ChatStore.get(chatId, ownerId);
+  const chat = await ChatStore.get(chatId, ownerId);
   if (!chat) {
     emit({ type: "error", message: "chat not found" });
     emit({ type: "done" });
     return;
   }
   const activeAgentId = chat.activeAgentId ?? chat.agentId;
-  const agent = AgentStore.get(activeAgentId, ownerId);
+  const agent = await AgentStore.get(activeAgentId, ownerId);
   if (!agent) {
     emit({ type: "error", message: "agent not found" });
     emit({ type: "done" });
@@ -66,10 +66,10 @@ export async function runAgentTurn(
   }
 
   // Persist user message
-  ChatStore.addMessage(chatId, { role: "user", content: userMessage });
+  await ChatStore.addMessage(chatId, { role: "user", content: userMessage });
 
   // Open a Run so the UI can show live execution logs.
-  const run = RunStore.start(chatId, ownerId, activeAgentId);
+  const run = await RunStore.start(chatId, ownerId, activeAgentId);
   emit({ type: "run_started", runId: run.id });
 
   // Build tool spec from registry

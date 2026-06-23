@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync } from "fs";
 import { join, resolve } from "path";
 
 const DEFAULT_URL = "postgresql://postgres:postgres@localhost:5432/lab";
@@ -19,25 +19,51 @@ function convertParams(sql: string, params?: any[]): [string, any[]] {
 }
 
 function convertInsertOrReplace(sql: string): string {
-  return sql.replace(/INSERT\s+OR\s+REPLACE\s+INTO/gi, "INSERT INTO");
+  // Handle INSERT OR REPLACE → ON CONFLICT DO UPDATE SET
+  // Preserves the original VALUES clause (may contain literals like 'user' mixed with ? params)
+  const replaceMatch = sql.match(
+    /INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i
+  );
+  if (replaceMatch) {
+    const table = replaceMatch[1];
+    const cols = replaceMatch[2].split(",").map(c => c.trim().replace(/["`]/g, ""));
+    const assigns = cols.map(c => `${c} = EXCLUDED.${c}`).join(", ");
+    // Strip OR REPLACE and append ON CONFLICT — VALUES clause is left intact
+    // (convertParams converts ? → $n later)
+    const stripped = sql.replace(/INSERT\s+OR\s+REPLACE\s+INTO/i, "INSERT INTO");
+    return `${stripped} ON CONFLICT DO UPDATE SET ${assigns}`;
+  }
+
+  // Handle INSERT OR IGNORE → ON CONFLICT DO NOTHING
+  // Preserves the original VALUES clause — just strips OR IGNORE
+  const ignoreMatch = sql.match(
+    /INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i
+  );
+  if (ignoreMatch) {
+    const stripped = sql.replace(/INSERT\s+OR\s+IGNORE\s+INTO/i, "INSERT INTO");
+    return `${stripped} ON CONFLICT DO NOTHING`;
+  }
+
+  // Fallback — just strip OR REPLACE/IGNORE
+  return sql.replace(/INSERT\s+OR\s+(REPLACE|IGNORE)\s+INTO/gi, "INSERT INTO");
 }
 
 class PGStatement<T = any> {
   private pool: Pool;
   private sql: string;
   constructor(pool: Pool, sql: string) {
-    this.pool = pool;
     this.sql = convertInsertOrReplace(sql);
+    this.pool = pool;
   }
-  all(params?: any[]): Promise<T[]> {
+  all(...params: any[]): Promise<T[]> {
     const [sql, p] = convertParams(this.sql, params);
     return this.pool.query(sql, p).then(r => r.rows as T[]);
   }
-  get(params?: any[]): Promise<T | null> {
+  get(...params: any[]): Promise<T | null> {
     const [sql, p] = convertParams(this.sql, params);
     return this.pool.query(sql, p).then(r => (r.rows[0] ?? null) as T | null);
   }
-  run(params?: any[]): Promise<{ changes: number; lastInsertRowid: number }> {
+  run(...params: any[]): Promise<{ changes: number; lastInsertRowid: number }> {
     const [sql, p] = convertParams(this.sql, params);
     return this.pool.query(sql, p).then(r => ({
       changes: r.rowCount ?? 0,

@@ -6,7 +6,8 @@
  * Boots the API server on $PORT (default 8787). Initializes the database,
  * seeds built-in skills, and serves the frontend static build.
  */
-import "./db/index.ts"; // initialize DB + run schema
+import "./db/index.ts"; // initialize DB
+import { initSchema } from "./db/index.ts";
 import "./security/auth.ts";
 import "./tools/builtin.ts";
 import "./tools/skill_tools.ts";
@@ -23,6 +24,7 @@ import { join } from "path";
 
 Skills.init();
 Skills.seedUserSkills();
+await initSchema(); // run PG schema migrations
 AutomationScheduler.start();
 
 const port = Number(process.env.PORT ?? 8787);

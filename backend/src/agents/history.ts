@@ -29,24 +29,24 @@ function rowToEntry(r: HistoryRow): HistoryEntry {
 }
 
 export const HistoryStore = {
-  record(agentId: string, filename: string, content: string): HistoryEntry {
+  async record(agentId: string, filename: string, content: string): HistoryEntry {
     const id = `hist_${nanoid(12)}`;
     const now = Date.now();
-    db.prepare(
+    await db.prepare(
       `INSERT INTO agent_file_history (id, agent_id, filename, content, created_at) VALUES (?, ?, ?, ?, ?)`,
     ).run(id, agentId, filename, content, now);
     return { id, agentId, filename, content, createdAt: now };
   },
 
-  list(agentId: string, file?: string): HistoryEntry[] {
+  async list(agentId: string, file?: string): Promise<HistoryEntry[]> {
     const rows = file
-      ? (db.prepare(`SELECT * FROM agent_file_history WHERE agent_id = ? AND filename = ? ORDER BY created_at DESC`).all(agentId, file) as HistoryRow[])
-      : (db.prepare(`SELECT * FROM agent_file_history WHERE agent_id = ? ORDER BY created_at DESC`).all(agentId) as HistoryRow[]);
+      ? (await db.prepare(`SELECT * FROM agent_file_history WHERE agent_id = ? AND filename = ? ORDER BY created_at DESC`).all(agentId, file) as HistoryRow[])
+      : (await db.prepare(`SELECT * FROM agent_file_history WHERE agent_id = ? ORDER BY created_at DESC`).all(agentId) as HistoryRow[]);
     return rows.map(rowToEntry);
   },
 
-  get(id: string): HistoryEntry | null {
-    const row = db.prepare(`SELECT * FROM agent_file_history WHERE id = ?`).get(id) as HistoryRow | undefined;
+  async get(id: string): Promise<HistoryEntry | null> {
+    const row = await db.prepare(`SELECT * FROM agent_file_history WHERE id = ?`).get(id) as HistoryRow | undefined;
     return row ? rowToEntry(row) : null;
   },
 };

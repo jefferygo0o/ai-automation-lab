@@ -86,50 +86,50 @@ function rowToMsg(r: MsgRow): Message {
 }
 
 export const ChatStore = {
-  create(ownerId: string, agentId: string, title?: string): Chat {
+  async create(ownerId: string, agentId: string, title?: string): Chat {
     const id = `chat_${nanoid(12)}`;
     const now = Date.now();
     const t = title ?? "New chat";
-    db.prepare(
+    await db.prepare(
       `INSERT INTO chats (id, agent_id, owner_id, title, active_agent_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(id, agentId, ownerId, t, agentId, now, now);
     return { id, agentId, ownerId, title: t, activeAgentId: agentId, createdAt: now, updatedAt: now };
   },
 
-  list(ownerId: string): Chat[] {
-    return (db.prepare(`SELECT * FROM chats WHERE owner_id = ? ORDER BY updated_at DESC`).all(ownerId) as ChatRow[]).map(rowToChat);
+  async list(ownerId: string): Promise<Chat[]> {
+    return (await db.prepare(`SELECT * FROM chats WHERE owner_id = ? ORDER BY updated_at DESC`).all(ownerId) as ChatRow[]).map(rowToChat);
   },
 
-  get(id: string, ownerId: string): Chat | null {
-    const r = db.prepare(`SELECT * FROM chats WHERE id = ? AND owner_id = ?`).get(id, ownerId) as ChatRow | undefined;
+  async get(id: string, ownerId: string): Promise<Chat | null> {
+    const r = await db.prepare(`SELECT * FROM chats WHERE id = ? AND owner_id = ?`).get(id, ownerId) as ChatRow | undefined;
     return r ? rowToChat(r) : null;
   },
 
-  setActiveAgent(chatId: string, ownerId: string, agentId: string): boolean {
-    const r = db.prepare(
+  async setActiveAgent(chatId: string, ownerId: string, agentId: string): boolean {
+    const r = await db.prepare(
       `UPDATE chats SET active_agent_id = ?, updated_at = ? WHERE id = ? AND owner_id = ?`
     ).run(agentId, Date.now(), chatId, ownerId);
     return r.changes > 0;
   },
 
-  rename(chatId: string, ownerId: string, title: string): boolean {
-    const r = db.prepare(
+  async rename(chatId: string, ownerId: string, title: string): boolean {
+    const r = await db.prepare(
       `UPDATE chats SET title = ?, updated_at = ? WHERE id = ? AND owner_id = ?`
     ).run(title, Date.now(), chatId, ownerId);
     return r.changes > 0;
   },
 
-  delete(chatId: string, ownerId: string): boolean {
-    db.prepare(`DELETE FROM messages WHERE chat_id = ?`).run(chatId);
-    const r = db.prepare(`DELETE FROM chats WHERE id = ? AND owner_id = ?`).run(chatId, ownerId);
+  async delete(chatId: string, ownerId: string): boolean {
+    await db.prepare(`DELETE FROM messages WHERE chat_id = ?`).run(chatId);
+    const r = await db.prepare(`DELETE FROM chats WHERE id = ? AND owner_id = ?`).run(chatId, ownerId);
     return r.changes > 0;
   },
 
-  addMessage(chatId: string, m: Omit<Message, "id" | "chatId" | "createdAt">): Message {
+  async addMessage(chatId: string, m: Omit<Message, "id" | "chatId" | "createdAt">): Message {
     const id = `msg_${nanoid(12)}`;
     const now = Date.now();
-    db.prepare(
+    await db.prepare(
       `INSERT INTO messages (id, chat_id, role, content, tool_calls, tool_call_id, name, run_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
@@ -143,14 +143,14 @@ export const ChatStore = {
       m.runId ?? null,
       now
     );
-    db.prepare(`UPDATE chats SET updated_at = ? WHERE id = ?`).run(now, chatId);
+    await db.prepare(`UPDATE chats SET updated_at = ? WHERE id = ?`).run(now, chatId);
     return { id, chatId, createdAt: now, ...m };
   },
 
   listMessages(chatId: string, ownerId: string): Message[] {
     const chat = ChatStore.get(chatId, ownerId);
     if (!chat) return [];
-    return (db.prepare(
+    return await (await db.prepare(
       `SELECT id, chat_id, role, content, tool_calls, tool_call_id, name, run_id, created_at
        FROM messages WHERE chat_id = ? ORDER BY created_at ASC`
     ).all(chatId) as MsgRow[]).map(rowToMsg);

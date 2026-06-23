@@ -48,29 +48,29 @@ function format(r: WebhookRow) {
 }
 
 export const WebhookStore = {
-  list(ownerId: string) {
-    return (db.prepare("SELECT * FROM webhook_endpoints WHERE owner_id = ? ORDER BY created_at DESC").all(ownerId) as WebhookRow[]).map(format);
+  async list(ownerId: string) {
+    return (await db.prepare("SELECT * FROM webhook_endpoints WHERE owner_id = ? ORDER BY created_at DESC").all(ownerId) as WebhookRow[]).map(format);
   },
-  get(id: string, ownerId: string) {
-    const r = db.prepare("SELECT * FROM webhook_endpoints WHERE id = ? AND owner_id = ?").get(id, ownerId) as WebhookRow | undefined;
+  async get(id: string, ownerId: string) {
+    const r = await db.prepare("SELECT * FROM webhook_endpoints WHERE id = ? AND owner_id = ?").get(id, ownerId) as WebhookRow | undefined;
     return r ? format(r) : null;
   },
-  bySecret(secret: string) {
-    const r = db.prepare("SELECT * FROM webhook_endpoints WHERE id = ? AND is_enabled = 1").get(`wh_${secret}`) as WebhookRow | undefined;
+  async bySecret(secret: string) {
+    const r = await db.prepare("SELECT * FROM webhook_endpoints WHERE id = ? AND is_enabled = 1").get(`wh_${secret}`) as WebhookRow | undefined;
     return r ? format(r) : null;
   },
-  create(input: { name: string; agentId: string; instructionTemplate: string; reusable?: boolean; ownerId: string }) {
+  async create(input: { name: string; agentId: string; instructionTemplate: string; reusable?: boolean; ownerId: string }) {
     const secret = nanoid(24);
     const id = `wh_${secret}`;
     const now = Date.now();
-    db.prepare(
+    await db.prepare(
       `INSERT INTO webhook_endpoints (id, owner_id, name, agent_id, instruction_template, reusable, is_enabled, call_count, created_at, secret)
        VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`
     ).run(id, input.ownerId, input.name, input.agentId, input.instructionTemplate, input.reusable ? 1 : 0, now, secret);
     Audit.record({ ownerId: input.ownerId, actor: "user", action: "webhook.create", targetId: id, targetType: "webhook", metadata: { name: input.name } });
     return { id, secret, name: input.name };
   },
-  update(id: string, ownerId: string, patch: Partial<{ name: string; instructionTemplate: string; reusable: boolean; enabled: boolean }>) {
+  async update(id: string, ownerId: string, patch: Partial<{ name: string; instructionTemplate: string; reusable: boolean; enabled: boolean }>) {
     const sets: string[] = [];
     const vals: any[] = [];
     if (patch.name !== undefined) { sets.push("name = ?"); vals.push(patch.name); }
@@ -79,15 +79,15 @@ export const WebhookStore = {
     if (patch.enabled !== undefined) { sets.push("is_enabled = ?"); vals.push(patch.enabled ? 1 : 0); }
     if (!sets.length) return false;
     vals.push(id, ownerId);
-    return db.prepare(`UPDATE webhook_endpoints SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals).changes > 0;
+    return await db.prepare(`UPDATE webhook_endpoints SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals).changes > 0;
   },
-  delete(id: string, ownerId: string) {
-    const ok = db.prepare("DELETE FROM webhook_endpoints WHERE id = ? AND owner_id = ?").run(id, ownerId).changes > 0;
+  async delete(id: string, ownerId: string) {
+    const ok = await db.prepare("DELETE FROM webhook_endpoints WHERE id = ? AND owner_id = ?").run(id, ownerId).changes > 0;
     if (ok) Audit.record({ ownerId, actor: "user", action: "webhook.delete", targetId: id, targetType: "webhook" });
     return ok;
   },
-  recordFire(id: string) {
-    db.prepare("UPDATE webhook_endpoints SET last_called_at = ?, call_count = call_count + 1 WHERE id = ?").run(Date.now(), id);
+  async recordFire(id: string) {
+    await db.prepare("UPDATE webhook_endpoints SET last_called_at = ?, call_count = call_count + 1 WHERE id = ?").run(Date.now(), id);
   },
 };
 
@@ -99,7 +99,7 @@ export const WebhookStore = {
 export const webhooksApi = new Hono();
 
 // CRUD (auth-required)
-webhooksApi.get("/", (c) => {
+webhooksApi.get("/", async (c) => {
   const userId = c.get("userId") as string;
   return c.json({ webhooks: WebhookStore.list(userId) });
 });
@@ -119,7 +119,7 @@ webhooksApi.put("/:id", async (c) => {
   return c.json({ ok });
 });
 
-webhooksApi.delete("/:id", (c) => {
+webhooksApi.delete("/:id", async (c) => {
   const userId = c.get("userId") as string;
   return c.json({ ok: WebhookStore.delete(c.req.param("id"), userId) });
 });
@@ -145,7 +145,7 @@ webhooksPublicApi.post("/api/hooks/fire/:secret", async (c) => {
       return cur == null ? "" : String(cur);
     });
 
-  const owner = db.prepare("SELECT owner_id FROM webhook_endpoints WHERE id = ?").get(hook.id) as { owner_id: string };
+  const owner = await db.prepare("SELECT owner_id FROM webhook_endpoints WHERE id = ?").get(hook.id) as { owner_id: string };
   const agent = AgentStore.get(hook.agentId, owner.owner_id);
   if (!agent) return c.json({ error: "agent no longer exists" }, 410);
 
@@ -155,7 +155,7 @@ webhooksPublicApi.post("/api/hooks/fire/:secret", async (c) => {
 
   // Disable single-use webhooks
   if (!hook.reusable) {
-    db.prepare("UPDATE webhook_endpoints SET is_enabled = 0 WHERE id = ?").run(hook.id);
+    await db.prepare("UPDATE webhook_endpoints SET is_enabled = 0 WHERE id = ?").run(hook.id);
   }
 
   // Stream the agent run as SSE

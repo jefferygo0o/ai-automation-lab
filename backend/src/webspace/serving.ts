@@ -29,7 +29,7 @@ export const webSpaceServing = new Hono<{ Variables: { userId: string; routeOwne
  *   1. Authorization: Bearer header
  *   2. ?token= query parameter
  */
-function authenticateRequest(c: any): { userId: string } | null {
+async function authenticateRequest(c: any): Promise<{ userId: string } | null> {
   const header = c.req.raw.headers.get("authorization") ?? undefined;
   const fromHeader = authenticateBearer(header);
   if (fromHeader) return fromHeader;
@@ -48,14 +48,14 @@ webSpaceServing.all("/:owner/*", async (c) => {
   let path = c.req.path.replace(new RegExp(`^/${ownerParam}`), "") || "/";
 
   // 1) Authenticate the caller (header → query param → anonymous).
-  const auth = authenticateRequest(c);
+  const auth = await authenticateRequest(c);
   const isOwner = auth !== null && auth.userId === ownerParam;
 
   // 2) Index: list owner's routes.
   if (path === "/" || path === "") {
     if (!isOwner) {
       // Anonymous users see only public routes.
-      const rows = db
+      const rows = await db
         .query(
           "SELECT id, path, type, is_public, updated_at FROM space_routes WHERE owner_id = ? AND is_public = 1 ORDER BY updated_at DESC"
         )
@@ -84,7 +84,7 @@ webSpaceServing.all("/:owner/*", async (c) => {
       return c.html(html);
     }
     // Owner sees all routes.
-    const rows = db
+    const rows = await db
       .query(
         "SELECT id, path, type, is_public, updated_at FROM space_routes WHERE owner_id = ? ORDER BY updated_at DESC"
       )

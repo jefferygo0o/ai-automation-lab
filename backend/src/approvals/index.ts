@@ -88,7 +88,7 @@ export const Approvals = {
     const id = `apr_${nanoid(12)}`;
     const now = Date.now();
     const expiresAt = now + (input.ttlMs ?? DEFAULT_TTL_MS);
-    db.prepare(
+    await db.prepare(
       `INSERT INTO approval_requests (id, owner_id, chat_id, run_id, agent_id, kind, title, body, payload_json, status, created_at, expires_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
     ).run(
@@ -108,33 +108,33 @@ export const Approvals = {
   },
 
   get(id: string): ApprovalRequest | null {
-    const row = db.prepare(`SELECT * FROM approval_requests WHERE id = ?`).get(id) as Row | undefined;
+    const row = await db.prepare(`SELECT * FROM approval_requests WHERE id = ?`).get(id) as Row | undefined;
     return row ? rowToApproval(row) : null;
   },
 
   getForRun(runId: string): ApprovalRequest[] {
-    return (db.prepare(
+    return await (await db.prepare(
       `SELECT * FROM approval_requests WHERE run_id = ? ORDER BY created_at DESC`
     ).all(runId) as Row[]).map(rowToApproval);
   },
 
   listPending(ownerId: string): ApprovalRequest[] {
-    return (db.prepare(
+    return await (await db.prepare(
       `SELECT * FROM approval_requests WHERE owner_id = ? AND status = 'pending' AND expires_at > ? ORDER BY created_at DESC`
     ).all(ownerId, Date.now()) as Row[]).map(rowToApproval);
   },
 
   resolve(id: string, decision: "approved" | "rejected" | "auto-approved", response?: string): ApprovalRequest | null {
     const now = Date.now();
-    const r = db.prepare(
+    const r = await db.prepare(
       `UPDATE approval_requests SET status = ?, response = ?, resolved_at = ? WHERE id = ? AND status = 'pending'`
     ).run(decision, response ?? null, now, id);
     if (r.changes === 0) return null;
     return Approvals.get(id);
   },
 
-  expireOverdue(): number {
-    const r = db.prepare(
+  async expireOverdue(): number {
+    const r = await db.prepare(
       `UPDATE approval_requests SET status = 'expired', resolved_at = ? WHERE status = 'pending' AND expires_at < ?`
     ).run(Date.now(), Date.now());
     return r.changes;

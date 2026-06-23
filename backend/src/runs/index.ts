@@ -111,15 +111,15 @@ function rowToTool(r: ToolRow): ToolInvocation {
 }
 
 export const RunStore = {
-  start(chatId: string, userId: string, agentId: string): Run {
+  async start(chatId: string, userId: string, agentId: string): Run {
     const id = `run_${nanoid(12)}`;
     const now = Date.now();
-    const aRow = db.prepare(`SELECT hash, runtime FROM agents WHERE id = ?`).get(agentId) as
+    const aRow = await db.prepare(`SELECT hash, runtime FROM agents WHERE id = ?`).get(agentId) as
       | { hash: string | null; runtime: string | null }
       | undefined;
     const agentHash = aRow?.hash ?? "";
     const agentRuntime = aRow?.runtime ?? "bun";
-    db.prepare(
+    await db.prepare(
       `INSERT INTO runs (id, chat_id, user_id, agent_id, status, started_at, finished_at, prompt_tokens, completion_tokens, total_tokens, cost_cents, error_message, agent_hash, agent_runtime)
        VALUES (?, ?, ?, ?, 'running', ?, NULL, 0, 0, 0, 0, NULL, ?, ?)`,
     ).run(id, chatId, userId, agentId, now, agentHash, agentRuntime);
@@ -131,70 +131,70 @@ export const RunStore = {
     };
   },
 
-  complete(id: string, usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number }) {
+  async complete(id: string, usage?: { promptTokens?: number; completionTokens?: number; totalTokens?: number }) {
     const now = Date.now();
     if (usage) {
-      db.prepare(
+      await db.prepare(
         `UPDATE runs SET status = 'completed', finished_at = ?, prompt_tokens = ?, completion_tokens = ?, total_tokens = ? WHERE id = ?`,
       ).run(now, usage.promptTokens ?? 0, usage.completionTokens ?? 0, usage.totalTokens ?? 0, id);
     } else {
-      db.prepare(`UPDATE runs SET status = 'completed', finished_at = ? WHERE id = ?`).run(now, id);
+      await db.prepare(`UPDATE runs SET status = 'completed', finished_at = ? WHERE id = ?`).run(now, id);
     }
   },
 
-  fail(id: string, error: string) {
-    db.prepare(`UPDATE runs SET status = 'failed', finished_at = ?, error_message = ? WHERE id = ?`)
+  async fail(id: string, error: string) {
+    await db.prepare(`UPDATE runs SET status = 'failed', finished_at = ?, error_message = ? WHERE id = ?`)
       .run(Date.now(), error, id);
   },
 
-  addUsage(id: string, usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number }) {
-    db.prepare(
+  async addUsage(id: string, usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number }) {
+    await db.prepare(
       `UPDATE runs SET prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?, total_tokens = total_tokens + ? WHERE id = ?`,
     ).run(usage.promptTokens ?? 0, usage.completionTokens ?? 0, usage.totalTokens ?? 0, id);
   },
 
   get(id: string, userId?: string): Run | null {
     const row = userId
-      ? (db.prepare(`SELECT * FROM runs WHERE id = ? AND user_id = ?`).get(id, userId) as RunRow | undefined)
-      : (db.prepare(`SELECT * FROM runs WHERE id = ?`).get(id) as RunRow | undefined);
+      ? (await db.prepare(`SELECT * FROM runs WHERE id = ? AND user_id = ?`).get(id, userId) as RunRow | undefined)
+      : (await db.prepare(`SELECT * FROM runs WHERE id = ?`).get(id) as RunRow | undefined);
     return row ? rowToRun(row) : null;
   },
 
   listForChat(chatId: string, limit = 50): Run[] {
-    return (db.prepare(
+    return await (await db.prepare(
       `SELECT * FROM runs WHERE chat_id = ? ORDER BY started_at DESC LIMIT ?`,
     ).all(chatId, limit) as RunRow[]).map(rowToRun);
   },
 
   listForUser(userId: string, limit = 100): Run[] {
-    return (db.prepare(
+    return await (await db.prepare(
       `SELECT * FROM runs WHERE user_id = ? ORDER BY started_at DESC LIMIT ?`,
     ).all(userId, limit) as RunRow[]).map(rowToRun);
   },
 
   // ---- tool invocations ----
 
-  recordToolStart(runId: string, toolName: string, args: unknown, sandboxId: string | null = null): ToolInvocation {
+  async recordToolStart(runId: string, toolName: string, args: unknown, sandboxId: string | null = null): ToolInvocation {
     const id = `inv_${nanoid(12)}`;
     const now = Date.now();
-    db.prepare(
+    await db.prepare(
       `INSERT INTO tool_invocations (id, run_id, tool_name, arguments_json, result_json, status, error, started_at, finished_at, duration_ms, sandbox_id)
        VALUES (?, ?, ?, ?, NULL, 'pending', NULL, ?, NULL, 0, ?)`,
     ).run(id, runId, toolName, JSON.stringify(args ?? {}), now, sandboxId);
     return { id, runId, toolName, arguments: args, result: null, status: "pending", error: null, startedAt: now, finishedAt: null, durationMs: 0, sandboxId };
   },
 
-  recordToolFinish(id: string, status: "ok" | "error" | "denied", result: unknown, error: string | null = null) {
+  async recordToolFinish(id: string, status: "ok" | "error" | "denied", result: unknown, error: string | null = null) {
     const now = Date.now();
-    const start = db.prepare(`SELECT started_at FROM tool_invocations WHERE id = ?`).get(id) as { started_at: number } | undefined;
+    const start = await db.prepare(`SELECT started_at FROM tool_invocations WHERE id = ?`).get(id) as { started_at: number } | undefined;
     const dur = start ? now - start.started_at : 0;
-    db.prepare(
+    await db.prepare(
       `UPDATE tool_invocations SET status = ?, result_json = ?, error = ?, finished_at = ?, duration_ms = ? WHERE id = ?`,
     ).run(status, JSON.stringify(result ?? null), error, now, dur, id);
   },
 
   listForRun(runId: string): ToolInvocation[] {
-    return (db.prepare(
+    return await (await db.prepare(
       `SELECT * FROM tool_invocations WHERE run_id = ? ORDER BY started_at ASC`,
     ).all(runId) as ToolRow[]).map(rowToTool);
   },

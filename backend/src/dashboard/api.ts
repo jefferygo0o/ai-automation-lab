@@ -8,27 +8,27 @@ export const dashboardApi = new Hono();
 
 const MS_PER_DAY = 86_400_000;
 
-dashboardApi.get("/", (c) => {
+dashboardApi.get("/", async (c) => {
   const userId = c.get("userId") as string;
-  const agents = (db.query("SELECT COUNT(*) AS n FROM agents WHERE owner_id = ?").get(userId) as { n: number }).n;
-  const chats = (db.query("SELECT COUNT(*) AS n FROM chats WHERE owner_id = ?").get(userId) as { n: number }).n;
-  const messages = (db.query(
+  const agents = await (await db.query("SELECT COUNT(*) AS n FROM agents WHERE owner_id = ?").get(userId) as { n: number }).n;
+  const chats = await (await db.query("SELECT COUNT(*) AS n FROM chats WHERE owner_id = ?").get(userId) as { n: number }).n;
+  const messages = await (await db.query(
     `SELECT COUNT(*) AS n FROM messages m
      INNER JOIN chats c ON c.id = m.chat_id
      WHERE c.owner_id = ?`
   ).get(userId) as { n: number }).n;
-  const runs = (db.query("SELECT COUNT(*) AS n FROM runs WHERE user_id = ?").get(userId) as { n: number }).n;
-  const totalTokens = (db.query("SELECT COALESCE(SUM(total_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
-  const pendingApprovals = (db.query(
+  const runs = await (await db.query("SELECT COUNT(*) AS n FROM runs WHERE user_id = ?").get(userId) as { n: number }).n;
+  const totalTokens = await (await db.query("SELECT COALESCE(SUM(total_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
+  const pendingApprovals = await (await db.query(
     "SELECT COUNT(*) AS n FROM approval_requests WHERE owner_id = ? AND status = 'pending'"
   ).get(userId) as { n: number }).n;
-  const skills = (db.query("SELECT COUNT(*) AS n FROM skills WHERE owner_id = ? OR owner_id IS NULL").get(userId) as { n: number }).n;
-  const mcpServers = (db.query("SELECT COUNT(*) AS n FROM mcp_servers").get() as { n: number }).n;
-  const automations = (db.query("SELECT COUNT(*) AS n FROM automations WHERE owner_id = ?").get(userId) as { n: number }).n;
-  const webhooks = (db.query("SELECT COUNT(*) AS n FROM webhook_endpoints WHERE owner_id = ?").get(userId) as { n: number }).n;
+  const skills = await (await db.query("SELECT COUNT(*) AS n FROM skills WHERE owner_id = ? OR owner_id IS NULL").get(userId) as { n: number }).n;
+  const mcpServers = await (await db.query("SELECT COUNT(*) AS n FROM mcp_servers").get() as { n: number }).n;
+  const automations = await (await db.query("SELECT COUNT(*) AS n FROM automations WHERE owner_id = ?").get(userId) as { n: number }).n;
+  const webhooks = await (await db.query("SELECT COUNT(*) AS n FROM webhook_endpoints WHERE owner_id = ?").get(userId) as { n: number }).n;
   const last24h = Date.now() - MS_PER_DAY;
-  const recentRuns = (db.query("SELECT COUNT(*) AS n FROM runs WHERE user_id = ? AND started_at >= ?").get(userId, last24h) as { n: number }).n;
-  const failedLast24h = (db.query(
+  const recentRuns = await (await db.query("SELECT COUNT(*) AS n FROM runs WHERE user_id = ? AND started_at >= ?").get(userId, last24h) as { n: number }).n;
+  const failedLast24h = await (await db.query(
     "SELECT COUNT(*) AS n FROM runs WHERE user_id = ? AND started_at >= ? AND status = 'failed'"
   ).get(userId, last24h) as { n: number }).n;
   return c.json({
@@ -37,12 +37,12 @@ dashboardApi.get("/", (c) => {
   });
 });
 
-dashboardApi.get("/timeseries", (c) => {
+dashboardApi.get("/timeseries", async (c) => {
   const userId = c.get("userId") as string;
   const days = Math.min(90, Math.max(1, Number(c.req.query("days") ?? 7)));
   const since = Date.now() - days * MS_PER_DAY;
   // Bucket by day
-  const rows = db.query(
+  const rows = await db.query(
     `SELECT
        (started_at / ${MS_PER_DAY}) * ${MS_PER_DAY} AS day,
        COUNT(*) AS runs,
@@ -56,9 +56,9 @@ dashboardApi.get("/timeseries", (c) => {
   return c.json({ days, buckets: rows });
 });
 
-dashboardApi.get("/top-agents", (c) => {
+dashboardApi.get("/top-agents", async (c) => {
   const userId = c.get("userId") as string;
-  const rows = db.query(
+  const rows = await db.query(
     `SELECT a.id, a.name, a.description, COUNT(r.id) AS runs, COALESCE(SUM(r.total_tokens), 0) AS tokens
      FROM agents a
      LEFT JOIN runs r ON r.agent_id = a.id
@@ -70,18 +70,18 @@ dashboardApi.get("/top-agents", (c) => {
   return c.json({ topAgents: rows });
 });
 
-dashboardApi.get("/usage", (c) => {
+dashboardApi.get("/usage", async (c) => {
   const userId = c.get("userId") as string;
-  const totalTokens = (db.query("SELECT COALESCE(SUM(total_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
-  const promptTokens = (db.query("SELECT COALESCE(SUM(prompt_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
-  const completionTokens = (db.query("SELECT COALESCE(SUM(completion_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
-  const totalCost = (db.query("SELECT COALESCE(SUM(cost_cents), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
+  const totalTokens = await (await db.query("SELECT COALESCE(SUM(total_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
+  const promptTokens = await (await db.query("SELECT COALESCE(SUM(prompt_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
+  const completionTokens = await (await db.query("SELECT COALESCE(SUM(completion_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
+  const totalCost = await (await db.query("SELECT COALESCE(SUM(cost_cents), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
   return c.json({ totalTokens, promptTokens, completionTokens, totalCostCents: totalCost });
 });
 
-dashboardApi.get("/tool-stats", (c) => {
+dashboardApi.get("/tool-stats", async (c) => {
   const userId = c.get("userId") as string;
-  const rows = db.query(
+  const rows = await db.query(
     `SELECT ti.tool_name AS name, COUNT(*) AS invocations,
        SUM(CASE WHEN ti.status = 'ok' THEN 1 ELSE 0 END) AS ok,
        SUM(CASE WHEN ti.status = 'error' THEN 1 ELSE 0 END) AS errors,

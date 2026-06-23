@@ -48,7 +48,7 @@ export const Templates = {
       }
     }
     // user-saved templates
-    const rows = db.query(`SELECT * FROM agent_templates ORDER BY created_at DESC`).all() as any[];
+    const rows = await db.query(`SELECT * FROM agent_templates ORDER BY created_at DESC`).all() as any[];
     for (const r of rows) {
       try {
         out.push({
@@ -68,9 +68,9 @@ export const Templates = {
     return Templates.list().find((t) => t.id === id) ?? null;
   },
 
-  saveUser(input: { ownerId: string; name: string; description: string; category: string; icon: string; tags: string[]; template: Omit<AgentTemplate, "id"> }): AgentTemplate {
+  async saveUser(input: { ownerId: string; name: string; description: string; category: string; icon: string; tags: string[]; template: Omit<AgentTemplate, "id"> }): AgentTemplate {
     const id = `tpl_${nanoid(10)}`;
-    db.query(
+    await db.query(
       `INSERT INTO agent_templates (id, owner_id, name, description, category, icon, tags, system_md, persona_md, tools_md, skills_md, memory_md, config_json, recommended_skills, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
@@ -83,8 +83,8 @@ export const Templates = {
     return Templates.get(id)!;
   },
 
-  deleteUser(id: string, ownerId: string): boolean {
-    return db.query(`DELETE FROM agent_templates WHERE id = ? AND owner_id = ?`).run(id, ownerId).changes > 0;
+  async deleteUser(id: string, ownerId: string): boolean {
+    return await db.query(`DELETE FROM agent_templates WHERE id = ? AND owner_id = ?`).run(id, ownerId).changes > 0;
   },
 
   /** Apply a template to a fresh agent directory + record metadata. */

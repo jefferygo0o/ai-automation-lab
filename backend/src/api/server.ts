@@ -64,7 +64,7 @@ api.get("/api/health", (c) => c.json({ ok: true, time: Date.now() }));
 
 // ---- Auth ----
 api.post("/api/auth/login", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string };
+  const body = async (await c.req.json().catch(() => ({}))) as { email?: string; password?: string };
   if (!body.email || !body.password) return c.json({ error: "email and password required" }, 400);
   const session = await login(body.email, body.password);
   if (!session) return c.json({ error: "invalid credentials" }, 401);
@@ -100,39 +100,39 @@ api.post("/api/auth/register", async (c) => {
 });
 
 // ---- Agents ----
-api.get("/api/agents", (c) => {
+api.get("/api/agents", async (c) => {
   const userId = c.get("userId") as string;
-  return c.json({ agents: AgentStore.list(userId) });
+  return c.json({ agents: await AgentStore.list(userId) });
 });
 
 api.post("/api/agents", async (c) => {
   const userId = c.get("userId") as string;
-  const body = (await c.req.json().catch(() => ({}))) as { name?: string; description?: string };
+  const body = async (await c.req.json().catch(() => ({}))) as { name?: string; description?: string };
   if (!body.name) return c.json({ error: "name required" }, 400);
-  const agent = AgentStore.create(userId, body.name, body.description ?? "");
+  const agent = await AgentStore.create(userId, body.name, body.description ?? "");
   Audit.record({ ownerId: userId, actor: "user", action: "agent.create", targetId: agent.id, targetType: "agent", metadata: { name: agent.name } });
   return c.json({ agent });
 });
 
-api.get("/api/agents/:id", (c) => {
+api.get("/api/agents/:id", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
   return c.json({ agent, config: readAgentConfig(agent.id) });
 });
 
-api.delete("/api/agents/:id", (c) => {
+api.delete("/api/agents/:id", async (c) => {
   const userId = c.get("userId") as string;
   const id = c.req.param("id");
-  const ok = AgentStore.delete(id, userId);
+  const ok = await AgentStore.delete(id, userId);
   if (ok) Audit.record({ ownerId: userId, actor: "user", action: "agent.delete", targetId: id, targetType: "agent" });
   return c.json({ ok });
 });
 
 api.post("/api/agents/:id/clone", async (c) => {
   const userId = c.get("userId") as string;
-  const body = (await c.req.json().catch(() => ({}))) as { name?: string };
-  const a = AgentStore.clone(c.req.param("id"), userId, body.name);
+  const body = async (await c.req.json().catch(() => ({}))) as { name?: string };
+  const a = await AgentStore.clone(c.req.param("id"), userId, body.name);
   if (!a) return c.json({ error: "not found" }, 404);
   return c.json({ agent: a });
 });
@@ -186,7 +186,7 @@ api.put("/api/agents/:id/config", async (c) => {
     return c.json({ error: "mcpServers must be an array" }, 400);
   }
 
-  return c.json({ ok: AgentStore.updateConfig(c.req.param("id"), userId, cfg) });
+  return c.json({ ok: await AgentStore.updateConfig(c.req.param("id"), userId, cfg) });
 });
 
 // Agent file CRUD — `?name=...` query param so file
@@ -196,14 +196,14 @@ const getFileName = (c: any): string => {
   return decodeURIComponent(raw).replace(/^\/+/, "");
 };
 
-api.get("/api/agents/:id/files", (c) => {
+api.get("/api/agents/:id/files", async (c) => {
   const userId = c.get("userId") as string;
-  return c.json({ files: AgentStore.listFiles(c.req.param("id"), userId) });
+  return c.json({ files: await AgentStore.listFiles(c.req.param("id"), userId) });
 });
 
-api.get("/api/agents/:id/file", (c) => {
+api.get("/api/agents/:id/file", async (c) => {
   const userId = c.get("userId") as string;
-  const file = AgentStore.readFile(c.req.param("id"), userId, getFileName(c));
+  const file = await AgentStore.readFile(c.req.param("id"), userId, getFileName(c));
   return c.json({ content: file.content, name: file.name, size: file.size, mtime: file.mtime });
 });
 
@@ -212,7 +212,7 @@ api.put("/api/agents/:id/file", async (c) => {
   const { content } = (await c.req.json()) as { content: string };
   const file = getFileName(c);
   try {
-    const result = AgentStore.writeFile(c.req.param("id"), userId, file, content);
+    const result = await AgentStore.writeFile(c.req.param("id"), userId, file, content);
     if (!result.ok) {
       return c.json({ error: result.error }, 400);
     }
@@ -222,79 +222,79 @@ api.put("/api/agents/:id/file", async (c) => {
   }
 });
 
-api.get("/api/agents/:id/history", (c) => {
+api.get("/api/agents/:id/history", async (c) => {
   const userId = c.get("userId") as string;
   const file = c.req.query("file");
   return c.json({ history: file ? HistoryStore.list(c.req.param("id"), file) : HistoryStore.list(c.req.param("id")) });
 });
 
-api.post("/api/agents/:id/history/:versionId/revert", (c) => {
+api.post("/api/agents/:id/history/:versionId/revert", async (c) => {
   const version = HistoryStore.get(c.req.param("versionId"));
   if (!version) return c.json({ ok: false }, 404);
-  AgentStore.writeFile(version.agentId, c.get("userId"), version.filename, version.content);
+  await AgentStore.writeFile(version.agentId, c.get("userId"), version.filename, version.content);
   return c.json({ ok: true });
 });
 
 // ---- Export / Import ----
-api.get("/api/agents/:id/export", (c) => {
+api.get("/api/agents/:id/export", async (c) => {
   const userId = c.get("userId") as string;
-  const pack = AgentStore.exportPack(c.req.param("id"), userId);
+  const pack = await AgentStore.exportPack(c.req.param("id"), userId);
   if (!pack) return c.json({ error: "not found" }, 404);
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   c.header("Content-Disposition", `attachment; filename="${agent?.name ?? c.req.param("id")}.json"`);
   return c.json(pack);
 });
 
 api.post("/api/agents/import", async (c) => {
   const userId = c.get("userId") as string;
-  const body = (await c.req.json()) as any;
-  return c.json({ agent: AgentStore.importPack(userId, body) });
+  const body = async (await c.req.json()) as any;
+  return c.json({ agent: await AgentStore.importPack(userId, body) });
 });
 
 // ---- Chats ----
-api.get("/api/chats", (c) => {
+api.get("/api/chats", async (c) => {
   const userId = c.get("userId") as string;
-  return c.json({ chats: ChatStore.list(userId) });
+  return c.json({ chats: await ChatStore.list(userId) });
 });
 
 api.post("/api/chats", async (c) => {
   const userId = c.get("userId") as string;
-  const body = (await c.req.json().catch(() => ({}))) as { agentId: string; title?: string };
+  const body = async (await c.req.json().catch(() => ({}))) as { agentId: string; title?: string };
   if (!body.agentId) return c.json({ error: "agentId required" }, 400);
-  return c.json({ chat: ChatStore.create(userId, body.agentId, body.title) });
+  return c.json({ chat: await ChatStore.create(userId, body.agentId, body.title) });
 });
 
-api.get("/api/chats/:id", (c) => {
+api.get("/api/chats/:id", async (c) => {
   const userId = c.get("userId") as string;
-  const chat = ChatStore.get(c.req.param("id"), userId);
+  const chat = await ChatStore.get(c.req.param("id"), userId);
   if (!chat) return c.json({ error: "not found" }, 404);
-  return c.json({ chat, messages: ChatStore.listMessages(chat.id, userId) });
+  return c.json({ chat, messages: await ChatStore.listMessages(chat.id, userId) });
 });
 
-api.delete("/api/chats/:id", (c) => {
+api.delete("/api/chats/:id", async (c) => {
   const userId = c.get("userId") as string;
-  return c.json({ ok: ChatStore.delete(c.req.param("id"), userId) });
+  return c.json({ ok: await ChatStore.delete(c.req.param("id"), userId) });
 });
 
 api.post("/api/chats/:id/rename", async (c) => {
   const userId = c.get("userId") as string;
   const { title } = (await c.req.json()) as { title: string };
-  return c.json({ ok: ChatStore.rename(c.req.param("id"), userId, title) });
+  return c.json({ ok: await ChatStore.rename(c.req.param("id"), userId, title) });
 });
 
 api.post("/api/chats/:id/active-agent", async (c) => {
   const userId = c.get("userId") as string;
   const { agentId } = (await c.req.json()) as { agentId: string };
-  return c.json({ ok: ChatStore.setActiveAgent(c.req.param("id"), userId, agentId) });
+  return c.json({ ok: await ChatStore.setActiveAgent(c.req.param("id"), userId, agentId) });
 });
 
 // SSE chat streaming -- supports JSON ({ content }) and multipart/form-data (content + files[])
 api.post("/api/chats/:id/messages", async (c) => {
   const userId = c.get("userId") as string;
   incrementHourly(userId);
-  const chat = ChatStore.get(c.req.param("id"), userId);
+  const chat = await ChatStore.get(c.req.param("id"), userId);
   if (!chat) return c.json({ error: "chat not found" }, 404);
-  const agent = AgentStore.get(chat.activeAgentId ?? chat.agentId, userId);
+  const agent = await AgentStore.get(chat.activeAgentId ?? chat.agentId, userId);
   if (!agent) return c.json({ error: "agent not found" }, 404);
   let content = "";
   let files: Array<{ name: string; data: string; mime: string }> = [];
@@ -357,7 +357,7 @@ api.post("/api/chats/:id/messages", async (c) => {
       );
     } catch { clearInterval(heartbeat); }
   }, 10_000);
-  const clearHb = () => { clearInterval(heartbeat); };
+  const clearHb = async () => { clearInterval(heartbeat); };
   runAgentTurn(userId, c.req.param("id"), content, send)
     .catch((e: any) => send({ type: "error", message: e?.message ?? String(e) }))
     .finally(() => { clearHb(); writer.close().catch(() => {}); });
@@ -373,30 +373,30 @@ api.post("/api/chats/:id/messages", async (c) => {
 // ---- Chat feedback (thumbs up/down on assistant messages) ----
 api.post("/api/chats/:id/feedback", async (c) => {
   const userId = c.get("userId") as string;
-  const chat = ChatStore.get(c.req.param("id"), userId);
+  const chat = await ChatStore.get(c.req.param("id"), userId);
   if (!chat) return c.json({ error: "chat not found" }, 404);
-  const body = (await c.req.json().catch(() => ({}))) as { messageId?: string; rating?: number; comment?: string };
+  const body = async (await c.req.json().catch(() => ({}))) as { messageId?: string; rating?: number; comment?: string };
   if (!body.messageId) return c.json({ error: "messageId required" }, 400);
   if (body.rating !== 1 && body.rating !== -1 && body.rating !== 0) return c.json({ error: "rating must be 1, -1, or 0" }, 400);
-  const r = db.prepare("UPDATE messages SET feedback_rating = ?, feedback_comment = ? WHERE id = ? AND chat_id = ?")
+  const r = await db.prepare("UPDATE messages SET feedback_rating = ?, feedback_comment = ? WHERE id = ? AND chat_id = ?")
     .run(body.rating, body.comment ?? null, body.messageId, c.req.param("id"));
   if (!r.changes) return c.json({ error: "message not found" }, 404);
   Audit.record({ ownerId: userId, actor: "user", action: "chat.feedback", targetId: c.req.param("id"), targetType: "chat", metadata: { messageId: body.messageId, rating: body.rating, hasComment: !!body.comment } });
   return c.json({ ok: true });
 });
 
-api.get("/api/chats/:id/feedback", (c) => {
+api.get("/api/chats/:id/feedback", async (c) => {
   const userId = c.get("userId") as string;
-  const chat = ChatStore.get(c.req.param("id"), userId);
+  const chat = await ChatStore.get(c.req.param("id"), userId);
   if (!chat) return c.json({ error: "chat not found" }, 404);
-  const rows = db.prepare("SELECT id, role, feedback_rating, feedback_comment FROM messages WHERE chat_id = ? AND feedback_rating IS NOT NULL").all(c.req.param("id"));
+  const rows = await db.prepare("SELECT id, role, feedback_rating, feedback_comment FROM messages WHERE chat_id = ? AND feedback_rating IS NOT NULL").all(c.req.param("id"));
   return c.json({ feedback: rows });
 });
 
 // ---- Skills ----
-api.get("/api/skills", (c) => {
+api.get("/api/skills", async (c) => {
   const userId = c.get("userId") as string;
-  const userSkills = Skills.listForUser(userId);
+  const userSkills = await Skills.listForUser(userId);
   const allSkills = Skills.list().filter(s => !s.source === "builtin" || !userSkills.find(u => u.id === s.id));
   const combined = [...allSkills, ...userSkills];
   const seen = new Set<string>();
@@ -404,9 +404,9 @@ api.get("/api/skills", (c) => {
   return c.json({ skills: dedu });
 });
 
-api.get("/api/skills/:id", (c) => {
+api.get("/api/skills/:id", async (c) => {
   const userId = c.get("userId") as string;
-  const skill = Skills.readForUser(userId, c.req.param("id"));
+  const skill = await Skills.readForUser(userId, c.req.param("id"));
   if (!skill) return c.json({ error: "not found" }, 404);
   return c.json({ body: skill.body, name: skill.name, description: skill.description, id: skill.id, inputs: skill.inputs, mcp_required: skill.mcp_required });
 });
@@ -416,26 +416,26 @@ api.post("/api/skills", async (c) => {
   const body = (await c.req.json()) as { id: string; name: string; body: string; description?: string; mcp_required?: string[]; inputs?: any[] };
   if (!body.id || !body.name || !body.body) return c.json({ error: "id, name, body required" }, 400);
   try {
-    const skill = Skills.saveUser(userId, body.id, body.name, body.body, { description: body.description ?? "", mcp_required: body.mcp_required, inputs: body.inputs });
+    const skill = await Skills.saveUser(userId, body.id, body.name, body.body, { description: body.description ?? "", mcp_required: body.mcp_required, inputs: body.inputs });
     return c.json({ skill });
   } catch (e: any) {
     return c.json({ error: e?.message ?? String(e) }, 400);
   }
 });
 
-api.delete("/api/skills/:id", (c) => {
+api.delete("/api/skills/:id", async (c) => {
   const userId = c.get("userId") as string;
-  return c.json({ ok: Skills.deleteUser(userId, c.req.param("id")) });
+  return c.json({ ok: await Skills.deleteUser(userId, c.req.param("id")) });
 });
 
 // ---- MCP ----
 api.get("/api/mcp/servers", (c) => {
-  return c.json({ servers: McpStore.list() });
+  return c.json({ servers: await McpStore.list() });
 });
 
 // ---- MCP Marketplace (curated catalog) ----
 api.get("/api/mcp/marketplace", (c) => {
-  const installedNames = new Set(McpStore.list().map((s) => s.name));
+  const installedNames = new Set(await McpStore.list().map((s) => s.name));
   const entries = MCP_MARKETPLACE.map((e) => ({
     ...e,
     installed: installedNames.has(e.name),
@@ -446,7 +446,7 @@ api.get("/api/mcp/marketplace", (c) => {
 api.get("/api/mcp/marketplace/:id", (c) => {
   const entry = findMarketplaceEntry(c.req.param("id"));
   if (!entry) return c.json({ error: "marketplace entry not found" }, 404);
-  const installedNames = new Set(McpStore.list().map((s) => s.name));
+  const installedNames = new Set(await McpStore.list().map((s) => s.name));
   return c.json({ ...entry, installed: installedNames.has(entry.name) });
 });
 
@@ -454,7 +454,7 @@ api.post("/api/mcp/marketplace/:id/install", async (c) => {
   const userId = c.get("userId") as string;
   const entry = findMarketplaceEntry(c.req.param("id"));
   if (!entry) return c.json({ error: "marketplace entry not found" }, 404);
-  const server = McpStore.upsert(
+  const server = await McpStore.upsert(
     { name: entry.name, command: entry.command, args: entry.args, enabled: true },
     userId,
   );
@@ -482,38 +482,38 @@ api.post("/api/mcp/marketplace/:id/install", async (c) => {
     connectError = e?.message ?? String(e);
   }
   return c.json({
-    server: McpStore.list().find((s) => s.id === server.id),
+    server: await McpStore.list().find((s) => s.id === server.id),
     status: connectStatus,
     error: connectError,
-    needs_env: (entry.envVars ?? []).filter((v) => v.required).map((v) => v.name),
+    needs_env: async (entry.envVars ?? []).filter((v) => v.required).map((v) => v.name),
   });
 });
 
 api.post("/api/mcp/servers", async (c) => {
   const userId = c.get("userId") as string;
-  const body = (await c.req.json()) as { name: string; command: string; args?: string[]; env?: Record<string, string> };
-  const server = McpStore.upsert(body, userId);
+  const body = async (await c.req.json()) as { name: string; command: string; args?: string[]; env?: Record<string, string> };
+  const server = await McpStore.upsert(body, userId);
   Audit.record({ ownerId: userId, actor: "user", action: "mcp.create", targetId: server.id, targetType: "mcp_server", metadata: { name: server.name, command: server.command } });
   return c.json({ server });
 });
 
 api.post("/api/mcp/servers/:id/connect", async (c) => {
-  const srv = McpStore.get(c.req.param("id"));
+  const srv = await McpStore.get(c.req.param("id"));
   if (!srv) return c.json({ error: "not found" }, 404);
   await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
   return c.json({ ok: true });
 });
 
-api.post("/api/mcp/servers/:id/disconnect", (c) => {
-  const srv = McpStore.get(c.req.param("id"));
+api.post("/api/mcp/servers/:id/disconnect", async (c) => {
+  const srv = await McpStore.get(c.req.param("id"));
   if (!srv) return c.json({ ok: false, error: "not found" }, 404);
   mcpManager.stopServer(srv.name);
   return c.json({ ok: true });
 });
 
-api.delete("/api/mcp/servers/:id", (c) => {
+api.delete("/api/mcp/servers/:id", async (c) => {
   const id = c.req.param("id");
-  const ok = McpStore.delete(id);
+  const ok = await McpStore.delete(id);
   if (ok) {
     const userId = c.get("userId") as string;
     Audit.record({ ownerId: userId, actor: "user", action: "mcp.delete", targetId: id, targetType: "mcp_server" });
@@ -522,7 +522,7 @@ api.delete("/api/mcp/servers/:id", (c) => {
 });
 
 api.get("/api/mcp/servers/:id/tools", async (c) => {
-  const srv = McpStore.get(c.req.param("id"));
+  const srv = await McpStore.get(c.req.param("id"));
   if (!srv) return c.json({ tools: [] });
   try {
     await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
@@ -531,53 +531,53 @@ api.get("/api/mcp/servers/:id/tools", async (c) => {
 });
 
 // ---- Memory (per-(agent, owner) scoped) ----
-api.get("/api/agents/:id/memory", (c) => {
+api.get("/api/agents/:id/memory", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "agent not found" }, 404);
   const kind = c.req.query("kind");
-  return c.json({ items: MemoryStore.list(agent.id, userId, kind) });
+  return c.json({ items: await MemoryStore.list(agent.id, userId, kind) });
 });
 
 api.post("/api/agents/:id/memory", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "agent not found" }, 404);
-  const body = (await c.req.json().catch(() => ({}))) as { kind?: string; key?: string; value?: string; source?: string };
+  const body = async (await c.req.json().catch(() => ({}))) as { kind?: string; key?: string; value?: string; source?: string };
   if (!body.kind || !body.key) return c.json({ error: "kind and key required" }, 400);
-  const id = MemoryStore.upsert(agent.id, userId, body.kind as any, body.key, body.value ?? "", body.source ?? "user");
+  const id = await MemoryStore.upsert(agent.id, userId, body.kind as any, body.key, body.value ?? "", body.source ?? "user");
   return c.json({ id });
 });
 
 api.put("/api/agents/:id/memory/:memId", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "agent not found" }, 404);
-  const body = (await c.req.json().catch(() => ({}))) as { value?: string; source?: string };
-  const ok = MemoryStore.update(c.req.param("memId"), userId, body.value ?? "", body.source);
+  const body = async (await c.req.json().catch(() => ({}))) as { value?: string; source?: string };
+  const ok = await MemoryStore.update(c.req.param("memId"), userId, body.value ?? "", body.source);
   if (!ok) return c.json({ error: "memory item not found" }, 404);
   return c.json({ ok: true });
 });
 
-api.delete("/api/agents/:id/memory/:memId", (c) => {
+api.delete("/api/agents/:id/memory/:memId", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "agent not found" }, 404);
-  const ok = MemoryStore.remove(c.req.param("memId"), userId);
+  const ok = await MemoryStore.remove(c.req.param("memId"), userId);
   if (!ok) return c.json({ error: "memory item not found" }, 404);
   return c.json({ ok: true });
 });
 
-api.delete("/api/agents/:id/memory", (c) => {
+api.delete("/api/agents/:id/memory", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "agent not found" }, 404);
-  const removed = MemoryStore.clear(agent.id, userId);
+  const removed = await MemoryStore.clear(agent.id, userId);
   return c.json({ ok: true, removed });
 });
 
 // ---- Secrets ----
-api.get("/api/secrets", (c) => {
+api.get("/api/secrets", async (c) => {
   const userId = c.get("userId") as string;
   return c.json({ secrets: SecretStore.list(userId) });
 });
@@ -591,7 +591,7 @@ api.put("/api/secrets/:name", async (c) => {
   return c.json({ secret });
 });
 
-api.delete("/api/secrets/:name", (c) => {
+api.delete("/api/secrets/:name", async (c) => {
   const userId = c.get("userId") as string;
   const name = c.req.param("name");
   const ok = SecretStore.delete(userId, name);
@@ -600,35 +600,35 @@ api.delete("/api/secrets/:name", (c) => {
 });
 
 // ---- Audit log ----
-api.get("/api/audit", (c) => {
+api.get("/api/audit", async (c) => {
   const userId = c.get("userId") as string;
   const action = c.req.query("action");
   const targetType = c.req.query("targetType");
   const limit = Number(c.req.query("limit") ?? 100);
   const cursor = c.req.query("cursor") ? Number(c.req.query("cursor")) : undefined;
-  return c.json({ events: Audit.list(userId, { action, targetType, limit, cursor }) });
+  return c.json({ events: await Audit.list(userId, { action, targetType, limit, cursor }) });
 });
 
-api.get("/api/audit/stats", (c) => {
+api.get("/api/audit/stats", async (c) => {
   const userId = c.get("userId") as string;
   const since = c.req.query("sinceMs") ? Number(c.req.query("sinceMs")) : Date.now() - 24 * 60 * 60 * 1000;
-  return c.json({ counts: Audit.countByAction(userId, since), since });
+  return c.json({ counts: await Audit.counts(userId, since), since });
 });
 
-api.delete("/api/audit", (c) => {
+api.delete("/api/audit", async (c) => {
   const userId = c.get("userId") as string;
   const beforeMs = c.req.query("beforeMs") ? Number(c.req.query("beforeMs")) : Date.now() - 30 * 24 * 60 * 60 * 1000;
-  return c.json({ ok: true, deleted: Audit.clear(userId, beforeMs) });
+  return c.json({ ok: true, deleted: await Audit.clear(userId, beforeMs) });
 });
 
 // ---- Tool registry introspection ----
-api.get("/api/tools", (c) => {
+api.get("/api/tools", async (c) => {
   return c.json({ tools: toolRegistry.all().map((t) => ({ name: t.name, description: t.description })) });
 });
 
 // ---- Models (presets + all agent models discovered from disk) ----
 api.post("/api/models/fetch", async (c) => {
-  const body = (await c.req.json()) as { provider: string; baseUrl: string; apiKey: string };
+  const body = async (await c.req.json()) as { provider: string; baseUrl: string; apiKey: string };
   let models: Array<{ id: string; name: string }> = [];
   if (body.provider === "mock") {
     models = [
@@ -739,23 +739,23 @@ api.post("/api/models/fetch", async (c) => {
 });
 
 // ---- Runs (execution history) ----
-api.get("/api/runs", (c) => {
+api.get("/api/runs", async (c) => {
   const userId = c.get("userId") as string;
   const limit = Number(c.req.query("limit") ?? 100);
   return c.json({ runs: RunStore.listForUser(userId, limit) });
 });
 
-api.get("/api/runs/:id", (c) => {
+api.get("/api/runs/:id", async (c) => {
   const userId = c.get("userId") as string;
   const run = RunStore.get(c.req.param("id"), userId);
   if (!run) return c.json({ error: "not found" }, 404);
   return c.json({ run, invocations: RunStore.listForRun(run.id) });
 });
 
-api.get("/api/chats/:id/runs", (c) => {
+api.get("/api/chats/:id/runs", async (c) => {
   const userId = c.get("userId") as string;
   // Confirm ownership of chat
-  const chat = ChatStore.get(c.req.param("id"), userId);
+  const chat = await ChatStore.get(c.req.param("id"), userId);
   if (!chat) return c.json({ error: "not found" }, 404);
   return c.json({ runs: RunStore.listForChat(c.req.param("id"), 50) });
 });
@@ -778,9 +778,9 @@ api.route("/api/automations", automationsApi);
 api.route("/api/integrations", integrationsApi);
 
 // ---- Sandbox live interaction (for the editor UI) ----
-api.get("/api/agents/:id/sandbox", (c) => {
+api.get("/api/agents/:id/sandbox", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
   const opts = resolveSandboxOptions(agent);
   const path = c.req.query("path") ?? ".";
@@ -792,9 +792,9 @@ api.get("/api/agents/:id/sandbox", (c) => {
   }
 });
 
-api.get("/api/agents/:id/sandbox/read", (c) => {
+api.get("/api/agents/:id/sandbox/read", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
   const opts = resolveSandboxOptions(agent);
   const path = c.req.query("path");
@@ -825,9 +825,9 @@ const sandboxFileMime = (p: string) => {
   return "application/octet-stream";
 };
 
-api.get("/api/agents/:id/sandbox/file", (c) => {
+api.get("/api/agents/:id/sandbox/file", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
   const opts = resolveSandboxOptions(agent);
   const path = c.req.query("path");
@@ -849,7 +849,7 @@ api.get("/api/agents/:id/sandbox/file", (c) => {
 
 api.put("/api/agents/:id/sandbox/write", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
   const opts = resolveSandboxOptions(agent);
   const { path, content } = (await c.req.json()) as { path: string; content: string };
@@ -861,9 +861,9 @@ api.put("/api/agents/:id/sandbox/write", async (c) => {
   }
 });
 
-api.delete("/api/agents/:id/sandbox", (c) => {
+api.delete("/api/agents/:id/sandbox", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
   const opts = resolveSandboxOptions(agent);
   const path = c.req.query("path");
@@ -878,7 +878,7 @@ api.delete("/api/agents/:id/sandbox", (c) => {
 
 api.post("/api/agents/:id/sandbox/exec", async (c) => {
   const userId = c.get("userId") as string;
-  const agent = AgentStore.get(c.req.param("id"), userId);
+  const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
   const opts = resolveSandboxOptions(agent);
   const { command, args, timeoutMs } = (await c.req.json()) as { command: string; args?: string[]; timeoutMs?: number };

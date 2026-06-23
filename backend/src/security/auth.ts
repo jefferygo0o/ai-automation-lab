@@ -25,7 +25,7 @@ export async function createUser(email: string, password: string): Promise<{ id:
   const uid = data.user.id;
   const now = Date.now();
   // Upsert into our users table — id is the Supabase Auth UUID
-  db.prepare(
+  await db.prepare(
     `INSERT OR IGNORE INTO users (id, email, password_hash, role, created_at) VALUES (?, ?, '', 'user', ?)`
   ).run(uid, email.toLowerCase(), now);
   return { id: uid, email: email.toLowerCase() };
@@ -65,14 +65,14 @@ export function deleteSession(token: string): void {
   // The token will expire naturally. No-op for now.
 }
 
-export function findUserById(id: string): { id: string; email: string; role: string } | undefined {
-  return db.prepare(
+export async function findUserById(id: string): Promise<{ id: string; email: string; role: string } | undefined> {
+  return await db.prepare(
     `SELECT id, email, role FROM users WHERE id = ?`
   ).get(id) as { id: string; email: string; role: string } | undefined;
 }
 
-export function findUserByEmail(email: string): { id: string; email: string } | undefined {
-  return db.prepare(
+export async function findUserByEmail(email: string): Promise<{ id: string; email: string } | undefined> {
+  return await db.prepare(
     `SELECT id, email FROM users WHERE email = ?`
   ).get(email.toLowerCase()) as { id: string; email: string } | undefined;
 }

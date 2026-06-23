@@ -31,7 +31,7 @@ export const SecretStore = {
     return String(name ?? "").trim().toUpperCase();
   },
 
-  set(ownerId: string, name: string, value: string): SecretMeta {
+  async set(ownerId: string, name: string, value: string): SecretMeta {
     // Canonicalise: store all secret names UPPERCASE. The collision guard
     // still uses LOWER() on both sides so any existing mixed-case row is
     // overwritten in place rather than orphaned.
@@ -44,15 +44,15 @@ export const SecretStore = {
     const id = existing?.id ?? `sec_${nanoid(12)}`;
     const now = Date.now();
     const enc = encryptSecret(value);
-    db.prepare(
+    await db.prepare(
       `INSERT OR REPLACE INTO secrets (id, owner_id, name, ciphertext, iv, auth_tag, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, ownerId, canonical, enc.ciphertext, enc.iv, enc.authTag, now);
     return { id, ownerId, name: canonical, createdAt: now };
   },
 
-  get(ownerId: string, name: string): string | null {
-    const row = db
+  async get(ownerId: string, name: string): Promise<string | null> {
+    const row = await db
       .prepare(
         `SELECT ciphertext, iv, auth_tag FROM secrets WHERE owner_id = ? AND name = ?`,
       )
@@ -69,8 +69,8 @@ export const SecretStore = {
    * Case-insensitive lookup. Returns the secret value regardless of the casing
    * the user typed when saving it (PIPEDREAM_API_KEY vs pipedream_api_key).
    */
-  getCI(ownerId: string, name: string): string | null {
-    const row = db
+  async getCI(ownerId: string, name: string): Promise<string | null> {
+    const row = await db
       .prepare(
         `SELECT ciphertext, iv, auth_tag FROM secrets WHERE owner_id = ? AND LOWER(name) = LOWER(?)`,
       )
@@ -84,15 +84,15 @@ export const SecretStore = {
   },
 
   /** List all secrets for an owner with case-collapsed names (lowercased). */
-  listNamesLower(ownerId: string): string[] {
-    const rows = db
+  async listNamesLower(ownerId: string): Promise<string[]> {
+    const rows = await db
       .prepare(`SELECT LOWER(name) AS n FROM secrets WHERE owner_id = ?`)
       .all(ownerId) as { n: string }[];
     return rows.map((r) => r.n);
   },
 
-  list(ownerId: string): SecretMeta[] {
-    return (db
+  async list(ownerId: string): Promise<SecretMeta[]> {
+    return (await db
       .prepare(
         `SELECT id, owner_id, name, created_at FROM secrets WHERE owner_id = ? ORDER BY created_at DESC`,
       )
@@ -104,8 +104,8 @@ export const SecretStore = {
     }));
   },
 
-  delete(ownerId: string, name: string): boolean {
-    const r = db
+  async delete(ownerId: string, name: string): Promise<boolean> {
+    const r = await db
       .prepare(`DELETE FROM secrets WHERE owner_id = ? AND LOWER(name) = LOWER(?)`)
       .run(ownerId, SecretStore.norm(name));
     return r.changes > 0;

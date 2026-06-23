@@ -98,10 +98,10 @@ export function getNextRun(row: AutomationRow, now: number = Date.now()): number
   return anchor + (intervalsElapsed + 1) * 60_000;
 }
 
-function loadDueAutomations(now: number): AutomationRow[] {
+async function loadDueAutomations(now: number): AutomationRow[] {
   // An automation is due if it is active AND (last_run_at + interval) <= now.
   // For never-run automations we still respect the schedule relative to created_at.
-  const rows = db.prepare(
+  const rows = await db.prepare(
     "SELECT * FROM automations WHERE active = 1"
   ).all() as AutomationRow[];
   return rows.filter((r) => getNextRun(r) <= now);
@@ -118,7 +118,7 @@ async function fireAutomation(auto: AutomationRow): Promise<void> {
   const runId = `run_${nanoid()}`;
   const startedAt = Date.now();
 
-  db.prepare(
+  await db.prepare(
     `INSERT INTO automation_runs (id, automation_id, status, started_at)
      VALUES (?, ?, 'running', ?)`
   ).run(runId, auto.id, startedAt);
@@ -153,12 +153,12 @@ async function fireAutomation(auto: AutomationRow): Promise<void> {
 
     const finishedAt = Date.now();
     const status = error ? "failed" : "completed";
-    db.prepare(
+    await db.prepare(
       `UPDATE automation_runs
          SET status = ?, output = ?, error = ?, finished_at = ?
        WHERE id = ?`
     ).run(status, output.slice(0, 100_000), error, finishedAt, runId);
-    db.prepare(
+    await db.prepare(
       `UPDATE automations
          SET last_run_at = ?, last_error = ?, updated_at = ?
        WHERE id = ?`
@@ -170,12 +170,12 @@ async function fireAutomation(auto: AutomationRow): Promise<void> {
   } catch (e: any) {
     const finishedAt = Date.now();
     const msg = e?.message ?? String(e);
-    db.prepare(
+    await db.prepare(
       `UPDATE automation_runs
          SET status = 'failed', error = ?, finished_at = ?
        WHERE id = ?`
     ).run(msg, finishedAt, runId);
-    db.prepare(
+    await db.prepare(
       `UPDATE automations
          SET last_run_at = ?, last_error = ?, updated_at = ?
        WHERE id = ?`
@@ -190,7 +190,7 @@ async function fireAutomation(auto: AutomationRow): Promise<void> {
  * double-firing if a tick is already running it.
  */
 export async function fireAutomationById(automationId: string): Promise<string> {
-  const row = db.prepare("SELECT * FROM automations WHERE id = ?").get(automationId) as AutomationRow | undefined;
+  const row = await db.prepare("SELECT * FROM automations WHERE id = ?").get(automationId) as AutomationRow | undefined;
   if (!row) throw new Error("automation not found");
   if (inFlight.has(row.id)) throw new Error("already in flight");
   inFlight.add(row.id);
@@ -200,7 +200,7 @@ export async function fireAutomationById(automationId: string): Promise<string> 
     inFlight.delete(row.id);
   }
   // Return the most recent run row for this automation
-  const r = db.prepare(
+  const r = await db.prepare(
     "SELECT id FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT 1"
   ).get(automationId) as { id: string } | undefined;
   return r?.id ?? "";
@@ -252,7 +252,7 @@ export const AutomationScheduler = {
   },
   /** Manually fire a single automation now (admin/debug). */
   async fireNow(automationId: string): Promise<{ ok: boolean; error?: string }> {
-    const row = db.prepare("SELECT * FROM automations WHERE id = ?").get(automationId) as AutomationRow | undefined;
+    const row = await db.prepare("SELECT * FROM automations WHERE id = ?").get(automationId) as AutomationRow | undefined;
     if (!row) return { ok: false, error: "not found" };
     if (inFlight.has(row.id)) return { ok: false, error: "already in flight" };
     inFlight.add(row.id);
@@ -272,7 +272,7 @@ async function tick(): Promise<void> {
   running = true;
   const start = Date.now();
   try {
-    const due = loadDueAutomations(Date.now());
+    const due = await loadDueAutomations(Date.now());
     for (const auto of due) {
       if (inFlight.has(auto.id)) continue; // skip if previous fire still running
       inFlight.add(auto.id);

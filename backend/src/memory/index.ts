@@ -49,19 +49,19 @@ function rowToItem(r: Row): MemoryItem {
 
 export const MemoryStore = {
   /** Upsert by (agent, kind, key). Returns the (existing or new) id. */
-  upsert(agentId: string, ownerUserId: string, kind: MemoryKind, key: string, value: string, source = "agent"): string {
+  async upsert(agentId: string, ownerUserId: string, kind: MemoryKind, key: string, value: string, source = "agent"): string {
     const now = Date.now();
-    const existing = db.prepare(
+    const existing = await db.prepare(
       `SELECT id, created_at FROM memory_items WHERE agent_id = ? AND kind = ? AND key = ?`
     ).get(agentId, kind, key) as { id: string; created_at: number } | undefined;
     if (existing) {
-      db.prepare(
+      await db.prepare(
         `UPDATE memory_items SET value = ?, source = ?, owner_user_id = ?, updated_at = ? WHERE id = ?`
       ).run(value, source, ownerUserId, now, existing.id);
       return existing.id;
     }
     const id = `mem_${nanoid(10)}`;
-    db.prepare(
+    await db.prepare(
       `INSERT INTO memory_items (id, agent_id, owner_user_id, kind, key, value, source, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, agentId, ownerUserId, kind, key, value, source, now, now);
@@ -76,35 +76,35 @@ export const MemoryStore = {
       params.push(kind);
     }
     params.push(limit);
-    return (db.prepare(
+    return await (await db.prepare(
       `SELECT * FROM memory_items WHERE ${where} ORDER BY updated_at DESC LIMIT ?`
     ).all(...params) as Row[]).map(rowToItem);
   },
 
   get(id: string, ownerUserId: string): MemoryItem | null {
-    const row = db.prepare(
+    const row = await db.prepare(
       `SELECT * FROM memory_items WHERE id = ? AND owner_user_id = ?`
     ).get(id, ownerUserId) as Row | undefined;
     return row ? rowToItem(row) : null;
   },
 
-  update(id: string, ownerUserId: string, value: string, source?: string): boolean {
+  async update(id: string, ownerUserId: string, value: string, source?: string): boolean {
     const now = Date.now();
     const r = source
-      ? db.prepare(`UPDATE memory_items SET value = ?, source = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?`)
+      ? await db.prepare(`UPDATE memory_items SET value = ?, source = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?`)
           .run(value, source, now, id, ownerUserId)
-      : db.prepare(`UPDATE memory_items SET value = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?`)
+      : await db.prepare(`UPDATE memory_items SET value = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?`)
           .run(value, now, id, ownerUserId);
     return r.changes > 0;
   },
 
-  remove(id: string, ownerUserId: string): boolean {
-    const r = db.prepare(`DELETE FROM memory_items WHERE id = ? AND owner_user_id = ?`).run(id, ownerUserId);
+  async remove(id: string, ownerUserId: string): boolean {
+    const r = await db.prepare(`DELETE FROM memory_items WHERE id = ? AND owner_user_id = ?`).run(id, ownerUserId);
     return r.changes > 0;
   },
 
-  clear(agentId: string, ownerUserId: string): number {
-    const r = db.prepare(`DELETE FROM memory_items WHERE agent_id = ? AND owner_user_id = ?`).run(agentId, ownerUserId);
+  async clear(agentId: string, ownerUserId: string): number {
+    const r = await db.prepare(`DELETE FROM memory_items WHERE agent_id = ? AND owner_user_id = ?`).run(agentId, ownerUserId);
     return r.changes;
   },
 };

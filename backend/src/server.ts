@@ -3,6 +3,7 @@
  * Boots DB, security, tools, skills, MCP, memory, then serves on PORT.
  */
 import "./db/index.ts";
+import { initSchema } from "./db/index.ts";
 import "./security/auth.ts";
 import "./tools/builtin.ts";
 import "./tools/skill_tools.ts";
@@ -16,6 +17,7 @@ import { AutomationScheduler } from "./automations/scheduler.ts";
 
 Skills.init();
 Skills.seedUserSkills();
+await initSchema(); // run PG schema migrations
 
 // Boot any saved MCP servers
 mcpManager.startAll();

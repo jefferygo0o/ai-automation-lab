@@ -43,36 +43,36 @@ function rowToConfig(r: McpServerRow): McpServerConfig & { id: string; enabled: 
 }
 
 export const McpStore = {
-  list(): Array<McpServerConfig & { id: string; enabled: boolean; connected: boolean }> {
-    return (db.prepare("SELECT * FROM mcp_servers ORDER BY name").all() as McpServerRow[]).map((r) => {
+  async list(): Promise<Array<McpServerConfig & { id: string; enabled: boolean; connected: boolean }>> {
+    return await (await db.prepare("SELECT * FROM mcp_servers ORDER BY name").all() as McpServerRow[]).map((r) => {
       const cfg = rowToConfig(r);
       return { ...cfg, connected: mcpManager.isConnected(cfg.name) };
     });
   },
-  get(id: string) {
-    const r = db.prepare("SELECT * FROM mcp_servers WHERE id = ?").get(id) as McpServerRow | undefined;
+  async get(id: string) {
+    const r = await db.prepare("SELECT * FROM mcp_servers WHERE id = ?").get(id) as McpServerRow | undefined;
     return r ? rowToConfig(r) : null;
   },
-  upsert(input: { name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }, ownerId: string): McpServerConfig & { id: string; enabled: boolean } {
-    const existing = db.prepare("SELECT id FROM mcp_servers WHERE name = ?").get(input.name) as { id: string } | undefined;
+  async upsert(input: { name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }, ownerId: string): Promise<McpServerConfig & { id: string; enabled: boolean }> {
+    const existing = await db.prepare("SELECT id FROM mcp_servers WHERE name = ?").get(input.name) as { id: string } | undefined;
     const args = JSON.stringify(input.args ?? []);
     const env = JSON.stringify(input.env ?? {});
     const enabled = input.enabled === false ? 0 : 1;
     if (existing) {
-      db.prepare("UPDATE mcp_servers SET command=?, args=?, env=?, enabled=? WHERE id=?")
+      await db.prepare("UPDATE mcp_servers SET command=?, args=?, env=?, enabled=? WHERE id=?")
         .run(input.command, args, env, enabled, existing.id);
       return this.get(existing.id)!;
     }
     const id = `mcp_${nanoid(10)}`;
-    db.prepare("INSERT INTO mcp_servers (id, owner_id, name, command, args, env, enabled, created_at) VALUES (?,?,?,?,?,?,?,?)")
+    await db.prepare("INSERT INTO mcp_servers (id, owner_id, name, command, args, env, enabled, created_at) VALUES (?,?,?,?,?,?,?,?)")
       .run(id, ownerId, input.name, input.command, args, env, enabled, Date.now());
     return { id, name: input.name, command: input.command, args: input.args ?? [], env: input.env ?? {}, enabled: !!enabled };
   },
-  delete(id: string): boolean {
-    return db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id).changes > 0;
+  async delete(id: string): boolean {
+    return await db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id).changes > 0;
   },
-  setEnabled(id: string, enabled: boolean) {
-    db.prepare("UPDATE mcp_servers SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
+  async setEnabled(id: string, enabled: boolean) {
+    await db.prepare("UPDATE mcp_servers SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
   },
 };
 
@@ -150,7 +150,7 @@ class McpManager {
         capabilities: {},
         clientInfo: { name: "ai-automation-lab", version: "0.1.0" },
       }, 10_000);
-      const toolsResult = (await this.rpc(live, "tools/list", {}, 10_000)) as { tools: any[] };
+      const toolsResult = async (await this.rpc(live, "tools/list", {}, 10_000)) as { tools: any[] };
       live.tools = toolsResult.tools ?? [];
       live.status = "ready";
       try {

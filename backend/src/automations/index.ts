@@ -58,10 +58,10 @@ export const automationsApi = new Hono();
 
 // ---- Routes (relative to mount point /api/automations) ----
 
-automationsApi.get("/", (c) => {
+automationsApi.get("/", async (c) => {
   const userId = c.get("userId") as string;
   const now = Date.now();
-  const rows = db.query(
+  const rows = await db.query(
     "SELECT * FROM automations WHERE owner_id = ? ORDER BY created_at DESC"
   ).all(userId) as Automation[];
   return c.json({
@@ -73,9 +73,9 @@ automationsApi.get("/", (c) => {
   });
 });
 
-automationsApi.get("/:id", (c) => {
+automationsApi.get("/:id", async (c) => {
   const userId = c.get("userId") as string;
-  const row = db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?")
+  const row = await db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?")
     .get(c.req.param("id"), userId) as Automation | undefined;
   if (!row) return c.json({ error: "not found" }, 404);
   return c.json({ automation: format(row) });
@@ -95,7 +95,7 @@ automationsApi.post("/", async (c) => {
   }
   const id = `auto_${nanoid()}`;
   const now = Date.now();
-  db.query(
+  await db.query(
     `INSERT INTO automations (id, owner_id, name, agent_id, rrule, prompt, active, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
@@ -143,26 +143,26 @@ automationsApi.put("/:id", async (c) => {
   sets.push("updated_at = ?");
   vals.push(Date.now());
   vals.push(c.req.param("id"), userId);
-  const result = db.query(
+  const result = await db.query(
     `UPDATE automations SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`
   ).run(...vals);
   if (!result.changes) return c.json({ error: "not found" }, 404);
   return c.json({ ok: true });
 });
 
-automationsApi.delete("/:id", (c) => {
+automationsApi.delete("/:id", async (c) => {
   const userId = c.get("userId") as string;
-  const result = db.query("DELETE FROM automations WHERE id = ? AND owner_id = ?")
+  const result = await db.query("DELETE FROM automations WHERE id = ? AND owner_id = ?")
     .run(c.req.param("id"), userId);
   return c.json({ ok: result.changes > 0 });
 });
 
-automationsApi.get("/:id/runs", (c) => {
+automationsApi.get("/:id/runs", async (c) => {
   const userId = c.get("userId") as string;
-  const auto = db.query("SELECT id FROM automations WHERE id = ? AND owner_id = ?")
+  const auto = await db.query("SELECT id FROM automations WHERE id = ? AND owner_id = ?")
     .get(c.req.param("id"), userId);
   if (!auto) return c.json({ error: "not found" }, 404);
-  const runs = db.query(
+  const runs = await db.query(
     "SELECT * FROM automation_runs WHERE automation_id = ? ORDER BY started_at DESC LIMIT 50"
   ).all(c.req.param("id")) as AutomationRun[];
   return c.json({ runs });
@@ -170,10 +170,10 @@ automationsApi.get("/:id/runs", (c) => {
 
 // Scheduler liveness + per-automation due-time view. Frontend polls this to
 // show "next run in" and whether the background loop is alive.
-automationsApi.get("/scheduler/status", (c) => {
+automationsApi.get("/scheduler/status", async (c) => {
   const userId = c.get("userId") as string;
   const now = Date.now();
-  const rows = db.query(
+  const rows = await db.query(
     "SELECT * FROM automations WHERE owner_id = ? ORDER BY created_at DESC"
   ).all(userId) as Automation[];
   const enriched = rows.map((r) => ({
@@ -195,7 +195,7 @@ automationsApi.get("/scheduler/status", (c) => {
 // for testing before waiting on the timer.
 automationsApi.post("/:id/run-now", async (c) => {
   const userId = c.get("userId") as string;
-  const row = db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?")
+  const row = await db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?")
     .get(c.req.param("id"), userId) as Automation | undefined;
   if (!row) return c.json({ error: "not found" }, 404);
   const runId = await fireAutomationById(row.id);

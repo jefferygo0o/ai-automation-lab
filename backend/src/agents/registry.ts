@@ -96,46 +96,46 @@ function pathForSkills(id: string): string {
   return path.join(process.env.LAB_DATA_DIR ?? "/home/workspace/Projects/ai-automation-lab/data", "agents", id, "skills");
 }
 
-function updateHash(id: string): void {
+async function updateHash(id: string): void {
   try {
     const hash = computeAgentHash(id);
-    db.prepare(`UPDATE agents SET hash = ?, runtime = ? WHERE id = ?`).run(hash, AGENT_RUNTIME, id);
+    await db.prepare(`UPDATE agents SET hash = ?, runtime = ? WHERE id = ?`).run(hash, AGENT_RUNTIME, id);
   } catch (e) {
     console.error(`[agents] failed to update hash for ${id}:`, e);
   }
 }
 
 export const AgentStore = {
-  create(ownerId: string, name: string, description = ""): AgentRecord {
+  async create(ownerId: string, name: string, description = ""): AgentRecord {
     const id = `agent_${nanoid(10)}`;
     const now = Date.now();
     ensureAgentDir(id);
     const hash = computeAgentHash(id);
-    db.prepare(
+    await db.prepare(
       `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, ownerId, name, description, now, now, hash, AGENT_RUNTIME);
     return { id, ownerId, name, description, createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME };
   },
 
-  get(id: string, ownerId: string): AgentRecord | null {
-    const row = db.prepare(`SELECT * FROM agents WHERE id = ? AND owner_id = ?`).get(id, ownerId) as AgentRow | undefined;
+  async get(id: string, ownerId: string): Promise<AgentRecord | null> {
+    const row = await db.prepare(`SELECT * FROM agents WHERE id = ? AND owner_id = ?`).get(id, ownerId) as AgentRow | undefined;
     return row ? rowToAgent(row) : null;
   },
 
-  list(ownerId: string): AgentRecord[] {
-    return (db.prepare(`SELECT * FROM agents WHERE owner_id = ? ORDER BY updated_at DESC`).all(ownerId) as AgentRow[]).map(rowToAgent);
+  async list(ownerId: string): Promise<AgentRecord[]> {
+    return (await db.prepare(`SELECT * FROM agents WHERE owner_id = ? ORDER BY updated_at DESC`).all(ownerId) as AgentRow[]).map(rowToAgent);
   },
 
-  rename(id: string, ownerId: string, name: string, description?: string): boolean {
-    const r = db.prepare(
+  async rename(id: string, ownerId: string, name: string, description?: string): boolean {
+    const r = await db.prepare(
       `UPDATE agents SET name = ?, description = COALESCE(?, description), updated_at = ? WHERE id = ? AND owner_id = ?`,
     ).run(name, description ?? null, Date.now(), id, ownerId);
     updateHash(id);
     return r.changes > 0;
   },
 
-  delete(id: string, ownerId: string): boolean {
-    const r = db.prepare(`DELETE FROM agents WHERE id = ? AND owner_id = ?`).run(id, ownerId);
+  async delete(id: string, ownerId: string): boolean {
+    const r = await db.prepare(`DELETE FROM agents WHERE id = ? AND owner_id = ?`).run(id, ownerId);
     if (r.changes > 0) {
       deleteAgentFs(id);
       rmSync(path.join(path.dirname(AGENTS_DIR), "sandboxes", id), { recursive: true, force: true });
@@ -143,21 +143,21 @@ export const AgentStore = {
     return r.changes > 0;
   },
 
-  clone(id: string, ownerId: string, newName?: string): AgentRecord | null {
+  async clone(id: string, ownerId: string, newName?: string): Promise<AgentRecord | null> {
     const src = AgentStore.get(id, ownerId);
     if (!src) return null;
     const newId = `agent_${nanoid(10)}`;
     cloneAgentFs(id, newId);
     const now = Date.now();
     const hash = computeAgentHash(newId);
-    db.prepare(
+    await db.prepare(
       `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(newId, ownerId, newName ?? `${src.name} (copy)`, src.description, now, now, hash, AGENT_RUNTIME);
     return { id: newId, ownerId, name: newName ?? `${src.name} (copy)`, description: src.description, createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME };
   },
 
-  readFile(id: string, ownerId: string, name: string): { name: string; content: string; size: number; mtime: number } {
-    const a = AgentStore.get(id, ownerId);
+  async readFile(id: string, ownerId: string, name: string): Promise<{ name: string; content: string; size: number; mtime: number }> {
+    const a = await AgentStore.get(id, ownerId);
     if (!a) throw new Error("agent not found");
     if (!AGENT_FILE_NAMES.includes(name as any) && !name.startsWith("skills/")) {
       throw new Error(`file not allowed: ${name}`);
@@ -168,8 +168,8 @@ export const AgentStore = {
     return { name, content: readAgentFile(id, name), size: meta.size, mtime: meta.mtime };
   },
 
-  writeFile(id: string, ownerId: string, name: string, content: string): { ok: boolean; error?: string } {
-    const a = AgentStore.get(id, ownerId);
+  async writeFile(id: string, ownerId: string, name: string, content: string): Promise<{ ok: boolean; error?: string }> {
+    const a = await AgentStore.get(id, ownerId);
     if (!a) return { ok: false, error: "agent not found" };
     if (!AGENT_FILE_NAMES.includes(name as any) && !name.startsWith("skills/")) {
       return { ok: false, error: `file not allowed: ${name}` };
@@ -178,7 +178,7 @@ export const AgentStore = {
       // snapshot before overwrite
       try {
         const old = readAgentFile(id, name);
-        recordHistory(id, name, old);
+        await recordHistory(id, name, old);
       } catch {
         // file doesn't exist yet, no history to record
       }
@@ -189,28 +189,28 @@ export const AgentStore = {
     }
   },
 
-  listFiles(id: string, ownerId: string) {
-    const a = AgentStore.get(id, ownerId);
+  async listFiles(id: string, ownerId: string): Promise<{ name: string; size: number; mtime: number }[]> {
+    const a = await AgentStore.get(id, ownerId);
     if (!a) throw new Error("agent not found");
     return listAgentFiles(id);
   },
 
-  updateConfig(id: string, ownerId: string, partial: Partial<AgentConfig>): AgentConfig {
+  async updateConfig(id: string, ownerId: string, partial: Partial<AgentConfig>): AgentConfig {
     const current = readAgentConfig(id);
     const next: AgentConfig = { ...current, ...partial, sandbox: { ...current.sandbox, ...(partial.sandbox ?? {}) } };
     writeAgentConfig(id, next);
-    db.prepare(`UPDATE agents SET updated_at = ? WHERE id = ?`).run(Date.now(), id);
+    await db.prepare(`UPDATE agents SET updated_at = ? WHERE id = ?`).run(Date.now(), id);
     updateHash(id);
     return next;
   },
 
-  resolveLLMConfig(id: string, ownerId: string) {
+  async resolveLLMConfig(id: string, ownerId: string) {
     const a = AgentStore.get(id, ownerId);
     if (!a) throw new Error("agent not found");
     const cfg = readAgentConfig(id);
     let apiKey = "";
     if (cfg.apiKeySecret) {
-      const row = db.prepare(`SELECT ciphertext, iv, auth_tag FROM secrets WHERE id = ? AND owner_id = ?`)
+      const row = await db.prepare(`SELECT ciphertext, iv, auth_tag FROM secrets WHERE id = ? AND owner_id = ?`)
         .get(cfg.apiKeySecret, ownerId) as { ciphertext: string; iv: string; auth_tag: string } | undefined;
       if (row) {
         apiKey = decryptSecret({ ciphertext: row.ciphertext, iv: row.iv, authTag: row.auth_tag });
@@ -226,17 +226,17 @@ export const AgentStore = {
     };
   },
 
-  exportPack(id: string, ownerId: string) {
-    const a = AgentStore.get(id, ownerId);
+  async exportPack(id: string, ownerId: string): Promise<{ manifest: any; files: any }> {
+    const a = await AgentStore.get(id, ownerId);
     if (!a) throw new Error("agent not found");
     return { ...packAgent(id), manifest: { ...packAgent(id).manifest, name: a.name, description: a.description } };
   },
 
-  importPack(ownerId: string, pack: any, newId?: string): AgentRecord {
+  async importPack(ownerId: string, pack: any, newId?: string): AgentRecord {
     const id = unpackAgent(pack, newId ? `agent_${newId}` : undefined);
     const now = Date.now();
     const hash = computeAgentHash(id);
-    db.prepare(
+    await db.prepare(
       `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(id, ownerId, pack.manifest?.name ?? "Imported Agent", pack.manifest?.description ?? "", now, now, hash, AGENT_RUNTIME);
     return { id, ownerId, name: pack.manifest?.name ?? "Imported Agent", description: pack.manifest?.description ?? "", createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME };
