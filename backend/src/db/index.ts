@@ -85,3 +85,18 @@ for (const m of migrations) {
 
 console.log("[db] open", DB_PATH);
 export { db };
+
+  // ─── Migrations lost during SQLite revert ───
+  { id: "memory_items.owner_user_id", run: () => { if (!columnExists("memory_items", "owner_user_id")) db.exec("ALTER TABLE memory_items ADD COLUMN owner_user_id TEXT;"); } },
+  { id: "runs.status_index", run: () => { if (!columnExists("runs", "status_index")) db.exec("ALTER TABLE runs ADD COLUMN status_index INTEGER NOT NULL DEFAULT 0;"); } },
+  { id: "catalog_app_cache", run: () => {
+    if (!tableExists("catalog_app_cache")) {
+      db.exec("CREATE TABLE IF NOT EXISTS catalog_app_cache (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, app_slug TEXT NOT NULL, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', auth_type TEXT NOT NULL DEFAULT 'none', auth_description TEXT NOT NULL DEFAULT '', action_count INTEGER NOT NULL DEFAULT 0, trigger_count INTEGER NOT NULL DEFAULT 0, logo_url TEXT NOT NULL DEFAULT '', categories_json TEXT NOT NULL DEFAULT '[]', fetched_at INTEGER NOT NULL, UNIQUE(owner_id, app_slug));");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_catalog_cache_owner ON catalog_app_cache(owner_id);");
+    }
+  }},
+  { id: "catalog_sync_state", run: () => {
+    if (!tableExists("catalog_sync_state")) {
+      db.exec("CREATE TABLE IF NOT EXISTS catalog_sync_state (owner_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'idle', total INTEGER NOT NULL DEFAULT 0, error_message TEXT, started_at INTEGER NOT NULL DEFAULT 0, completed_at INTEGER);");
+    }
+  }},

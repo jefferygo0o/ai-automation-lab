@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS memory_items (
   kind TEXT NOT NULL,        -- fact | preference | reference | task
   key TEXT NOT NULL,
   value TEXT NOT NULL,
+  owner_user_id TEXT,
   source TEXT NOT NULL DEFAULT "agent",
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
