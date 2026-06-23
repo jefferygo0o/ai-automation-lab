@@ -2,16 +2,15 @@
 -- Mirrors the SQLite schema with PG-idiomatic types.
 
 CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
   created_at BIGINT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
   token TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   created_at BIGINT NOT NULL,
   expires_at BIGINT NOT NULL
 );
@@ -19,7 +18,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
 CREATE TABLE IF NOT EXISTS secrets (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   ciphertext TEXT NOT NULL,
   iv TEXT NOT NULL,
@@ -38,7 +37,7 @@ CREATE TABLE IF NOT EXISTS rate_counters (
 
 CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   tags TEXT NOT NULL DEFAULT '[]',
@@ -51,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id);
 CREATE TABLE IF NOT EXISTS chats (
   id TEXT PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title TEXT NOT NULL DEFAULT 'New chat',
   active_agent_id TEXT,
   last_message_at BIGINT,
@@ -140,7 +139,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_agent ON memory_items(agent_id);
 
 CREATE TABLE IF NOT EXISTS mcp_servers (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   transport TEXT NOT NULL DEFAULT 'stdio',
   command TEXT,
@@ -154,7 +153,7 @@ CREATE INDEX IF NOT EXISTS idx_mcp_owner ON mcp_servers(owner_id);
 
 CREATE TABLE IF NOT EXISTS skills (
   id TEXT PRIMARY KEY,
-  owner_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NOT NULL,
   category TEXT NOT NULL DEFAULT 'general',
@@ -167,7 +166,7 @@ CREATE INDEX IF NOT EXISTS idx_skills_owner ON skills(owner_id);
 
 CREATE TABLE IF NOT EXISTS automations (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -194,7 +193,7 @@ CREATE INDEX IF NOT EXISTS idx_automation_runs_auto ON automation_runs(automatio
 
 CREATE TABLE IF NOT EXISTS space_routes (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   path TEXT NOT NULL,
   type TEXT NOT NULL DEFAULT 'page',
   code TEXT NOT NULL DEFAULT '',
@@ -207,7 +206,7 @@ CREATE INDEX IF NOT EXISTS idx_space_routes_owner ON space_routes(owner_id);
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   actor TEXT NOT NULL,
   action TEXT NOT NULL,
   target_id TEXT,
@@ -223,7 +222,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_target ON audit_log(owner_id, target_type, 
 
 CREATE TABLE IF NOT EXISTS approval_requests (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   run_id TEXT,
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -243,7 +242,7 @@ CREATE INDEX IF NOT EXISTS idx_approvals_chat ON approval_requests(chat_id, crea
 
 CREATE TABLE IF NOT EXISTS webhook_endpoints (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -259,7 +258,7 @@ CREATE INDEX IF NOT EXISTS idx_webhooks_owner ON webhook_endpoints(owner_id);
 
 CREATE TABLE IF NOT EXISTS agent_templates (
   id TEXT PRIMARY KEY,
-  owner_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   category TEXT NOT NULL DEFAULT 'general',
@@ -277,7 +276,7 @@ CREATE INDEX IF NOT EXISTS idx_templates_owner ON agent_templates(owner_id, cate
 
 CREATE TABLE IF NOT EXISTS chat_feedback (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   message_id TEXT NOT NULL,
   rating INTEGER NOT NULL,
@@ -289,7 +288,7 @@ CREATE INDEX IF NOT EXISTS idx_feedback_msg ON chat_feedback(message_id);
 
 CREATE TABLE IF NOT EXISTS scheduled_jobs (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   job_type TEXT NOT NULL,
   payload_json TEXT NOT NULL DEFAULT '{}',
@@ -303,7 +302,7 @@ CREATE INDEX IF NOT EXISTS idx_scheduled_owner ON scheduled_jobs(owner_id);
 
 CREATE TABLE IF NOT EXISTS observability_metrics (
   id TEXT PRIMARY KEY,
-  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   metric TEXT NOT NULL,
   bucket TEXT NOT NULL,
   count INTEGER NOT NULL DEFAULT 0,

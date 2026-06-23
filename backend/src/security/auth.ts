@@ -1,24 +1,6 @@
-import { scryptSync, randomBytes, timingSafeEqual } from "node:crypto";
-import { nanoid } from "nanoid";
+import { timingSafeEqual } from "node:crypto";
 import { db } from "../db/index.ts";
-
-const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
-export function hashPassword(plain: string): string {
-  const salt = randomBytes(16);
-  const derived = scryptSync(plain, salt, 64);
-  return `${salt.toString("hex")}:${derived.toString("hex")}`;
-}
-
-export function verifyPassword(plain: string, stored: string): boolean {
-  const [saltHex, hashHex] = stored.split(":");
-  if (!saltHex || !hashHex) return false;
-  const salt = Buffer.from(saltHex, "hex");
-  const expected = Buffer.from(hashHex, "hex");
-  const candidate = scryptSync(plain, salt, 64);
-  if (candidate.length !== expected.length) return false;
-  return timingSafeEqual(candidate, expected);
-}
+import { supabaseAdmin } from "./supabase.ts";
 
 export interface Session {
   token: string;
@@ -26,58 +8,71 @@ export interface Session {
   expiresAt: number;
 }
 
-export function createUser(email: string, password: string): { id: string; email: string } {
-  const id = `usr_${nanoid(12)}`;
+export async function createUser(email: string, password: string): Promise<{ id: string; email: string } | null> {
+  if (!supabaseAdmin) {
+    console.error("[auth] Supabase not configured");
+    return null;
+  }
+  const { data, error } = await supabaseAdmin.auth.admin.createUser({
+    email: email.toLowerCase(),
+    password,
+    email_confirm: true,
+  });
+  if (error || !data.user) {
+    console.error("[auth] Supabase create user failed:", error?.message);
+    return null;
+  }
+  const uid = data.user.id;
   const now = Date.now();
+  // Upsert into our users table — id is the Supabase Auth UUID
   db.prepare(
-    `INSERT INTO users (id, email, password_hash, role, created_at) VALUES (?, ?, ?, 'user', ?)`
-  ).run(id, email.toLowerCase(), hashPassword(password), now);
-  return { id, email: email.toLowerCase() };
+    `INSERT OR IGNORE INTO users (id, email, password_hash, role, created_at) VALUES (?, ?, '', 'user', ?)`
+  ).run(uid, email.toLowerCase(), now);
+  return { id: uid, email: email.toLowerCase() };
 }
 
-export function findUserByEmail(email: string) {
-  return db.prepare(
-    `SELECT id, email, password_hash FROM users WHERE email = ?`
-  ).get(email.toLowerCase()) as { id: string; email: string; password_hash: string } | undefined;
+export async function login(email: string, password: string): Promise<Session | null> {
+  if (!supabaseAdmin) {
+    console.error("[auth] Supabase not configured");
+    return null;
+  }
+  // Sign in with Supabase
+  const { data, error } = await supabaseAdmin.auth.signInWithPassword({
+    email: email.toLowerCase(),
+    password,
+  });
+  if (error || !data.session) {
+    return null;
+  }
+  return {
+    token: data.session.access_token,
+    userId: data.user.id,
+    expiresAt: data.session.expires_at ? data.session.expires_at * 1000 : Date.now() + 3600000,
+  };
 }
 
-export function findUserById(id: string) {
+export async function authenticateBearer(authHeader: string | undefined): Promise<{ userId: string } | null> {
+  if (!authHeader || !supabaseAdmin) return null;
+  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (!m || !m[1]) return null;
+  const { data, error } = await supabaseAdmin.auth.getUser(m[1]);
+  if (error || !data.user) return null;
+  return { userId: data.user.id };
+}
+
+export function deleteSession(token: string): void {
+  // Supabase sessions are JWT-based; we don't store them in our DB.
+  // The token will expire naturally. No-op for now.
+}
+
+export function findUserById(id: string): { id: string; email: string; role: string } | undefined {
   return db.prepare(
     `SELECT id, email, role FROM users WHERE id = ?`
   ).get(id) as { id: string; email: string; role: string } | undefined;
 }
 
-export function createSession(userId: string): Session {
-  const token = `tok_${nanoid(32)}`;
-  const expires = Date.now() + SESSION_TTL_MS;
-  db.prepare(`INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)`).run(
-    token, userId, Date.now(), expires,
-  );
-  return { token, userId, expiresAt: expires };
-}
-
-export function deleteSession(token: string): void {
-  db.prepare(`DELETE FROM sessions WHERE token = ?`).run(token);
-}
-
-export function authenticateBearer(authHeader: string | undefined): { userId: string } | null {
-  if (!authHeader) return null;
-  const m = authHeader.match(/^Bearer\s+(.+)$/i);
-  if (!m || !m[1]) return null;
-  const row = db.prepare(
-    `SELECT user_id, expires_at FROM sessions WHERE token = ?`
-  ).get(m[1]) as { user_id: string; expires_at: number } | undefined;
-  if (!row) return null;
-  if (row.expires_at < Date.now()) {
-    deleteSession(m[1]);
-    return null;
-  }
-  return { userId: row.user_id };
-}
-
-export function login(email: string, password: string): Session | null {
-  const u = findUserByEmail(email);
-  if (!u) return null;
-  if (!verifyPassword(password, u.password_hash)) return null;
-  return createSession(u.id);
+export function findUserByEmail(email: string): { id: string; email: string } | undefined {
+  return db.prepare(
+    `SELECT id, email FROM users WHERE email = ?`
+  ).get(email.toLowerCase()) as { id: string; email: string } | undefined;
 }

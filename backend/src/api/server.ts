@@ -48,7 +48,7 @@ api.use("/api/*", async (c, next) => {
     path === "/api/auth/register" ||
     path === "/api/health";
   if (!PUBLIC) {
-    const auth = authenticateBearer(c.req.raw.headers.get("authorization") ?? undefined);
+    const auth = await authenticateBearer(c.req.raw.headers.get("authorization") ?? undefined);
     if (!auth) return c.json({ error: "unauthorized" }, 401);
     const rl = rateLimit(`u:${auth.userId}`, { perMinute: 240, perHour: 10_000 });
     if (!rl.allowed) {
@@ -66,7 +66,7 @@ api.get("/api/health", (c) => c.json({ ok: true, time: Date.now() }));
 api.post("/api/auth/login", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { email?: string; password?: string };
   if (!body.email || !body.password) return c.json({ error: "email and password required" }, 400);
-  const session = login(body.email, body.password);
+  const session = await login(body.email, body.password);
   if (!session) return c.json({ error: "invalid credentials" }, 401);
   Audit.record({
     ownerId: session.userId,
@@ -84,7 +84,8 @@ api.post("/api/auth/register", async (c) => {
     return c.json({ error: "email and password (>=8 chars) required" }, 400);
   }
   try {
-    const user = createUser(body.email, body.password);
+    const user = await createUser(body.email, body.password);
+    if (!user) return c.json({ error: "registration failed — check Supabase config" }, 500);
     Audit.record({
       ownerId: user.id,
       actor: "user",
