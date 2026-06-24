@@ -17,38 +17,37 @@ function getPool(): Pool {
     );
     throw new Error("SUPABASE_DB_URL is not set");
   }
-  
+
   // Mask password in logged URL for security
   const masked = url.replace(/\/\/[^:]+:[^@]+@/, "//****:****@");
   const isLocal = url.includes("localhost") || url.includes("127.0.0.1") || url.includes("::1");
-  
+
   console.log(`[db] connecting via ${envSource}: ${masked} (ssl=${!isLocal})`);
-  
+
   _pool = new Pool({
     connectionString: url,
     max: 2,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 30000,
     ssl: isLocal ? undefined : { rejectUnauthorized: false },
-    family: 4,
     keepAlive: true,
   });
   _pool.on("error", (err) => {
     console.error("[db] idle client error:", err?.message ?? err);
   });
-  
+
   // Probe connection immediately so failures surface at startup
   _pool.query("SELECT 1").then(() => {
     console.log("[db] connection verified OK");
   }).catch((err) => {
     console.error("[db] *** INITIAL CONNECTION PROBE FAILED ***");
-    console.error(`[db] ${envSource} timed out or was refused. Possible causes:`);
+    console.error(`[db] ${envSource} refused. Possible causes:`);
     console.error(`[db]   1. Supabase project is PAUSED (free tier pauses after 1 wk)`);
-    console.error(`[db]   2. Wrong port — use 6543 (Supabase transaction pooler)`);
+    console.error(`[db]   2. SUPABASE_DB_URL uses wrong hostname — see DEPLOY_RENDER.md`);
     console.error(`[db]   3. Special chars in password need URL encoding`);
     console.error("[db] error:", err?.message ?? err);
   });
-  
+
   return _pool;
 }
 

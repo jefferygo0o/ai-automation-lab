@@ -60,12 +60,41 @@ The disk is mounted as a Render **persistent disk** so it survives deploys and r
 | `LAB_AGENTS_DIR` | `/var/data/lab/agents` | Per-agent filesystem root |
 | `LAB_SANDBOX_ROOT` | `/var/data/lab/sandboxes` | Per-agent sandbox workdir root |
 | `LAB_MASTER_KEY` | (auto-generated) | Encryption key for secrets vault |
-| `SUPABASE_URL` | — | **Required.** Supabase project URL (Settings → API) |
+| `SUPABASE_URL` | — | **Required.** Supabase project URL (Settings → API → Project URL) |
 | `SUPABASE_SERVICE_ROLE_KEY` | — | **Required.** Supabase service_role key (NOT anon key) |
-| `SUPABASE_DB_URL` | — | **Required.** Supabase DB connection string (Transaction pooler, port 6543) |
+| `SUPABASE_DB_URL` | — | **Required.** Supabase DB connection string (see format below) |
 
-> **Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_DB_URL` in Render's dashboard**  
-> (Dashboard → Environment Variables). Do not commit secrets to the repo.
+> **All three `SUPABASE_*` env vars must be set in Render's dashboard** (Dashboard → Environment). Do not commit secrets to the repo.
+
+### Setting SUPABASE_DB_URL
+
+**Correct format (Transaction Pooler — RECOMMENDED):**
+
+```
+postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres?pgbouncer=true
+```
+
+- Go to your Supabase project → **Database settings** → **Connection string**
+- Select the **Transaction Pooler** tab
+- Copy the connection string shown there
+- It will look like the above format
+- This uses port **6543** and has IPv4 addresses, so it works from Render
+
+**⚠️ Common mistakes that cause ECONNREFUSED:**
+
+| Wrong URL | Problem |
+|---|---|
+| `db.<ref>.supabase.co:**6543**/postgres` | Wrong hostname + port combo. Port 6543 only works with the pooler hostname. The `db.*.supabase.co` host is the **direct connection** and only uses port **5432**. |
+| `db.<ref>.supabase.co:**5432**/postgres` | The direct connection hostname is **IPv6-only** — Render can't reach IPv6. Use the pooler instead. |
+| Password with `@`, `:`, `#`, `%` un-encoded | URL-encode special chars (`@` → `%40`, `#` → `%23`) |
+
+### Where to find the values
+
+1. Log into [supabase.com](https://supabase.com) → your project
+2. **Project Settings → API**:
+   - Project URL → `SUPABASE_URL`
+   - `service_role` key (NOT the anon key) → `SUPABASE_SERVICE_ROLE_KEY`
+3. **Project Settings → Database → Connection string** → Transaction Pooler tab → `SUPABASE_DB_URL`
 
 ## Cost
 
