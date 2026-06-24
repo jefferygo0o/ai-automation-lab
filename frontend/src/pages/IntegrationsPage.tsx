@@ -336,6 +336,52 @@ function AppCard({
 // SECTION: Catalog Browser
 // ==============================================================
 
+// Featured apps for Quick Connect section
+const FEATURED_SLUGS = [
+  "gmail",
+  "microsoft_outlook",
+  "twitter",
+  "slack",
+  "n8n",
+  "github",
+  "cloudflare",
+  "stripe",
+  "linkedin",
+  "moltbook",
+];
+
+function FeaturedAppCard({
+  app,
+  onConnect,
+}: {
+  app: PdApp;
+  onConnect: (app: PdApp) => void;
+}) {
+  return (
+    <button
+      onClick={() => onConnect(app)}
+      className="flex items-center gap-3 p-3.5 rounded-lg border border-line bg-paper hover:bg-paper-200/60 hover:shadow-sm transition-all text-left"
+    >
+      <div className="w-10 h-10 rounded-lg bg-ink-100 flex items-center justify-center text-sm font-bold text-ink-600 shrink-0 overflow-hidden border border-line/50">
+        {app.logo_url ? (
+          <img src={app.logo_url} alt="" className="w-full h-full object-contain" />
+        ) : (
+          app.name.charAt(0).toUpperCase()
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-medium text-ink-900 truncate">{app.name}</div>
+        <div className="text-2xs font-mono text-ink-400 uppercase mt-0.5">
+          {app.auth_type === "oauth" ? "OAuth" : app.auth_type === "api_key" ? "API Key" : app.auth_type}
+        </div>
+      </div>
+      <span className="shrink-0 text-xs text-ink-400 hover:text-ink-700">
+        <Plus className="w-4 h-4" />
+      </span>
+    </button>
+  );
+}
+
 function CatalogView({
   onConnect,
   onBack,
@@ -345,290 +391,193 @@ function CatalogView({
   onBack: () => void;
   pdConfigured: boolean;
 }) {
-  const [apps, setApps] = useState<PdApp[]>([]);
-  const [total, setTotal] = useState(0);
-  const [pages, setPages] = useState(1);
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(50);
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [searchResults, setSearchResults] = useState<PdApp[] | null>(null);
+  const [featured, setFeatured] = useState<PdApp[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [featuredLoading, setFeaturedLoading] = useState(true);
   const [error, setError] = useState("");
-  const [categories, setCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState("");
 
-  const fetchPage = useCallback(async (p: number, q: string, cat: string) => {
+  // Fetch featured apps on mount
+  useEffect(() => {
+    setFeaturedLoading(true);
+    Promise.all(
+      FEATURED_SLUGS.map((slug) =>
+        Integrations.catalog({ q: slug, per_page: 5 })
+          .then((res) => {
+            const match = res.apps.find(
+              (a) => a.name_slug === slug || a.name.toLowerCase().replace(/[^a-z0-9]/g, "_") === slug
+            );
+            return match ?? null;
+          })
+          .catch(() => null)
+      )
+    ).then((apps) => {
+      setFeatured(apps.filter(Boolean) as PdApp[]);
+      setFeaturedLoading(false);
+    });
+  }, []);
+
+  const handleSearch = useCallback(async () => {
+    if (!search.trim()) return;
+    setSearchQuery(search);
     setLoading(true);
     setError("");
     try {
-      const res = await Integrations.catalog({
-        q: q || undefined,
-        page: p,
-        per_page: perPage,
-        category: cat || undefined,
-      });
-      setApps(res.apps);
-      setTotal(res.total);
-      setPages(res.pages);
-      setPage(res.page);
+      const res = await Integrations.catalog({ q: search.trim(), per_page: 50 });
+      setSearchResults(res.apps);
     } catch (e: any) {
-      setError(e?.message || "Failed to load catalog");
+      setError(e?.message || "Search failed");
+      setSearchResults(null);
     }
     setLoading(false);
-  }, [perPage]);
+  }, [search]);
 
-  // Initial load and when search/submit changes
-  const doSearch = useCallback(() => {
-    setPage(1);
-    fetchPage(1, searchQuery, selectedCategory);
-  }, [searchQuery, selectedCategory, fetchPage]);
-
-  const goToPage = useCallback((p: number) => {
-    fetchPage(p, searchQuery, selectedCategory);
-  }, [searchQuery, selectedCategory, fetchPage]);
-
-  // Load categories on mount
-  useEffect(() => {
-    Integrations.categories()
-      .then((res) => setCategories(res.categories))
-      .catch(() => {});
-  }, []);
-
-  // Initial load
-  useEffect(() => {
-    fetchPage(1, "", "");
-  }, [fetchPage]);
-
-  const handleSearchKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      setSearchQuery(search);
-      setPage(1);
-    }
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") handleSearch();
   };
 
-  const handleCategoryClick = (cat: string) => {
-    const next = cat === selectedCategory ? "" : cat;
-    setSelectedCategory(next);
-    setSearchQuery("");
-    setSearch("");
-    setPage(1);
-    fetchPage(1, "", next);
-  };
-
-  const handleClearSearch = () => {
+  const clearSearch = () => {
     setSearch("");
     setSearchQuery("");
-    setSelectedCategory("");
-    setPage(1);
-    fetchPage(1, "", "");
+    setSearchResults(null);
+    setError("");
   };
 
-  // Pagination range
-  const pageRange = useMemo(() => {
-    const range: (number | "...")[] = [];
-    const totalP = Math.max(1, pages);
-    if (totalP <= 7) {
-      for (let i = 1; i <= totalP; i++) range.push(i);
-    } else {
-      range.push(1);
-      if (page > 3) range.push("...");
-      for (let i = Math.max(2, page - 1); i <= Math.min(totalP - 1, page + 1); i++) {
-        range.push(i);
-      }
-      if (page < totalP - 2) range.push("...");
-      range.push(totalP);
-    }
-    return range;
-  }, [pages, page]);
+  const showFeatured = !searchQuery && !searchResults;
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <button onClick={onBack} className="btn btn-ghost text-ink-600">
+    <div className="flex flex-col gap-5">
+      {/* Search bar */}
+      <div className="flex items-center gap-2">
+        <button onClick={onBack} className="btn btn-ghost text-ink-600 shrink-0">
           <ChevronLeftIcon /> Back
         </button>
-        <h2 className="serif text-xl text-ink-900">App Catalog</h2>
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-400" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="Search all 2,500+ Pipedream apps..."
+            className="input pl-10 w-full"
+            autoFocus
+          />
+          {search && (
+            <button
+              onClick={clearSearch}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
         <button
-          onClick={() => fetchPage(page, searchQuery, selectedCategory)}
-          className="btn btn-ghost text-ink-600"
-          title="Refresh catalog"
+          onClick={handleSearch}
+          disabled={!search.trim() || loading}
+          className="btn btn-primary"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          {loading ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <Search className="w-3.5 h-3.5" />
+          )}
+          Search
         </button>
       </div>
 
       {!pdConfigured && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
           <Key className="w-3.5 h-3.5 shrink-0" />
-          Set up your Pipedream API key above to browse the full catalog.
-        </div>
-      )}
-
-      {/* Search + Clear */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-ink-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={handleSearchKeyDown}
-            placeholder={`Search ${total || "2,500+"} apps...`}
-            className="input pl-9 font-mono w-full"
-          />
-          {search && (
-            <button
-              onClick={() => { setSearch(""); setSearchQuery(""); setPage(1); fetchPage(1, "", selectedCategory); }}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          )}
-        </div>
-        <button
-          onClick={doSearch}
-          disabled={!search.trim()}
-          className="btn btn-primary"
-        >
-          <Search className="w-3.5 h-3.5" /> Search
-        </button>
-        {(searchQuery || selectedCategory) && (
-          <button onClick={handleClearSearch} className="btn btn-ghost text-ink-600">
-            <X className="w-3 h-3" /> Clear
-          </button>
-        )}
-      </div>
-
-      {/* Category chips */}
-      {categories.length > 0 && !searchQuery && (
-        <div className="flex flex-wrap gap-1.5">
-          <button
-            onClick={() => handleCategoryClick("")}
-            className={`px-2.5 py-1 text-xs rounded-full border transition-colors ${
-              selectedCategory === ""
-                ? "bg-ink-900 text-paper border-ink-900"
-                : "border-line text-ink-500 hover:text-ink-900 hover:border-ink-300"
-            }`}
-          >
-            All
-          </button>
-          {categories.slice(0, 24).map((c) => (
-            <button
-              key={c}
-              onClick={() => handleCategoryClick(c)}
-              className={`px-2.5 py-1 text-xs rounded-full border transition-colors capitalize ${
-                selectedCategory === c
-                  ? "bg-ink-900 text-paper border-ink-900"
-                  : "border-line text-ink-500 hover:text-ink-900 hover:border-ink-300"
-              }`}
-            >
-              {c.replace(/-/g, " ")}
-            </button>
-          ))}
-          {categories.length > 24 && (
-            <span className="text-2xs text-ink-400 self-center">+{categories.length - 24} more</span>
-          )}
-        </div>
-      )}
-
-      {/* Loading state */}
-      {loading && (
-        <div className="flex items-center justify-center py-16 text-ink-400 gap-2">
-          <Loader2 className="w-5 h-5 animate-spin" />
-          <span className="text-sm">Loading catalog...</span>
+          Set up your Pipedream API key above to browse the full catalog and connect apps.
         </div>
       )}
 
       {/* Error state */}
-      {error && !loading && (
-        <div className="flex items-start gap-2 p-4 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+      {error && (
+        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-          <div>
-            <p className="font-medium">Failed to load catalog</p>
-            <p className="text-xs mt-1 text-red-500">{error}</p>
-          </div>
+          <span>{error}</span>
+          <button onClick={() => setError("")} className="ml-auto"><X className="w-3 h-3" /></button>
         </div>
       )}
 
-      {/* App grid */}
-      {!loading && !error && (
-        <>
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-            {apps.map((app) => (
-              <AppCard
-                key={app.name_slug}
-                app={app}
-                onConnect={onConnect}
-                onRefresh={(slug) => {
-                  Integrations.refreshCatalogCache(slug).then(() => {
-                    fetchPage(page, searchQuery, selectedCategory);
-                  }).catch(() => {});
-                }}
-              />
-            ))}
-            {apps.length === 0 && (
-              <div className="col-span-full text-center py-16 text-ink-400">
-                <div className="flex flex-col items-center gap-2">
-                  <Search className="w-8 h-8 stroke-[1]" />
-                  <p className="text-sm">
-                    {searchQuery
-                      ? `No apps matching "${searchQuery}"`
-                      : selectedCategory
-                      ? `No apps in "${selectedCategory}"`
-                      : "No apps found"}
-                  </p>
-                  <button onClick={handleClearSearch} className="btn btn-sm btn-ghost">
-                    Clear filters
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+      {/* Loading search */}
+      {loading && (
+        <div className="flex items-center justify-center py-16 text-ink-400 gap-2">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          <span className="text-sm">Searching Pipedream catalog...</span>
+        </div>
+      )}
 
-          {/* Pagination */}
-          {pages > 1 && (
-            <div className="flex items-center justify-center gap-1 mt-2">
-              <button
-                onClick={() => goToPage(page - 1)}
-                disabled={page <= 1}
-                className="btn btn-ghost btn-icon btn-sm disabled:opacity-30"
-              >
-                <ChevronLeftIcon />
-              </button>
-              {pageRange.map((p, i) =>
-                p === "..." ? (
-                  <span key={`ellipsis-${i}`} className="text-xs text-ink-400 px-1">...</span>
-                ) : (
-                  <button
-                    key={p}
-                    onClick={() => goToPage(p as number)}
-                    className={`px-2.5 py-1 text-xs rounded transition-colors ${
-                      p === page
-                        ? "bg-ink-900 text-paper font-medium"
-                        : "text-ink-500 hover:text-ink-900 hover:bg-paper-200"
-                    }`}
-                  >
-                    {p}
-                  </button>
-                )
-              )}
-              <button
-                onClick={() => goToPage(page + 1)}
-                disabled={page >= pages}
-                className="btn btn-ghost btn-icon btn-sm disabled:opacity-30"
-              >
-                <ChevronRightIcon className="w-4 h-4" />
-              </button>
+      {/* Search results */}
+      {searchResults && !loading && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="serif text-lg text-ink-900">
+              Search results for "{searchQuery}"
+            </h2>
+            <span className="text-xs text-ink-400">{searchResults.length} found</span>
+          </div>
+          {searchResults.length === 0 ? (
+            <div className="flex flex-col items-center py-16 text-ink-400 gap-2">
+              <Search className="w-8 h-8 stroke-[1]" />
+              <p className="text-sm">No apps matching "{searchQuery}"</p>
+              <button onClick={clearSearch} className="btn btn-sm btn-ghost mt-2">Clear search</button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {searchResults.map((app) => (
+                <AppCard
+                  key={app.name_slug}
+                  app={app}
+                  onConnect={onConnect}
+                  onRefresh={() => {}}
+                />
+              ))}
             </div>
           )}
+        </div>
+      )}
 
-          {/* Footer */}
-          <p className="text-2xs text-ink-400 text-center mt-2">
-            Powered by{" "}
-            <a href="https://pipedream.com" target="_blank" rel="noreferrer" className="underline hover:text-ink-700">Pipedream</a>
-            {" "}— {total.toLocaleString()}+ apps available · page {page} of {pages}
-          </p>
-        </>
+      {/* Featured apps (Quick Connect) */}
+      {showFeatured && (
+        <div className="space-y-4">
+          <div>
+            <h2 className="serif text-lg text-ink-900">Quick Connect</h2>
+            <p className="text-xs text-ink-500 mt-1">
+              Popular integrations to connect your agents in one click
+            </p>
+          </div>
+          {featuredLoading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div key={i} className="h-[68px] rounded-lg bg-paper-100/50 border border-line animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+              {featured.map((app) => (
+                <FeaturedAppCard key={app.name_slug} app={app} onConnect={onConnect} />
+              ))}
+            </div>
+          )}
+          <div className="text-center pt-2">
+            <p className="text-xs text-ink-400">
+              Can't find what you need? Search the full{" "}
+              <a
+                href="https://pipedream.com/apps"
+                target="_blank"
+                rel="noreferrer"
+                className="underline hover:text-ink-700"
+              >
+                Pipedream catalog
+              </a>{" "}
+              of 2,500+ apps above.
+            </p>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -688,7 +637,7 @@ function ConnectedView({
           Browse the catalog of 2,500+ apps and connect your first one to start building automations.
         </p>
         <button onClick={onOpenCatalog} className="btn btn-primary">
-          <Search className="w-3.5 h-3.5" /> Browse Catalog
+          <Search className="w-3.5 h-3.5" /> Browse Integrations
         </button>
       </div>
     );
@@ -1311,10 +1260,7 @@ export default function IntegrationsPage() {
                 : "text-ink-400 border-transparent hover:text-ink-700"
             }`}
           >
-            Browse Catalog
-            {!loading && (
-              <span className="ml-1 text-xs font-mono text-ink-400">(2,500+)</span>
-            )}
+            Add Integration
           </button>
         </div>
 
