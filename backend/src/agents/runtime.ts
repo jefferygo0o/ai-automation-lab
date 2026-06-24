@@ -141,9 +141,8 @@ export async function runAgentTurn(
     .join("\n");
   if (skillsIndex) skillsBlock += `\n\n## Available skills (use run_skill \`<id>\`)\n${skillsIndex}\n`;
 
-  const longTerm = MemoryStore.list(agent.id, ownerId, undefined, 20)
-    .map((m) => `- [${m.kind}] ${m.key}: ${m.value}`)
-    .join("\n");
+  const memItems = await MemoryStore.list(agent.id, ownerId, undefined, 20);
+  const longTerm = memItems.map((m) => `- [${m.kind}] ${m.key}: ${m.value}`).join("\n");
   const longTermBlock = longTerm ? `\n\n## Long-term memory\n${longTerm}\n` : "";
 
   const toolListForPrompt = builtinToolSpecs.map((t) => `- \`${t.name}\``).join("\n") || "(none)";
