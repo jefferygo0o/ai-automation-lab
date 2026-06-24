@@ -4,7 +4,14 @@ import { toolRegistry } from "./registry.ts";
 toolRegistry.register({
   name: "approve_action",
   description: "Approve a pending approval request",
-  inputSchema: { type: "object", properties: { requestId: { type: "string" } }, required: ["requestId"] },
+  parameters: {
+    requestId: {
+      type: "string",
+      description: "The ID of the approval request to approve",
+      required: true,
+    },
+  },
+  defaultPermission: "ask",
   execute: async () => ({}) as any,
 });
 

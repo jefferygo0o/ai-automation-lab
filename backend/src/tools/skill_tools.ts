@@ -116,12 +116,14 @@ toolRegistry.register({
   async execute(args, ctx) {
     if (!args.plan) return err("plan is required");
     try {
-      const id = Approvals.create({
+      const id = await Approvals.create({
         ownerId: ctx.ownerId,
+        agentId: ctx.agentId,
         chatId: ctx.chatId,
-        runId: ctx.runId,
-        type: "plan",
-        summary: args.plan.slice(0, 200),
+        runId: ctx.runId ?? "",
+        kind: "plan",
+        title: (args.plan ?? "").slice(0, 200),
+        body: (args.plan ?? ""),
         payload: { plan: args.plan, risks: args.risks },
       });
       return text(`## Plan proposed for review\n\n${args.plan}\n\n${args.risks ? `### Risks\n${args.risks}\n` : ""}\n\n(approval id: ${id} — waiting for user to approve in the UI before continuing)`);
@@ -142,12 +144,14 @@ toolRegistry.register({
   defaultPermission: "ask",
   async execute(args, ctx) {
     try {
-      const id = Approvals.create({
+      const id = await Approvals.create({
         ownerId: ctx.ownerId,
+        agentId: ctx.agentId,
         chatId: ctx.chatId,
-        runId: ctx.runId,
-        type: "action",
-        summary: args.reason,
+        runId: ctx.runId ?? "",
+        kind: "tool",
+        body: args.reason ?? "",
+        title: (args.reason ?? ""),
         payload: { reason: args.reason },
       });
       return text(`Approval requested: ${args.reason}\n(approval id: ${id} — waiting for user to approve in the UI before continuing)`);

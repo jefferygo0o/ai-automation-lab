@@ -76,7 +76,7 @@ export async function runAgentTurn(
   const builtinToolSpecs: ToolSpec[] = toolRegistry.all().map((t) => toolToSpec(t));
 
   // Add MCP tools (if any servers configured for this agent)
-  const agentMcpServers = McpStore.list().filter((s) => s.enabled);
+  const agentMcpServers = (await McpStore.list()).filter((s) => s.enabled);
   if (agentMcpServers.length) {
     for (const cfg of agentMcpServers) {
       try { await mcpManager.startServer({ name: cfg.name, command: cfg.command, args: cfg.args, env: cfg.env }); }
@@ -106,7 +106,7 @@ export async function runAgentTurn(
     runId: run.id,
     sandbox,
     secrets: {
-      get: (name) => SecretStore.get(ownerId, name),
+      get: async (name: string): Promise<string | null> => SecretStore.get(ownerId, name),
     },
     mcp: {
       call: (server, tool, args) => mcpManager.callTool(server, tool, args),
@@ -161,16 +161,16 @@ export async function runAgentTurn(
     memoryMd.trim() ? `\n\n# Notes (memory.md)\n${memoryMd.trim()}\n` : "",
     longTermBlock,
     `\n\n# Tools available\n${toolListForPrompt}\n`,
-    `\n\n# Working directory\nYou have a sandboxed working directory at ${sandboxOpts.workdir}. Use relative paths. All execute_command calls are isolated.\n`,
+    `\n\n# Working directory\nYou have a sandboxed working directory at ${sandboxOpts.workdir!}. Use relative paths. All execute_command calls are isolated.\n`,
     RUNTIME_SYSTEM_TAIL,
   ].join("");
 
   // LLM config: use the agent's provider + secret-resolved API key
-  const apiKey = cfg.provider === "mock"
+  const apiKey: string = cfg.provider === "mock"
     ? "mock-key"
-    : (cfg.apiKeySecret
-        ? (SecretStore.get(ownerId, cfg.apiKeySecret) ?? process.env[cfg.apiKeySecret] ?? "")
-        : (process.env[`${cfg.provider.toUpperCase()}_API_KEY`] ?? ""));
+    : await (cfg.apiKeySecret
+        ? (await SecretStore.get(ownerId, cfg.apiKeySecret)) ?? process.env[cfg.apiKeySecret] ?? ""
+        : Promise.resolve(process.env[`${cfg.provider.toUpperCase()}_API_KEY`] ?? ""));
   
   // Fail fast if no API key — don't make a doomed HTTP call
   if (cfg.provider !== "mock" && !apiKey) {
@@ -194,7 +194,7 @@ export async function runAgentTurn(
   };
 
   // History (includes the user message we just persisted)
-  const history = ChatStore.listMessages(chatId, ownerId);
+  const history = await ChatStore.listMessages(chatId, ownerId);
 
   // Filter out orphaned tool responses that have no matching assistant
   // tool_call message in the history. These accumulate when a previous
@@ -258,12 +258,12 @@ export async function runAgentTurn(
           onChunk: (c) => {
             if (c.type === "content" && c.content) emit({ type: "token", delta: c.content });
             else if (c.type === "thinking" && c.content) emit({ type: "thinking", delta: c.content });
-            else if (c.type === "tool_call" && c.name) {
+            else if (c.type === "tool_call" && c.toolCall) {
               // Relay tool call deltas live so the frontend can show
               // the tool card with progressively filling content.
               // Use safeJsonParse to format args as a string for transport.
-              const argsStr = typeof c.arguments === 'string' ? c.arguments : JSON.stringify(c.arguments ?? {});
-              emit({ type: 'tool_call', name: c.name, args: argsStr });
+              const argsStr = typeof c.toolCall.arguments === 'string' ? c.toolCall.arguments : JSON.stringify(c.toolCall.arguments ?? {});
+              emit({ type: 'tool_call', name: c.toolCall.name, args: argsStr });
             }
           },
         });

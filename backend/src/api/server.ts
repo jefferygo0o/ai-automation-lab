@@ -326,7 +326,7 @@ api.post("/api/chats/:id/messages", async (c) => {
     const sandboxOpts = resolveSandboxOptions(agent);
     const sandbox = createSandbox(sandboxOpts);
     const { processAttachments } = await import("../chat/attachments.ts");
-    const result = await processAttachments(userId, content, files, sandboxOpts.workdir);
+    const result = await processAttachments(userId, content, files, sandboxOpts.workdir ?? "");
     content = result.content;
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
@@ -750,7 +750,7 @@ api.get("/api/runs", async (c) => {
 
 api.get("/api/runs/:id", async (c) => {
   const userId = c.get("userId") as string;
-  const run = RunStore.get(c.req.param("id"), userId);
+  const run = await RunStore.get(c.req.param("id"), userId);
   if (!run) return c.json({ error: "not found" }, 404);
   return c.json({ run, invocations: RunStore.listForRun(run.id) });
 });

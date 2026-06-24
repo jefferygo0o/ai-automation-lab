@@ -19,6 +19,6 @@ const enc = {
 try {
   const key = decryptSecret(enc);
   console.log("DECRYPTED KEY:", key.slice(0, 10) + "...");
-} catch (e) {
-  console.log("DECRYPT ERROR:", e.message);
+} catch (e: any) {
+  console.error("decrypt error:", e);
 }

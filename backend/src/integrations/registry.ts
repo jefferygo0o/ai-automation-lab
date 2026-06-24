@@ -208,7 +208,7 @@ export const IntegrationRegistry = {
       opts.authType, opts.authDescription,
       opts.logoUrl, categories, now, now,
     );
-    return await this.get(id, ownerId)!;
+    return (await this.get(id, ownerId))!;
   },
 
   async updateStatus(
@@ -216,7 +216,7 @@ export const IntegrationRegistry = {
     ownerId: string,
     status: IntegrationConnection["status"],
     extra?: { credentialsRef?: string; connectedAccountId?: string; error?: string },
-  ): boolean {
+  ): Promise<boolean> {
     const sets: string[] = ["status = ?"];
     const vals: (string | null)[] = [status];
     if (extra?.credentialsRef !== undefined) {
@@ -235,7 +235,7 @@ export const IntegrationRegistry = {
     return r.changes > 0;
   },
 
-  async delete(id: string, ownerId: string): boolean {
+  async delete(id: string, ownerId: string): Promise<boolean> {
     const r = await db.prepare(
       `DELETE FROM integration_connections WHERE id = ? AND owner_id = ?`
     ).run(id, ownerId);
@@ -244,7 +244,7 @@ export const IntegrationRegistry = {
 
   // ---- Action cache ----
 
-  async cacheActions(appSlug: string, actions: CachedAction[]): void {
+  async cacheActions(appSlug: string, actions: CachedAction[]): Promise<void> {
     // Remove stale entries for this app
     await db.prepare(`DELETE FROM integration_action_cache WHERE app_slug = ?`).run(appSlug);
     const now = Date.now();
@@ -301,14 +301,14 @@ export const IntegrationRegistry = {
   },
 
   /** List all unique app slugs that have cached actions. */
-  async listCachedApps(): string[] {
+  async listCachedApps(): Promise<string[]> {
     return await (await db.prepare(
       `SELECT DISTINCT app_slug FROM integration_action_cache ORDER BY app_slug`
     ).all() as { app_slug: string }[]).map((r) => r.app_slug);
   },
 
   /** Get cache timestamp for an app (most recent action). */
-  async getCacheTimestamp(appSlug: string): number | null {
+  async getCacheTimestamp(appSlug: string): Promise<number | null> {
     const r = await db.prepare(
       `SELECT MAX(created_at) as ts FROM integration_action_cache WHERE app_slug = ?`
     ).get(appSlug) as { ts: number } | undefined;
@@ -334,7 +334,7 @@ export const IntegrationRegistry = {
     ).all(ownerId) as CatalogAppRow[]).map(rowToCatalogApp);
   },
 
-  async getCachedAppsCount(ownerId: string): number {
+  async getCachedAppsCount(ownerId: string): Promise<number> {
     const r = await db.prepare(
       `SELECT COUNT(*) as count FROM catalog_app_cache WHERE owner_id = ?`
     ).get(ownerId) as { count: number };
@@ -367,7 +367,7 @@ export const IntegrationRegistry = {
     return r ? rowToCatalogApp(r) : null;
   },
 
-  async getCachedCategories(ownerId: string): string[] {
+  async getCachedCategories(ownerId: string): Promise<string[]> {
     const rows = await db.prepare(
       `SELECT DISTINCT categories_json FROM catalog_app_cache WHERE owner_id = ?`
     ).all(ownerId) as { categories_json: string }[];
@@ -438,7 +438,7 @@ export const IntegrationRegistry = {
     };
   },
 
-  async updateCatalogSyncState(ownerId: string, status: string, extra?: { total?: number; errorMessage?: string }): void {
+  async updateCatalogSyncState(ownerId: string, status: string, extra?: { total?: number; errorMessage?: string }): Promise<void> {
     const existing = await db.prepare(`SELECT * FROM catalog_sync_state WHERE owner_id = ?`).get(ownerId);
     const now = Date.now();
     if (existing) {
@@ -457,7 +457,7 @@ export const IntegrationRegistry = {
     }
   },
 
-  async isCacheFresh(ownerId: string, ttlMs: number): boolean {
+  async isCacheFresh(ownerId: string, ttlMs: number): Promise<boolean> {
     const r = await db.prepare(
       `SELECT MAX(fetched_at) as ts FROM catalog_app_cache WHERE owner_id = ?`
     ).get(ownerId) as { ts: number | null } | undefined;

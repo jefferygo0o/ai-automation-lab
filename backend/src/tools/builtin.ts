@@ -266,7 +266,7 @@ toolRegistry.register({
   defaultPermission: "always",
   async execute(args, ctx) {
     try {
-      const items = MemoryStore.list(ctx.agentId, ctx.ownerId, args.kind, args.limit ?? 50);
+      const items = await MemoryStore.list(ctx.agentId, ctx.ownerId, args.kind, args.limit ?? 50);
       if (!items.length) return text("(memory is empty)");
       return text(items.map((m: any) => `[${m.kind}] ${m.key}: ${m.value}`).join("\n"));
     } catch (e: any) {

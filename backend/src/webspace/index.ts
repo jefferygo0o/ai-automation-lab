@@ -3,6 +3,7 @@
  * Routes are stored in the lab SQLite DB (space_routes table).
  */
 import { Hono } from "hono";
+import { type HonoEnv } from "../types/hono.ts";
 import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
 import { invalidateApiCache } from "./render.ts";
@@ -18,7 +19,7 @@ interface SpaceRoute {
   updated_at: number;
 }
 
-export const webSpaceApi = new Hono();
+export const webSpaceApi = new Hono<HonoEnv>();
 
 // ---- Routes are relative to mount point (/api/web-space) ----
 

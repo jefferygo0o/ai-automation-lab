@@ -25,7 +25,7 @@ export interface AuditEvent {
 }
 
 export const Audit = {
-  async record(input: Omit<AuditEvent, "id" | "at">): void {
+  async record(input: Omit<AuditEvent, "id" | "at">): Promise<void> {
     try {
       const id = `aud_${nanoid(12)}`;
       const at = Date.now();

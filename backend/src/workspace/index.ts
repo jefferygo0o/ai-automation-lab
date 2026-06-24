@@ -1,7 +1,7 @@
 /**
  * Workspace file browser — browse, read, write, delete files in /home/workspace.
  */
-import { readdirSync, existsSync, lstatSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { readdirSync, existsSync, lstatSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync } from "fs";
 import { join, relative, basename } from "path";
 import { Hono } from "hono";
 
@@ -21,7 +21,8 @@ const EXCLUDED_DIRS = new Set([
   ".venv", "venv", ".bun", "build", ".sass-cache", ".turbo",
 ]);
 
-function isTextFile(name: string): boolean {
+function isTextFile(fn: string): boolean {
+  const name = fn ?? "";
   const ext = name.split(".").pop()?.toLowerCase();
   const textExts = new Set([
     "md", "txt", "json", "yaml", "yml", "toml", "xml", "csv",
@@ -36,7 +37,7 @@ function isTextFile(name: string): boolean {
     "tsconfig", "eslintrc", "prettierrc", "babelrc",
     "lock", "mod", "sum",
   ]);
-  return textExts.has(ext) || textExts.has(name.toLowerCase());
+  return textExts.has(ext ?? "") || textExts.has(name.toLowerCase());
 }
 
 function walkDir(dirPath: string, basePath: string): FileEntry[] {
@@ -48,23 +49,18 @@ function walkDir(dirPath: string, basePath: string): FileEntry[] {
       if (EXCLUDED_DIRS.has(name)) continue;
 
       const fullPath = join(dirPath, name);
-      const relPath = relative(basePath, fullPath);
-      try {
-        const stat = lstatSync(fullPath);
-        entries.push({
-          name,
-          path: relPath,
-          type: stat.isDirectory() ? "dir" : "file",
-          size: stat.size,
-          mtime: stat.mtimeMs,
-        });
-      } catch {}
+      const stat = statSync(fullPath);
+      const relative = join(basePath, name);
+      if (stat.isDirectory()) {
+        entries.push(...walkDir(fullPath, relative));
+      } else {
+        entries.push({ path: relative, name, type: "file", size: 0, mtime: 0 });
+      }
     }
-  } catch {}
-  return entries.sort((a, b) => {
-    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
-    return a.name.localeCompare(b.name);
-  });
+  } catch {
+    // Permission denied or non-existent — skip
+  }
+  return entries;
 }
 
 function resolvePath(rawPath: string): string | null {
@@ -81,7 +77,7 @@ function readFile(rawPath: string): { content: string; encoding: string } | null
   if (!resolved || !existsSync(resolved) || lstatSync(resolved).isDirectory()) return null;
 
   const name = basename(rawPath);
-  if (isTextFile(name)) {
+  if (name && isTextFile(name)) {
     return { content: readFileSync(resolved, "utf-8"), encoding: "utf-8" };
   }
   // Binary files: return as base64
@@ -121,7 +117,7 @@ workspaceApi.get("/tree", (c) => {
 });
 
 workspaceApi.get("/read", (c) => {
-  const path = c.req.query("path");
+  const path = c.req.query("path") ?? "";
   if (!path) return c.json({ error: "path required" }, 400);
   const result = readFile(path);
   if (!result) return c.json({ error: "not found or directory" }, 404);
@@ -135,14 +131,14 @@ workspaceApi.put("/write", async (c) => {
 });
 
 workspaceApi.delete("/delete", (c) => {
-  const path = c.req.query("path");
+  const path = c.req.query("path") ?? "";
   if (!path) return c.json({ error: "path required" }, 400);
   return c.json({ ok: deleteFile(path) });
 });
 
 // Get file metadata
 workspaceApi.get("/info", (c) => {
-  const path = c.req.query("path");
+  const path = c.req.query("path") ?? "";
   if (!path) return c.json({ error: "path required" }, 400);
   const absPath = resolvePath(path);
   if (!absPath) return c.json({ error: "invalid path" }, 400);

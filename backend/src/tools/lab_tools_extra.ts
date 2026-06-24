@@ -82,7 +82,7 @@ function resolveLabPath(ctx: ToolContext, p: string): string {
 /** Write content into the sandbox at a sandbox-relative path. */
 function saveToSandbox(ctx: ToolContext, absPath: string, content: string | Buffer): string {
   if (!ctx.sandbox) throw new Error("sandbox not active");
-  const workdir = ctx.sandbox.workdir;
+  const workdir = resolve(ctx.sandbox.workdir, dirname(absPath));
   const rel = absPath.startsWith(workdir) ? absPath.slice(workdir.length).replace(/^[/\\]+/, "") : absPath.replace(/^[/\\]+/, "");
   ctx.sandbox.writeFile(rel, typeof content === "string" ? content : content.toString("utf8"));
   return rel;
@@ -91,7 +91,7 @@ function saveToSandbox(ctx: ToolContext, absPath: string, content: string | Buff
 /** Pull out a sandbox-relative file name when given an absolute path. */
 function relFromAbs(ctx: ToolContext, abs: string): string {
   if (!ctx.sandbox) return abs;
-  const wd = ctx.sandbox.workdir;
+  const wd = resolve(ctx.sandbox.workdir, dirname(abs));
   return abs.startsWith(wd) ? abs.slice(wd.length).replace(/^[/\\]+/, "") : abs.replace(/^[/\\]+/, "");
 }
 
@@ -180,9 +180,9 @@ const CF_BASE = "https://api.cloudflare.com/client/v4";
 interface CfCreds { accountId: string; apiToken: string; }
 
 /** Read Cloudflare creds from the user's secrets vault. Returns null if missing. */
-function cfGetConfig(ctx: ToolContext): CfCreds | null {
-  const accountId = ctx.secrets.get("CF_ACCOUNT_ID");
-  const apiToken = ctx.secrets.get("CF_API_TOKEN");
+async function cfGetConfig(ctx: ToolContext): Promise<CfCreds | null> {
+  const accountId = await ctx.secrets.get("CF_ACCOUNT_ID");
+  const apiToken = await ctx.secrets.get("CF_API_TOKEN");
   if (!accountId || !apiToken) return null;
   return { accountId, apiToken };
 }
@@ -1185,7 +1185,7 @@ toolRegistry.register({
       const meta = (probe.stderr.split("\n").filter((l) => l.includes("Duration") || l.includes("Stream"))[0] ?? "").trim();
       // Try Cloudflare Whisper first — convert input audio to MP3 first (CF's
       // whisper rejects some WAV headers; MP3 works reliably).
-      const creds = cfGetConfig(ctx);
+      const creds = await cfGetConfig(ctx);
       if (creds) {
         try {
           const mp3Path = join(tmpdir(), `lab_audio_${randomBytes(6).toString("hex")}.mp3`);
@@ -1244,7 +1244,7 @@ toolRegistry.register({
       if (!extract.ok) return err(`ffmpeg audio extract failed: ${extract.stderr.slice(0, 500)}`);
       // Try Cloudflare Whisper — convert the extracted WAV to MP3 first
       // (CF's whisper rejects some WAV headers; MP3 is reliable).
-      const creds = cfGetConfig(ctx);
+      const creds = await cfGetConfig(ctx);
       if (creds) {
         try {
           const mp3Path = join(tmpdir(), `lab_video_audio_${randomBytes(6).toString("hex")}.mp3`);
@@ -1317,7 +1317,7 @@ toolRegistry.register({
   async execute(args, ctx) {
     if (!args.prompt) return err("prompt is required");
     if (!args.file_stem) return err("file_stem is required");
-    const creds = cfGetConfig(ctx);
+    const creds = await cfGetConfig(ctx);
     if (!creds) return err(cfMissingCredsMsg("lab_generate_image"));
 
     const { width, height } = aspectToSize(args.aspect_ratio ?? "1:1");
@@ -1444,7 +1444,7 @@ toolRegistry.register({
     if (!Array.isArray(args.filepaths) || args.filepaths.length === 0) return err("filepaths must be a non-empty array (1-3 images)");
     if (args.filepaths.length > 3) return err("max 3 source images");
     if (!args.file_stem) return err("file_stem is required");
-    const creds = cfGetConfig(ctx);
+    const creds = await cfGetConfig(ctx);
     if (!creds) return err(cfMissingCredsMsg("lab_edit_image"));
 
     try {
@@ -1541,7 +1541,7 @@ toolRegistry.register({
         : fp;
     } else {
       // Try to generate a base image via Cloudflare (same code path as lab_generate_image).
-      const creds = cfGetConfig(ctx);
+      const creds = await cfGetConfig(ctx);
       if (!creds) {
         return err(
           "lab_generate_video: no source image supplied and no Cloudflare creds to generate one.\n" +

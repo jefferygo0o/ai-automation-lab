@@ -86,7 +86,7 @@ function rowToMsg(r: MsgRow): Message {
 }
 
 export const ChatStore = {
-  async create(ownerId: string, agentId: string, title?: string): Chat {
+  async create(ownerId: string, agentId: string, title?: string): Promise<Chat> {
     const id = `chat_${nanoid(12)}`;
     const now = Date.now();
     const t = title ?? "New chat";
@@ -106,27 +106,27 @@ export const ChatStore = {
     return r ? rowToChat(r) : null;
   },
 
-  async setActiveAgent(chatId: string, ownerId: string, agentId: string): boolean {
+  async setActiveAgent(chatId: string, ownerId: string, agentId: string): Promise<boolean> {
     const r = await db.prepare(
       `UPDATE chats SET active_agent_id = ?, updated_at = ? WHERE id = ? AND owner_id = ?`
     ).run(agentId, Date.now(), chatId, ownerId);
     return r.changes > 0;
   },
 
-  async rename(chatId: string, ownerId: string, title: string): boolean {
+  async rename(chatId: string, ownerId: string, title: string): Promise<boolean> {
     const r = await db.prepare(
       `UPDATE chats SET title = ?, updated_at = ? WHERE id = ? AND owner_id = ?`
     ).run(title, Date.now(), chatId, ownerId);
     return r.changes > 0;
   },
 
-  async delete(chatId: string, ownerId: string): boolean {
+  async delete(chatId: string, ownerId: string): Promise<boolean> {
     await db.prepare(`DELETE FROM messages WHERE chat_id = ?`).run(chatId);
     const r = await db.prepare(`DELETE FROM chats WHERE id = ? AND owner_id = ?`).run(chatId, ownerId);
     return r.changes > 0;
   },
 
-  async addMessage(chatId: string, m: Omit<Message, "id" | "chatId" | "createdAt">): Message {
+  async addMessage(chatId: string, m: Omit<Message, "id" | "chatId" | "createdAt">): Promise<Message> {
     const id = `msg_${nanoid(12)}`;
     const now = Date.now();
     await db.prepare(

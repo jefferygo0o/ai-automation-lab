@@ -3,21 +3,22 @@
  * fresh agent.
  */
 import { Hono } from "hono";
-import { Templates, type Template } from "./index.ts";
+import { type HonoEnv } from "../types/hono.ts";
+import { Templates } from "./index.ts";
 import { AgentStore } from "../agents/registry.ts";
 import { Audit } from "../audit/index.ts";
 import { nanoid } from "nanoid";
 
-export const templatesApi = new Hono();
+export const templatesApi = new Hono<HonoEnv>();
 
-templatesApi.get("/", (c) => {
+templatesApi.get("/", async (c) => {
   const category = c.req.query("category");
-  const list = category ? Templates.list().filter((t) => t.category === category) : Templates.list();
+  const list = category ? (await Templates.list()).filter((t) => t.category === category) : await Templates.list();
   return c.json({ templates: list });
 });
 
-templatesApi.get("/:id", (c) => {
-  const t = Templates.get(c.req.param("id"));
+templatesApi.get("/:id", async (c) => {
+  const t = await Templates.get(c.req.param("id"));
   if (!t) return c.json({ error: "not found" }, 404);
   return c.json({ template: t });
 });
@@ -28,7 +29,7 @@ templatesApi.get("/:id", (c) => {
  */
 templatesApi.post("/:id/instantiate", async (c) => {
   const userId = c.get("userId") as string;
-  const t = Templates.get(c.req.param("id"));
+  const t = await Templates.get(c.req.param("id"));
   if (!t) return c.json({ error: "template not found" }, 404);
 
   const body = (await c.req.json().catch(() => ({}))) as { name?: string; installSkills?: boolean };
@@ -49,7 +50,7 @@ templatesApi.post("/:id/instantiate", async (c) => {
 
   // Apply config
   if (t.config && Object.keys(t.config).length) {
-    await AgentStore.updateConfig(agent.id, userId, t.config);
+    await AgentStore.updateConfig(agent.id, userId, t.config as any);
   }
 
   Audit.record({ ownerId: userId, actor: "user", action: "agent.create", targetId: agent.id, targetType: "agent", metadata: { source: "template", templateId: t.id } });

@@ -16,7 +16,7 @@ export type ToolParameters = Record<string, {
   description?: string;
   enum?: unknown[];
   required?: boolean;
-  items?: { type: string; enum?: unknown[] };
+  items?: { type: string; enum?: unknown[]; properties?: ToolParameters };
   properties?: ToolParameters;
 }>;
 
@@ -27,7 +27,7 @@ export interface ToolContext {
   runId: string | null;
   sandbox: Sandbox | null;
   secrets: {
-    get(name: string): string | null;
+    get(name: string): string | null | Promise<string | null>;
   };
   mcp: {
     call(server: string, tool: string, args: unknown): Promise<unknown>;

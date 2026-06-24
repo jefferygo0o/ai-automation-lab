@@ -98,7 +98,7 @@ export function getNextRun(row: AutomationRow, now: number = Date.now()): number
   return anchor + (intervalsElapsed + 1) * 60_000;
 }
 
-async function loadDueAutomations(now: number): AutomationRow[] {
+async function loadDueAutomations(now: number): Promise<AutomationRow[]> {
   // An automation is due if it is active AND (last_run_at + interval) <= now.
   // For never-run automations we still respect the schedule relative to created_at.
   const rows = await db.prepare(
@@ -129,7 +129,7 @@ async function fireAutomation(auto: AutomationRow): Promise<void> {
   try {
     const { runAgentTurn } = await import("../agents/runtime.ts");
     const { ChatStore } = await import("../chats/index.ts");
-    const chat = ChatStore.create(auto.owner_id, auto.agent_id, `automation: ${auto.name}`);
+    const chat = await ChatStore.create(auto.owner_id, auto.agent_id, `automation: ${auto.name}`);
 
     let output = "";
     let error: string | null = null;

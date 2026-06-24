@@ -28,18 +28,17 @@ export interface SpaceRouteRow {
   updated_at: number;
 }
 
-export function getRouteByPath(ownerId: string, path: string): SpaceRouteRow | null {
+export async function getRouteByPath(ownerId: string, path: string): Promise<SpaceRouteRow | null> {
   // Normalize: ensure leading slash, no trailing slash (except root)
   let p = path;
   if (!p.startsWith("/")) p = "/" + p;
   if (p.length > 1 && p.endsWith("/")) p = p.slice(0, -1);
-  return (
-    (db
-      .query(
-        "SELECT id, owner_id, path, type, code, is_public, created_at, updated_at FROM space_routes WHERE owner_id = ? AND path = ?"
-      )
-      .get(ownerId, p) as SpaceRouteRow | undefined) ?? null
-  );
+  const row = await db
+    .query(
+      "SELECT id, owner_id, path, type, code, is_public, created_at, updated_at FROM space_routes WHERE owner_id = ? AND path = ?"
+    )
+    .get(ownerId, p) as SpaceRouteRow | undefined;
+  return row ?? null;
 }
 
 // ---- API route compilation cache ----

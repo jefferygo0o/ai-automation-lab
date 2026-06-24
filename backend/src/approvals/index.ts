@@ -84,7 +84,7 @@ export const Approvals = {
     body: string;
     payload?: Record<string, unknown>;
     ttlMs?: number;
-  }): ApprovalRequest {
+  }): Promise<ApprovalRequest> {
     const id = `apr_${nanoid(12)}`;
     const now = Date.now();
     const expiresAt = now + (input.ttlMs ?? DEFAULT_TTL_MS);
@@ -104,36 +104,39 @@ export const Approvals = {
       now,
       expiresAt,
     );
-    return Approvals.get(id)!;
+    const created = await Approvals.get(id);
+    return created!;
   },
 
-  async get(id: string): ApprovalRequest | null {
+  async get(id: string): Promise<ApprovalRequest | null> {
     const row = await db.prepare(`SELECT * FROM approval_requests WHERE id = ?`).get(id) as Row | undefined;
     return row ? rowToApproval(row) : null;
   },
 
-  async getForRun(runId: string): ApprovalRequest[] {
-    return await (await db.prepare(
+  async getForRun(runId: string): Promise<ApprovalRequest[]> {
+    const rows = await db.prepare(
       `SELECT * FROM approval_requests WHERE run_id = ? ORDER BY created_at DESC`
-    ).all(runId) as Row[]).map(rowToApproval);
+    ).all(runId) as Row[];
+    return (await Promise.all(rows.map(rowToApproval)));
   },
 
-  async listPending(ownerId: string): ApprovalRequest[] {
-    return await (await db.prepare(
+  async listPending(ownerId: string): Promise<ApprovalRequest[]> {
+    const rows = await db.prepare(
       `SELECT * FROM approval_requests WHERE owner_id = ? AND status = 'pending' AND expires_at > ? ORDER BY created_at DESC`
-    ).all(ownerId, Date.now()) as Row[]).map(rowToApproval);
+    ).all(ownerId, Date.now()) as Row[];
+    return (await Promise.all(rows.map(rowToApproval)));
   },
 
-  async resolve(id: string, decision: "approved" | "rejected" | "auto-approved", response?: string): ApprovalRequest | null {
+  async resolve(id: string, decision: "approved" | "rejected" | "expired" | "auto-approved", response?: string): Promise<ApprovalRequest | null> {
     const now = Date.now();
     const r = await db.prepare(
       `UPDATE approval_requests SET status = ?, response = ?, resolved_at = ? WHERE id = ? AND status = 'pending'`
     ).run(decision, response ?? null, now, id);
     if (r.changes === 0) return null;
-    return Approvals.get(id);
+    return await Approvals.get(id);
   },
 
-  async expireOverdue(): number {
+  async expireOverdue(): Promise<number> {
     const r = await db.prepare(
       `UPDATE approval_requests SET status = 'expired', resolved_at = ? WHERE status = 'pending' AND expires_at < ?`
     ).run(Date.now(), Date.now());
@@ -152,19 +155,22 @@ export const Approvals = {
     while (Date.now() - start < 30 * 60_000) {
       if (signal?.aborted) {
         // mark as rejected due to abort
-        Approvals.resolve(id, "rejected", "agent run aborted by user");
-        return Approvals.get(id) ?? { ...this.fakeRejected(id), status: "rejected", response: "aborted" };
+        await Approvals.resolve(id, "rejected", "agent run aborted by user");
+        const rejected = await Approvals.get(id);
+        return rejected ?? { ...this.fakeRejected(id), status: "rejected", response: "aborted" };
       }
-      const a = Approvals.get(id);
+      const a = await Approvals.get(id);
       if (a && a.status !== "pending") return a;
       if (a && a.expiresAt < Date.now()) {
-        Approvals.resolve(id, "expired", "approval expired before response");
-        return Approvals.get(id)!;
+        await Approvals.resolve(id, "expired", "approval expired before response");
+        const expired = await Approvals.get(id);
+        return expired!;
       }
       await new Promise((r) => setTimeout(r, 500));
     }
-    Approvals.resolve(id, "expired", "approval wait timeout");
-    return Approvals.get(id) ?? this.fakeRejected(id);
+    await Approvals.resolve(id, "expired", "approval wait timeout");
+    const expired = await Approvals.get(id);
+    return expired ?? this.fakeRejected(id);
   },
 
   fakeRejected(id: string): ApprovalRequest {

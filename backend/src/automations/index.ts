@@ -7,6 +7,7 @@
  * backend/src/api/server.ts).
  */
 import { Hono } from "hono";
+import { type HonoEnv } from "../types/hono.ts";
 import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
 import { AutomationScheduler, getNextRun, fireAutomationById } from "./scheduler.ts";
@@ -54,7 +55,7 @@ function format(row: Automation, now: number = Date.now()) {
   };
 }
 
-export const automationsApi = new Hono();
+export const automationsApi = new Hono<HonoEnv>();
 
 // ---- Routes (relative to mount point /api/automations) ----
 

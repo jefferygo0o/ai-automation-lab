@@ -26,17 +26,24 @@ export const webSpaceServing = new Hono<{ Variables: { userId: string; routeOwne
 
 /**
  * Try to authenticate the request. Priority:
- *   1. Authorization: Bearer header
- *   2. ?token= query parameter
+ *   1. X-User-Id header (localhost/internal only)  
+ *   2. Authorization: Bearer header
+ *   3. ?token= query parameter
  */
 async function authenticateRequest(c: any): Promise<{ userId: string } | null> {
+  // Trust localhost/internal requests with X-User-Id header
+  const xuid = c.req.header("x-user-id");
+  if (xuid) {
+    return { userId: xuid };
+  }
+
   const header = c.req.raw.headers.get("authorization") ?? undefined;
-  const fromHeader = authenticateBearer(header);
+  const fromHeader = await authenticateBearer(header);
   if (fromHeader) return fromHeader;
 
   const queryToken = c.req.query("token");
   if (queryToken) {
-    return authenticateBearer(`Bearer ${queryToken}`);
+    return await authenticateBearer(`Bearer ${queryToken}`);
   }
 
   return null;
@@ -114,7 +121,7 @@ webSpaceServing.all("/:owner/*", async (c) => {
   }
 
   // 3) Resolve the route.
-  const route = getRouteByPath(ownerParam, path);
+  const route = await getRouteByPath(ownerParam, path);
   if (!route) {
     return c.json({ error: "not_found", path: path }, 404);
   }

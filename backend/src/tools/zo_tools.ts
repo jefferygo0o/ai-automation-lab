@@ -35,8 +35,8 @@ function err(s: string) {
 }
 
 /** Get the Zo API key from the user's secrets. */
-function getZoKey(ctx: ToolContext): string | null {
-  const key = SecretStore.get(ctx.ownerId, "zo_api_key");
+async function getZoKey(ctx: ToolContext): Promise<string | null> {
+  const key = await SecretStore.get(ctx.ownerId, "zo_api_key");
   if (!key) {
     return null;
   }
@@ -99,16 +99,17 @@ function resolveForSandbox(ctx: ToolContext, p: string): string {
 }
 
 function saveToSandbox(ctx: ToolContext, absPath: string, content: string | Buffer) {
-  if (!ctx.sandbox) throw new Error("sandbox is required to save files");
+  const sbox = ctx.sandbox;
+  if (!sbox) throw new Error("sandbox is required to save files");
   // Re-anchor into the sandbox workdir
-  const workdir = ctx.sandbox.workdir;
+  const workdir = sbox.workdir;
   let rel: string;
   if (absPath.startsWith(workdir)) {
     rel = absPath.slice(workdir.length).replace(/^\/+/, "");
   } else {
     rel = absPath.replace(/^\/+/, "");
   }
-  ctx.sandbox.writeFile(rel, typeof content === "string" ? content : content.toString("utf8"));
+  sbox.writeFile(rel, typeof content === "string" ? content : content.toString("utf8"));
   return rel;
 }
 
@@ -369,12 +370,12 @@ toolRegistry.register({
       cliArgs.push("--", args.query, root);
       const proc = spawn("rg", cliArgs, { stdio: ["ignore", "pipe", "pipe"] });
       let out = "";
-      let err = "";
+      let stderrData = "";
       proc.stdout.on("data", (c) => (out += c.toString()));
-      proc.stderr.on("data", (c) => (err += c.toString()));
+      proc.stderr.on("data", (c) => (stderrData += c.toString()));
       const code: number = await new Promise((res) => proc.on("close", res));
       if (code !== 0 && code !== 1) {
-        return err(`ripgrep failed (${code}): ${err.slice(0, 500)}`);
+        return err(`ripgrep failed (${code}): ${stderrData.slice(0, 500)}`);
       }
       const trimmed = out.length > 16_000 ? out.slice(0, 16_000) + `\n... (truncated, ${out.length} total chars)` : out;
       return text(trimmed || "(no matches)");

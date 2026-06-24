@@ -33,9 +33,9 @@ export type SandboxBackend = "local" | "docker";
 
 export interface SandboxOptions {
   /** absolute path to the agent's working directory (chroot-style jail) */
-  workdir: string;
+  workdir: string | null;
   /** max wall time per command in ms */
-  timeoutMs?: number;
+  timeoutMs: number | null;
   /** truncate combined stdout+stderr to this many bytes */
   maxOutputBytes?: number;
   /** allowed egress hosts (empty set = deny all network); undefined = inherit host */
@@ -61,6 +61,14 @@ export interface CommandResult {
 }
 
 export interface Sandbox {
+  agentId: string;
+  runId: string | null;
+  timeoutMs: number | null;
+  memoryMb: number | null;
+  cpus: number | null;
+  network: "none" | "egress" | "full" | null;
+  allowHosts: string[];
+  denyHosts: string[];
   readonly id: string;
   readonly workdir: string;
   readonly options: Required<Pick<SandboxOptions, "timeoutMs" | "maxOutputBytes">> & SandboxOptions;
@@ -85,15 +93,23 @@ class LocalSandbox implements Sandbox {
   readonly id: string;
   readonly workdir: string;
   readonly options: Sandbox["options"];
+  readonly agentId: string = "";
+  readonly runId: string | null = null;
+  readonly timeoutMs: number | null = null;
+  readonly memoryMb: number | null = null;
+  readonly cpus: number | null = null;
+  readonly network: "none" | "egress" | "full" | null = null;
+  readonly allowHosts: string[] = [];
+  readonly denyHosts: string[] = [];
 
   constructor(opts: SandboxOptions) {
     this.id = `sbox_${randomBytes(6).toString("hex")}`;
-    this.workdir = opts.workdir;
+    this.workdir = opts.workdir ?? "/tmp/sandbox";
     if (!isAbsolute(this.workdir)) throw new Error("sandbox workdir must be absolute");
     this.options = {
+      ...opts,
       timeoutMs: opts.timeoutMs ?? 30_000,
       maxOutputBytes: opts.maxOutputBytes ?? 256_000,
-      ...opts,
     };
     if (!existsSync(this.workdir)) mkdirSync(this.workdir, { recursive: true });
   }
@@ -132,7 +148,7 @@ class LocalSandbox implements Sandbox {
 
     let proc;
     try {
-      proc = spawn(finalCommand, finalArgs, {
+      proc = (spawn as any)(finalCommand, finalArgs, {
         cwd: this.workdir,
         env: {
           PATH: process.env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
@@ -160,7 +176,7 @@ class LocalSandbox implements Sandbox {
     let truncated = false;
     const cap = this.options.maxOutputBytes;
 
-    proc.stdout.on("data", (chunk) => {
+    proc.stdout.on("data", (chunk: Buffer) => {
       if (stdoutBuf.length + chunk.length > cap) {
         truncated = true;
         stdoutBuf = Buffer.concat([stdoutBuf, chunk]).subarray(0, cap);
@@ -168,7 +184,7 @@ class LocalSandbox implements Sandbox {
         stdoutBuf = Buffer.concat([stdoutBuf, chunk]);
       }
     });
-    proc.stderr.on("data", (chunk) => {
+    proc.stderr.on("data", (chunk: Buffer) => {
       if (stderrBuf.length + chunk.length > cap) {
         truncated = true;
         stderrBuf = Buffer.concat([stderrBuf, chunk]).subarray(0, cap);
@@ -181,10 +197,10 @@ class LocalSandbox implements Sandbox {
     const timer = setTimeout(() => {
       killed = true;
       try { proc.kill("SIGKILL"); } catch {}
-    }, this.options.timeoutMs);
+    }, this.options.timeoutMs ?? undefined);
 
-    const [exitCode, errorEvent] = await new Promise<[number | null, string | null]>((res) => {
-      proc.on("exit", (code, signal) => {
+    const [exitCode, errorEvent]: [number | null, string | null] = await new Promise<[number | null, string | null]>((res) => {
+      proc.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
         clearTimeout(timer);
         res([code, null]);
         void signal;
@@ -202,7 +218,7 @@ class LocalSandbox implements Sandbox {
         exitCode: null,
         signal: null,
         stdout: stdoutBuf.toString("utf8"),
-        stderr: errorEvent,
+        stderr: errorEvent ?? "",
         durationMs: Date.now() - start,
         truncated,
       };

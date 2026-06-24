@@ -144,7 +144,7 @@ function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
         // Emit tool_call when the name first becomes known. Some providers
         // send the id in one delta and the name in the next — using `isNew`
         // alone misses the window. Track via the name transition instead.
-        ctx.onChunk({ type: "tool_call", id: existing.id, name: existing.name, arguments: existing.args });
+        ctx.onChunk({ type: "tool_call", toolCall: { id: existing.id, name: existing.name, arguments: existing.args } });
       }
     }
     if (delta.finishReason) ctx.finishReason = delta.finishReason as LLMResponse["finishReason"];

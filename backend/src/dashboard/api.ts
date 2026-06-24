@@ -2,9 +2,10 @@
  * Dashboard / Observability API — aggregate stats for the user's lab.
  */
 import { Hono } from "hono";
+import { type HonoEnv } from "../types/hono.ts";
 import { db } from "../db/index.ts";
 
-export const dashboardApi = new Hono();
+export const dashboardApi = new Hono<HonoEnv>();
 
 const MS_PER_DAY = 86_400_000;
 

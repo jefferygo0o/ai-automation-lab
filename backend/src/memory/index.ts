@@ -49,7 +49,7 @@ function rowToItem(r: Row): MemoryItem {
 
 export const MemoryStore = {
   /** Upsert by (agent, kind, key). Returns the (existing or new) id. */
-  async upsert(agentId: string, ownerUserId: string, kind: MemoryKind, key: string, value: string, source = "agent"): string {
+  async upsert(agentId: string, ownerUserId: string, kind: MemoryKind, key: string, value: string, source = "agent"): Promise<string> {
     const now = Date.now();
     const existing = await db.prepare(
       `SELECT id, created_at FROM memory_items WHERE agent_id = ? AND kind = ? AND key = ?`
@@ -68,7 +68,7 @@ export const MemoryStore = {
     return id;
   },
 
-  async list(agentId: string, ownerUserId: string, kind?: MemoryKind | string, limit = 50): MemoryItem[] {
+  async list(agentId: string, ownerUserId: string, kind?: MemoryKind | string, limit = 50): Promise<MemoryItem[]> {
     const params: (string | number)[] = [agentId, ownerUserId];
     let where = `agent_id = ? AND owner_user_id = ?`;
     if (kind) {
@@ -88,7 +88,7 @@ export const MemoryStore = {
     return row ? rowToItem(row) : null;
   },
 
-  async update(id: string, ownerUserId: string, value: string, source?: string): boolean {
+  async update(id: string, ownerUserId: string, value: string, source?: string): Promise<boolean> {
     const now = Date.now();
     const r = source
       ? await db.prepare(`UPDATE memory_items SET value = ?, source = ?, updated_at = ? WHERE id = ? AND owner_user_id = ?`)
@@ -98,12 +98,12 @@ export const MemoryStore = {
     return r.changes > 0;
   },
 
-  async remove(id: string, ownerUserId: string): boolean {
+  async remove(id: string, ownerUserId: string): Promise<boolean> {
     const r = await db.prepare(`DELETE FROM memory_items WHERE id = ? AND owner_user_id = ?`).run(id, ownerUserId);
     return r.changes > 0;
   },
 
-  async clear(agentId: string, ownerUserId: string): number {
+  async clear(agentId: string, ownerUserId: string): Promise<number> {
     const r = await db.prepare(`DELETE FROM memory_items WHERE agent_id = ? AND owner_user_id = ?`).run(agentId, ownerUserId);
     return r.changes;
   },

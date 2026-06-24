@@ -16,10 +16,6 @@ services:
         value: /app
       - key: LAB_DIST
         value: /app/backend/dist-spa
-      - key: LAB_DATA_DIR
-        value: /var/data/lab
-      - key: LAB_DB_PATH
-        value: /var/data/lab/lab.db
       - key: LAB_AGENTS_DIR
         value: /var/data/lab/agents
       - key: LAB_SANDBOX_ROOT

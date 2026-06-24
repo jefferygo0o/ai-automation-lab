@@ -31,12 +31,12 @@ export const SecretStore = {
     return String(name ?? "").trim().toUpperCase();
   },
 
-  async set(ownerId: string, name: string, value: string): SecretMeta {
+  async set(ownerId: string, name: string, value: string): Promise<SecretMeta> {
     // Canonicalise: store all secret names UPPERCASE. The collision guard
     // still uses LOWER() on both sides so any existing mixed-case row is
     // overwritten in place rather than orphaned.
     const canonical = SecretStore.norm(name);
-    const existing = db
+    const existing = await db
       .prepare(
         `SELECT id FROM secrets WHERE owner_id = ? AND LOWER(name) = LOWER(?)`,
       )

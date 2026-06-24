@@ -36,7 +36,7 @@ export interface AgentTemplate {
 const BUILTIN_DIR = resolve(import.meta.dir, "builtin");
 
 export const Templates = {
-  async list(): AgentTemplate[] {
+  async list(): Promise<AgentTemplate[]> {
     const out: AgentTemplate[] = [];
     if (existsSync(BUILTIN_DIR)) {
       for (const f of readdirSync(BUILTIN_DIR)) {
@@ -64,11 +64,12 @@ export const Templates = {
     return out;
   },
 
-  async get(id: string): AgentTemplate | null {
-    return Templates.list().find((t) => t.id === id) ?? null;
+  async get(id: string): Promise<AgentTemplate | null> {
+    const list = await Templates.list();
+    return list.find((t) => t.id === id) ?? null;
   },
 
-  async saveUser(input: { ownerId: string; name: string; description: string; category: string; icon: string; tags: string[]; template: Omit<AgentTemplate, "id"> }): AgentTemplate {
+  async saveUser(input: { ownerId: string; name: string; description: string; category: string; icon: string; tags: string[]; template: Omit<AgentTemplate, "id"> }): Promise<AgentTemplate> {
     const id = `tpl_${nanoid(10)}`;
     await db.query(
       `INSERT INTO agent_templates (id, owner_id, name, description, category, icon, tags, system_md, persona_md, tools_md, skills_md, memory_md, config_json, recommended_skills, created_at)
@@ -80,11 +81,13 @@ export const Templates = {
       JSON.stringify(input.template.config),
       JSON.stringify(input.template.recommendedSkills), Date.now()
     );
-    return Templates.get(id)!;
+    const created = await Templates.get(id);
+    return created!;
   },
 
-  async deleteUser(id: string, ownerId: string): boolean {
-    return await db.query(`DELETE FROM agent_templates WHERE id = ? AND owner_id = ?`).run(id, ownerId).changes > 0;
+  async deleteUser(id: string, ownerId: string): Promise<boolean> {
+    const r = await db.query(`DELETE FROM agent_templates WHERE id = ? AND owner_id = ?`).run(id, ownerId);
+    return r.changes > 0;
   },
 
   /** Apply a template to a fresh agent directory + record metadata. */

@@ -13,7 +13,8 @@ import { toolRegistry, type ToolContext } from "./registry.ts";
 import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
 import { invalidateApiCache } from "../webspace/render.ts";
-import { createSession } from "../security/auth.ts";
+
+// Internal fetch helper - passes the owner id for localhost auth bypass
 
 function text(s: string) {
   return { content: [{ type: "text" as const, text: s }] };
@@ -180,11 +181,10 @@ toolRegistry.register({
     if (!row) return err(`route not found: ${args.id}`);
     const url = liveUrl(row.owner_id, row.path);
     // Mint a fresh session for this one-off internal call.
-    const session = createSession(userId);
     try {
       const res = await fetch(url, {
         method: args.method ?? "GET",
-        headers: { authorization: `Bearer ${session.token}` },
+        headers: { "X-User-Id": userId },
       });
       const content = await res.text();
       return text(`HTTP ${res.status} ${res.statusText}\n\n${content.slice(0, 16_000)}`);

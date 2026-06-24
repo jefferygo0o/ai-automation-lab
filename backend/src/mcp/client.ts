@@ -61,15 +61,17 @@ export const McpStore = {
     if (existing) {
       await db.prepare("UPDATE mcp_servers SET command=?, args=?, env=?, enabled=? WHERE id=?")
         .run(input.command, args, env, enabled, existing.id);
-      return this.get(existing.id)!;
+      const result = await this.get(existing.id);
+      return result!;
     }
     const id = `mcp_${nanoid(10)}`;
     await db.prepare("INSERT INTO mcp_servers (id, owner_id, name, command, args, env, enabled, created_at) VALUES (?,?,?,?,?,?,?,?)")
       .run(id, ownerId, input.name, input.command, args, env, enabled, Date.now());
     return { id, name: input.name, command: input.command, args: input.args ?? [], env: input.env ?? {}, enabled: !!enabled };
   },
-  async delete(id: string): boolean {
-    return await db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id).changes > 0;
+  async delete(id: string): Promise<boolean> {
+    const r = await db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+    return r.changes > 0;
   },
   async setEnabled(id: string, enabled: boolean) {
     await db.prepare("UPDATE mcp_servers SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
@@ -150,7 +152,7 @@ class McpManager {
         capabilities: {},
         clientInfo: { name: "ai-automation-lab", version: "0.1.0" },
       }, 10_000);
-      const toolsResult = async (await this.rpc(live, "tools/list", {}, 10_000)) as { tools: any[] };
+      const toolsResult = (await this.rpc(live, "tools/list", {}, 10_000)) as { tools: any[] };
       live.tools = toolsResult.tools ?? [];
       live.status = "ready";
       try {
