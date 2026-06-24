@@ -450,7 +450,7 @@ toolRegistry.register({
   defaultPermission: "always",
   async execute(args, ctx) {
     try {
-      const target = args.path ?? "workspace";
+      const target = args.path ?? DATA_DIR;
       const abs = resolveLabPath(ctx, target);
       if (!existsSync(abs)) return err(`path not found: ${abs}`);
       const st = statSync(abs);
