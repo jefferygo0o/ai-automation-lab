@@ -24,6 +24,7 @@ function getPool(): Pool {
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
     ssl: url.includes("supabase") ? { rejectUnauthorized: false } : undefined,
+    family: 4,
   });
   _pool.on("error", (err) => {
     console.error("[db] idle client error:", err?.message ?? err);

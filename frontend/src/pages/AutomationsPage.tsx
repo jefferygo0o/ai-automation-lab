@@ -141,8 +141,8 @@ export default function AutomationsPage() {
 
   const handleToggle = async (auto: Automation) => {
     try {
-      const updated = await Automations.update(auto.id, { enabled: !auto.active });
-      setAutomations((prev) => prev.map((a) => a.id === updated.id ? updated : a));
+      const res = await Automations.update(auto.id, { enabled: !auto.enabled });
+      setAutomations((prev) => prev.map((a) => a.id === res.automation.id ? res.automation : a));
     } catch (e: any) {
       setError(e.message || "Failed to update");
     }
@@ -276,10 +276,10 @@ export default function AutomationsPage() {
                     <div className="flex items-center gap-3 min-w-0">
                       <button
                         onClick={() => handleToggle(auto)}
-                        className={`btn btn-icon ${auto.active ? "text-ok" : "text-ink-400"}`}
-                        title={auto.active ? "Pause" : "Activate"}
+                        className={`btn btn-icon ${auto.enabled ? "text-ok" : "text-ink-400"}`}
+                        title={auto.enabled ? "Pause" : "Activate"}
                       >
-                        {auto.active ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                        {auto.enabled ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
                       </button>
                       <div className="min-w-0">
                         <div className="text-sm font-medium text-ink-900 truncate">{auto.name}</div>
@@ -287,9 +287,9 @@ export default function AutomationsPage() {
                           <Clock className="w-3 h-3" />
                           <span>{rruleDescription(auto.rrule)}</span>
                           <span>·</span>
-                          <span className={`dot ${auto.active ? "dot-ok" : "dot-mute"}`} />
-                          <span>{auto.active ? "Active" : "Paused"}</span>
-                          {auto.active && dueMs !== null && (
+                          <span className={`dot ${auto.enabled ? "dot-ok" : "dot-mute"}`} />
+                          <span>{auto.enabled ? "Active" : "Paused"}</span>
+                          {auto.enabled && dueMs !== null && (
                             <>
                               <span>·</span>
                               <span className="font-mono text-2xs">
@@ -340,7 +340,7 @@ export default function AutomationsPage() {
                                 <span className={`dot ${run.status === "completed" ? "dot-ok" : run.status === "running" ? "dot-warn" : "dot-err"}`} />
                                 <span className="font-mono text-2xs">{new Date(run.startedAt!).toLocaleString()}</span>
                                 <span className="text-2xs text-ink-400">{run.status}</span>
-                                {(run.finishedAt ?? run.finished_at) && (run.startedAt ?? run.started_at) && (
+                                {run.finishedAt && run.startedAt && (
                                   <span className="text-2xs text-ink-400">
                                     ({Math.round((run.finishedAt - run.startedAt) / 100) / 10}s)
                                   </span>

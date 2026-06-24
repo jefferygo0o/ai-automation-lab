@@ -300,12 +300,13 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
             toolSeqRef.current++;
             // Check if this is a streaming delta for an existing tool
             const aidBlocks = blocksRef.current[aid] ?? [];
-            const existingIdx = aidBlocks.findIndex(
-              (b) => b.type === "tool_call" && b.tool.name === payload.name && b.tool.status === "pending"
-            );
+            const existingIdx = aidBlocks.findIndex((b): boolean => {
+              if (b.type !== "tool_call") return false;
+              return b.tool.name === payload.name && b.tool.status === "pending";
+            });
             if (existingIdx >= 0 && payload.args) {
               // Streaming delta — accumulate raw JSON args string
-              const existing = aidBlocks[existingIdx];
+              const existing = aidBlocks[existingIdx] as Extract<Block, { type: "tool_call" }>;
               const oldRaw = existing.tool.rawArgs ?? '';
               const newRaw = typeof payload.args === 'string' ? payload.args : JSON.stringify(payload.args ?? {});
               const rawArgs = oldRaw.length >= newRaw.length ? oldRaw : newRaw;
@@ -344,13 +345,15 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
             let idx = -1;
             for (let i = blocks.length - 1; i >= 0; i--) {
               const b = blocks[i];
-              if (b.type === "tool_call" && b.tool.name === payload.name && b.tool.status === "pending") {
+              if (b.type !== "tool_call") continue;
+              if (b.tool.name === payload.name && b.tool.status === "pending") {
                 idx = i; break;
               }
             }
             if (idx === -1) continue;
+            const block = blocks[idx] as Extract<Block, { type: "tool_call" }>;
             const updated: ToolCallInfo = {
-              ...blocks[idx].tool,
+              ...block.tool,
               status: payload.ok ? ("ok" as const) : ("error" as const),
               result: payload.result,
               error: payload.ok ? null : (payload.error ?? payload.result?.error ?? "failed"),
@@ -620,7 +623,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                             return (
                               <div key={t.id} className="w-full min-w-0 space-y-0.5">
                                 <div data-state={isOpen ? "open" : "closed"} data-slot="collapsible">
-                                  <div
+                                  <button
                                     type="button"
                                     aria-controls={contentId}
                                     aria-expanded={isOpen}
@@ -675,7 +678,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                         </div>
                                       </button>
                                     </div>
-                                  </div>
+                                  </button>
                                   <div
                                     id={contentId}
                                     data-state={isOpen ? "open" : "closed"}

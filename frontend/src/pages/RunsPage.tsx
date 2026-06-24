@@ -89,7 +89,7 @@ export default function RunsPage() {
                     <span className="text-2xs text-ink-300 font-mono">{r.id.slice(0, 8)}</span>
                   </div>
                   <div className="text-sm text-ink-700 truncate">
-                    {r.summary || `${r.status} run`}
+                    {r.errorMessage || `${r.status} run`}
                   </div>
                 </div>
                 <div className="flex items-center gap-5 text-2xs text-ink-400 font-mono shrink-0">
