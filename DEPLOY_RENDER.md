@@ -56,11 +56,16 @@ The disk is mounted as a Render **persistent disk** so it survives deploys and r
 | `NODE_ENV` | `production` | — |
 | `LAB_PROJECT_ROOT` | `/app` | Project root in the image |
 | `LAB_DIST` | `/app/backend/dist-spa` | Where the SPA bundle is copied to during build |
-| `LAB_DATA_DIR` | `/var/data/lab` | Persistent root for agents, sandboxes, DB |
-| `LAB_DB_PATH` | `/var/data/lab/lab.db` | SQLite file |
+| `LAB_DATA_DIR` | `/var/data/lab` | Persistent root for agents, sandboxes |
 | `LAB_AGENTS_DIR` | `/var/data/lab/agents` | Per-agent filesystem root |
 | `LAB_SANDBOX_ROOT` | `/var/data/lab/sandboxes` | Per-agent sandbox workdir root |
 | `LAB_MASTER_KEY` | (auto-generated) | Encryption key for secrets vault |
+| `SUPABASE_URL` | — | **Required.** Supabase project URL (Settings → API) |
+| `SUPABASE_SERVICE_ROLE_KEY` | — | **Required.** Supabase service_role key (NOT anon key) |
+| `SUPABASE_DB_URL` | — | **Required.** Supabase DB connection string (Transaction pooler, port 6543) |
+
+> **Set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_DB_URL` in Render's dashboard**  
+> (Dashboard → Environment Variables). Do not commit secrets to the repo.
 
 ## Cost
 
@@ -93,13 +98,25 @@ Note: the `local` sandbox backend doesn't enforce allowHosts (only the `docker` 
 
 ## Troubleshooting
 
-**Service won't start:** check Render logs. Common issue: `LAB_DIST` doesn't exist. Verify the build step completed by checking the build log for `frontend/dist/`.
+### All API endpoints return 500
 
-**Database locked errors:** SQLite under WAL mode handles concurrent reads, but if you see "database is locked", the disk may have hit IOPS limits. Upgrade the disk or reduce write frequency.
+If every `/api/*` endpoint returns 500, the database connection is failing.
 
-**Agents can't reach LLM providers:** check that the agent's `apiKeySecret` resolves to a value. Add API keys via the **Secrets** page; they encrypt with `LAB_MASTER_KEY` and store in SQLite.
+**1. Is your Supabase project paused?**  
+   Free-tier Supabase projects pause after 1 week without activity.  
+   → Log into https://supabase.com, check your project dashboard for a "Project is paused" banner, and click **Restore**.
 
-**MCP servers won't start:** the lab auto-starts MCP servers on boot. If a server fails, it's logged but doesn't block startup. Check `/api/mcp/servers` for status.
+**2. Are you using the correct port?**  
+   `SUPABASE_DB_URL` must use port **6543** (transaction pooler):  
+   `postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres`  
+   Port 5432 (direct) can time out from Render due to connection limits.
+
+**3. Special characters in the password?**  
+   If your Supabase DB password contains `@`, `:`, `/`, `%`, or `#`, URL-encode them:  
+   `#` → `%23`, `@` → `%40`, etc.
+
+**4. Check Render startup logs**  
+   Look for `[db]` lines — the startup probe logs whether the connection succeeded or failed, with a hint about the cause.
 
 ## Manual one-off commands
 

@@ -23,3 +23,10 @@ services:
       - key: LAB_MASTER_KEY
         generateValue: true
         description: "Master key for encrypting secrets. Render auto-generates and persists this."
+      # === Supabase config (set these in Render dashboard after deploy) ===
+      - key: SUPABASE_URL
+        description: "Supabase project URL (Settings → API)"
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        description: "Supabase service_role key (NOT anon key)"
+      - key: SUPABASE_DB_URL
+        description: "Supabase DB connection string — Transaction pooler, port 6543. Example: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres"
