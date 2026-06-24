@@ -3,6 +3,7 @@ import { MCP, McpServer, McpTool } from "../api";
 import {
   Plus, Plug, Unplug, Trash2, Server, Terminal, Circle, ChevronDown, ChevronRight, Wrench, Search, Download, Star, Package, AlertCircle,
 } from "lucide-react";
+import AnimatedDots from "../components/AnimatedDots";
 
 function MarketplacePanel({
   entries,
@@ -123,7 +124,7 @@ function MarketplacePanel({
                   disabled={isInstalling || isInstalled || isError}
                   className="btn btn-primary text-xs"
                 >
-                  {isInstalling ? "Installing..." : isInstalled ? "Installed" : "Install"}
+                  {isInstalling ? <><AnimatedDots invert size={14} /> Installing...</> : isInstalled ? "Installed" : "Install"}
                 </button>
               </div>
             </div>
@@ -316,7 +317,8 @@ export default function McpPage() {
                 disabled={!draft.name.trim() || !draft.command.trim() || saving}
                 className="btn btn-primary"
               >
-                <Plus className="w-3.5 h-3.5 stroke-[1.75]" /> Add
+                {saving ? <AnimatedDots invert size={16} /> : <Plus className="w-3.5 h-3.5 stroke-[1.75]" />}
+                <span>{saving ? "Adding..." : "Add"}</span>
               </button>
             </div>
           </div>

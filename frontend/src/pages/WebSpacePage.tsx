@@ -4,6 +4,7 @@ import {
   Globe, Plus, Trash2, Eye, EyeOff, FileCode, Code,
   ExternalLink, Copy, Check, AlertCircle, Info,
 } from "lucide-react";
+import AnimatedDots from "../components/AnimatedDots";
 import { WebSpacePreview } from "../components/WebSpacePreview";
 import { WebSpaceMeta } from "../components/WebSpaceMeta";
 
@@ -296,6 +297,7 @@ export default function WebSpacePage() {
             className="input h-7 flex-1 text-xs font-mono"
           />
           <button onClick={handleCreate} disabled={saving || !newPath} className="btn btn-primary btn-sm">
+            {saving ? <AnimatedDots invert size={14} /> : null}
             {saving ? "Creating..." : "Create"}
           </button>
           <button onClick={() => setShowNew(false)} className="btn btn-ghost btn-sm">Cancel</button>
@@ -448,6 +450,7 @@ export default function WebSpacePage() {
                   disabled={saving}
                   className="btn btn-primary btn-sm"
                 >
+                  {saving ? <AnimatedDots invert size={14} /> : null}
                   {saving ? "Saving..." : "Save"}
                 </button>
               </div>

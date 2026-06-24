@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Skills, Skill } from "../api";
 import { Plus, Trash2, Sparkles, FileText, Search } from "lucide-react";
+import AnimatedDots from "../components/AnimatedDots";
 
 export default function SkillsPage() {
   const [skills, setSkills] = useState<Skill[]>([]);
@@ -199,6 +200,7 @@ export default function SkillsPage() {
                 disabled={!draft.id.trim() || !draft.name.trim() || saving}
                 className="btn btn-primary"
               >
+                {saving ? <AnimatedDots invert size={16} /> : null}
                 {saving ? "Saving…" : editing ? "Update skill" : "Create skill"}
               </button>
             </div>

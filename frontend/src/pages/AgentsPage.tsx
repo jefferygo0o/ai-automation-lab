@@ -5,6 +5,7 @@ import {
   Plus, Copy, Trash2, Edit3, MessageSquare, Upload, Download,
   ArrowUpRight, Bot, MoreHorizontal, Search,
 } from "lucide-react";
+import AnimatedDots from "../components/AnimatedDots";
 
 export default function AgentsPage() {
   const nav = useNavigate();
@@ -125,8 +126,8 @@ export default function AgentsPage() {
               disabled={busy || !newName.trim()}
               className="btn btn-primary"
             >
-              {busy ? <span className="spinner" /> : <Plus className="w-3.5 h-3.5 stroke-[1.75]" />}
-              <span>Create</span>
+              {busy ? <AnimatedDots invert size={16} /> : <Plus className="w-3.5 h-3.5 stroke-[1.75]" />}
+              <span>{busy ? "Creating..." : "Create"}</span>
             </button>
           </div>
         </div>

@@ -4,6 +4,7 @@ import {
   Timer, Plus, Trash2, Play, Pause,
   AlertCircle, Clock, History, Zap, Activity, RefreshCw,
 } from "lucide-react";
+import AnimatedDots from "../components/AnimatedDots";
 
 function rruleDescription(rrule: string): string {
   if (!rrule) return "—";
@@ -249,7 +250,7 @@ export default function AutomationsPage() {
           </div>
           <div className="flex gap-2">
             <button onClick={handleCreate} disabled={saving || !newName || !newInstruction} className="btn btn-primary">
-              {saving ? "Creating..." : "Create Automation"}
+              {saving ? <><AnimatedDots invert size={16} /> Creating...</> : "Create Automation"}
             </button>
             <button onClick={() => setShowNew(false)} className="btn btn-ghost">Cancel</button>
           </div>
@@ -313,7 +314,7 @@ export default function AutomationsPage() {
                         className="btn btn-ghost btn-sm"
                         title="Trigger now (ignores schedule)"
                       >
-                        {isRunning ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
+                        {isRunning ? <AnimatedDots invert size={16} /> : <Zap className="w-3.5 h-3.5" />}
                         <span>{isRunning ? "Running..." : "Run now"}</span>
                       </button>
                       <button onClick={() => showHistory(auto.id)} className="btn btn-ghost btn-sm" title="Run history">

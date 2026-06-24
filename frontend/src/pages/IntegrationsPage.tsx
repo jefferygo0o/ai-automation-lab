@@ -8,6 +8,7 @@ import {
   List, ChevronLeft, ChevronRight as ChevronRightIcon,
   Wifi, WifiOff,
 } from "lucide-react";
+import AnimatedDots from "../components/AnimatedDots";
 
 // ---- ChevronLeft icon inline (used by page) ----
 function ChevronLeftIcon(props: any) {
@@ -90,8 +91,8 @@ function PipedreamKeySetup({
             disabled={!key.trim() || saving}
             className="btn btn-primary"
           >
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-            Save Key
+            {saving ? <AnimatedDots invert size={16} /> : <Check className="w-3.5 h-3.5" />}
+            {saving ? "Saving Key..." : "Save Key"}
           </button>
         </div>
         {error && (
@@ -966,7 +967,7 @@ function ApiKeyDialog({
                 className="btn btn-primary w-full justify-center"
               >
                 {saving ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <AnimatedDots invert size={16} />
                 ) : (
                   <Plug className="w-3.5 h-3.5" />
                 )}
@@ -1005,7 +1006,7 @@ function ApiKeyDialog({
                   disabled={!key.trim() || saving}
                   className="btn btn-primary"
                 >
-                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  {saving ? <AnimatedDots invert size={16} /> : <Check className="w-3.5 h-3.5" />}
                   {saving ? "Saving..." : "Save & Connect"}
                 </button>
               </div>
