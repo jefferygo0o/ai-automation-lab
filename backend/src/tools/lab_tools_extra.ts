@@ -1484,6 +1484,7 @@ toolRegistry.register({
       const j = await res.json() as any;
       if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
 
+      const outRel = `Images/${safeName}.jpg`;
       const out = decodeBase64Jpeg(j.result.image);
       mkdirSync(dirname(outAbs), { recursive: true });
       writeFileSync(outAbs, out);

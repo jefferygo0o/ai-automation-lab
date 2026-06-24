@@ -327,7 +327,7 @@ toolRegistry.register({
     try {
       switch (args.action) {
         case "list": {
-          const servers = McpStore.list();
+          const servers = await McpStore.list();
           if (!servers.length) return text("(no MCP servers configured)");
           const lines = servers.map((s) => {
             return `- ${s.id}: ${s.name} [${s.connected ? "connected" : "disconnected"}] ${s.command} ${(s.args ?? []).join(" ")}`;
@@ -338,7 +338,7 @@ toolRegistry.register({
           if (!args.name || !args.command) return err("name and command required for create");
           const parsedArgs = typeof args.args === "string" ? args.args.split(/\s+/).filter(Boolean) : (args.args ?? []);
           const parsedEnv = typeof args.env === "string" ? (() => { try { return JSON.parse(args.env); } catch { return {}; } })() : (args.env ?? {});
-          const server = McpStore.upsert({
+          const server = await McpStore.upsert({
             name: args.name,
             command: args.command,
             args: parsedArgs,
@@ -348,11 +348,11 @@ toolRegistry.register({
         }
         case "edit": {
           if (!args.id) return err("id required for edit");
-          const existing = McpStore.get(args.id);
+          const existing = await McpStore.get(args.id);
           if (!existing) return err("MCP server not found");
           const parsedArgs = typeof args.args === "string" ? args.args.split(/\s+/).filter(Boolean) : (args.args ?? existing.args);
           const parsedEnv = typeof args.env === "string" ? (() => { try { return JSON.parse(args.env); } catch { return {}; } })() : (args.env ?? existing.env);
-          McpStore.upsert({
+          await McpStore.upsert({
             name: args.name ?? existing.name,
             command: args.command ?? existing.command,
             args: parsedArgs,
@@ -363,19 +363,19 @@ toolRegistry.register({
         case "delete": {
           if (!args.id) return err("id required for delete");
           mcpManager.stopServer(args.id); // stop if running
-          const ok = McpStore.delete(args.id);
+          const ok = await McpStore.delete(args.id);
           return text(ok ? `Deleted MCP server: ${args.id}` : "MCP server not found");
         }
         case "connect": {
           if (!args.id) return err("id required for connect");
-          const server = McpStore.get(args.id);
+          const server = await McpStore.get(args.id);
           if (!server) return err("MCP server not found");
           await mcpManager.startServer({ name: server.name, command: server.command, args: server.args, env: server.env });
           return text(`Connected MCP server: ${server.name}`);
         }
         case "disconnect": {
           if (!args.id) return err("id required for disconnect");
-          const server = McpStore.get(args.id);
+          const server = await McpStore.get(args.id);
           if (!server) return err("MCP server not found");
           mcpManager.stopServer(server.name);
           return text(`Disconnected MCP server: ${server.name}`);
