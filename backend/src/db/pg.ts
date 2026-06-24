@@ -1,15 +1,18 @@
 import { Pool } from "pg";
 import { readFileSync } from "fs";
-import { join, resolve } from "path";
+import { join } from "path";
+import { fileURLToPath } from "url";
 
 const DEFAULT_URL = "postgresql://postgres:postgres@localhost:5432/lab";
+let _pool: Pool | null = null;
 
-function buildPool(): Pool {
-  const url = process.env.POSTGRES_URL || process.env.SUPABASE_URL || DEFAULT_URL;
-  return new Pool({ connectionString: url, max: 3, idleTimeoutMillis: 30000 });
+function getPool(): Pool {
+  if (!_pool) {
+    const url = process.env.POSTGRES_URL || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || DEFAULT_URL;
+    _pool = new Pool({ connectionString: url, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 5000 });
+  }
+  return _pool;
 }
-
-export const pool = buildPool();
 
 function convertParams(sql: string, params?: any[]): [string, any[]] {
   if (!params || params.length === 0) return [sql, params || []];
@@ -19,32 +22,16 @@ function convertParams(sql: string, params?: any[]): [string, any[]] {
 }
 
 function convertInsertOrReplace(sql: string): string {
-  // Handle INSERT OR REPLACE → ON CONFLICT DO UPDATE SET
-  // Preserves the original VALUES clause (may contain literals like 'user' mixed with ? params)
-  const replaceMatch = sql.match(
-    /INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i
-  );
-  if (replaceMatch) {
-    const table = replaceMatch[1];
-    const cols = replaceMatch[2].split(",").map(c => c.trim().replace(/["`]/g, ""));
+  const rm = sql.match(/INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
+  if (rm) {
+    const cols = rm[2].split(",").map(c => c.trim().replace(/["`]/g, ""));
     const assigns = cols.map(c => `${c} = EXCLUDED.${c}`).join(", ");
-    // Strip OR REPLACE and append ON CONFLICT — VALUES clause is left intact
-    // (convertParams converts ? → $n later)
-    const stripped = sql.replace(/INSERT\s+OR\s+REPLACE\s+INTO/i, "INSERT INTO");
-    return `${stripped} ON CONFLICT DO UPDATE SET ${assigns}`;
+    return `${sql.replace(/INSERT\s+OR\s+REPLACE\s+INTO/i, "INSERT INTO")} ON CONFLICT DO UPDATE SET ${assigns}`;
   }
-
-  // Handle INSERT OR IGNORE → ON CONFLICT DO NOTHING
-  // Preserves the original VALUES clause — just strips OR IGNORE
-  const ignoreMatch = sql.match(
-    /INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i
-  );
-  if (ignoreMatch) {
-    const stripped = sql.replace(/INSERT\s+OR\s+IGNORE\s+INTO/i, "INSERT INTO");
-    return `${stripped} ON CONFLICT DO NOTHING`;
+  const im = sql.match(/INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
+  if (im) {
+    return `${sql.replace(/INSERT\s+OR\s+IGNORE\s+INTO/i, "INSERT INTO")} ON CONFLICT DO NOTHING`;
   }
-
-  // Fallback — just strip OR REPLACE/IGNORE
   return sql.replace(/INSERT\s+OR\s+(REPLACE|IGNORE)\s+INTO/gi, "INSERT INTO");
 }
 
@@ -65,60 +52,34 @@ class PGStatement<T = any> {
   }
   run(...params: any[]): Promise<{ changes: number; lastInsertRowid: number }> {
     const [sql, p] = convertParams(this.sql, params);
-    return this.pool.query(sql, p).then(r => ({
-      changes: r.rowCount ?? 0,
-      lastInsertRowid: 0,
-    }));
+    return this.pool.query(sql, p).then(r => ({ changes: r.rowCount ?? 0, lastInsertRowid: 0 }));
   }
 }
 
 class PgDbShim {
-  private pool: Pool;
-  constructor(pool: Pool) { this.pool = pool; }
-
+  query<T = any>(sql: string): PGStatement<T> { return new PGStatement<T>(getPool(), sql); }
+  prepare<T = any>(sql: string): PGStatement<T> { return new PGStatement<T>(getPool(), sql); }
   exec(sql: string): Promise<{ changes: number }> {
-    return this.pool.query(sql).then(r => ({ changes: r.rowCount ?? 0 }));
+    return getPool().query(sql).then(r => ({ changes: r.rowCount ?? 0 }));
   }
-
-  prepare<T = any>(sql: string): PGStatement<T> {
-    return new PGStatement<T>(this.pool, sql);
-  }
-
-  query<T = any>(sql: string): PGStatement<T> {
-    return new PGStatement<T>(this.pool, sql);
-  }
-
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      const result = await fn();
-      await client.query("COMMIT");
-      return result;
-    } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
-      client.release();
-    }
+    const client = await getPool().connect();
+    try { await client.query("BEGIN"); const r = await fn(); await client.query("COMMIT"); return r; }
+    catch (e) { await client.query("ROLLBACK"); throw e; }
+    finally { client.release(); }
   }
-
-  close(): Promise<void> { return this.pool.end(); }
+  close(): Promise<void> { return _pool ? _pool.end() : Promise.resolve(); }
 }
 
-export const db = new PgDbShim(pool);
+export const db = new PgDbShim();
 
 export async function initSchema(): Promise<void> {
-  const candidates = [
-    join(resolve(import.meta.dir || "."), "schema.pg.sql"),
-  ];
-  for (const p of candidates) {
-    try {
-      const schema = readFileSync(p, "utf8");
-      await db.exec(schema);
-      console.log("[db] schema applied from", p);
-      return;
-    } catch {}
+  const dir = fileURLToPath(new URL(".", import.meta.url));
+  const p = join(dir, "schema.pg.sql");
+  try {
+    await db.exec(readFileSync(p, "utf8"));
+    console.log("[db] schema applied from", p);
+  } catch (e: any) {
+    console.error("[db] schema apply failed:", e?.message ?? e, "(path:", p, ")");
   }
-  console.warn("[db] No schema.pg.sql found");
 }
