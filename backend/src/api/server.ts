@@ -227,7 +227,7 @@ api.put("/api/agents/:id/file", async (c) => {
 api.get("/api/agents/:id/history", async (c) => {
   const userId = c.get("userId") as string;
   const file = c.req.query("file");
-  return c.json({ history: file ? HistoryStore.list(c.req.param("id"), file) : HistoryStore.list(c.req.param("id")) });
+  return c.json({ history: file ? await HistoryStore.list(c.req.param("id"), file) : await HistoryStore.list(c.req.param("id")) });
 });
 
 api.post("/api/agents/:id/history/:versionId/revert", async (c) => {
@@ -745,14 +745,14 @@ api.post("/api/models/fetch", async (c) => {
 api.get("/api/runs", async (c) => {
   const userId = c.get("userId") as string;
   const limit = Number(c.req.query("limit") ?? 100);
-  return c.json({ runs: RunStore.listForUser(userId, limit) });
+  return c.json({ runs: await RunStore.listForUser(userId, limit) });
 });
 
 api.get("/api/runs/:id", async (c) => {
   const userId = c.get("userId") as string;
   const run = await RunStore.get(c.req.param("id"), userId);
   if (!run) return c.json({ error: "not found" }, 404);
-  return c.json({ run, invocations: RunStore.listForRun(run.id) });
+  return c.json({ run, invocations: await RunStore.listForRun(run.id) });
 });
 
 api.get("/api/chats/:id/runs", async (c) => {
@@ -760,7 +760,7 @@ api.get("/api/chats/:id/runs", async (c) => {
   // Confirm ownership of chat
   const chat = await ChatStore.get(c.req.param("id"), userId);
   if (!chat) return c.json({ error: "not found" }, 404);
-  return c.json({ runs: RunStore.listForChat(c.req.param("id"), 50) });
+  return c.json({ runs: await RunStore.listForChat(c.req.param("id"), 50) });
 });
 
 // ---- Approvals (human-in-the-loop) ----
@@ -891,6 +891,27 @@ api.post("/api/agents/:id/sandbox/exec", async (c) => {
   } catch (e: any) {
     return c.json({ error: e?.message ?? String(e) }, 400);
   }
+});
+
+// ---- Secrets (encrypted at rest) ----
+api.get("/api/secrets", async (c) => {
+  const userId = c.get("userId") as string;
+  const secrets = await SecretStore.list(userId);
+  return c.json({ secrets });
+});
+
+api.put("/api/secrets/:name", async (c) => {
+  const userId = c.get("userId") as string;
+  const { value } = (await c.req.json()) as { value: string };
+  if (!value) return c.json({ error: "value required" }, 400);
+  const secret = await SecretStore.set(userId, c.req.param("name"), value);
+  return c.json({ secret });
+});
+
+api.delete("/api/secrets/:name", async (c) => {
+  const userId = c.get("userId") as string;
+  const ok = await SecretStore.delete(userId, c.req.param("name"));
+  return c.json({ ok });
 });
 
 // ---- Dashboard (observability) ----
