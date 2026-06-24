@@ -96,7 +96,7 @@ function pathForSkills(id: string): string {
   return path.join(process.env.LAB_DATA_DIR ?? "/home/workspace/Projects/ai-automation-lab/data", "agents", id, "skills");
 }
 
-async function updateHash(id: string): void {
+async function updateHash(id: string): Promise<void> {
   try {
     const hash = computeAgentHash(id);
     await db.prepare(`UPDATE agents SET hash = ?, runtime = ? WHERE id = ?`).run(hash, AGENT_RUNTIME, id);
@@ -106,7 +106,7 @@ async function updateHash(id: string): void {
 }
 
 export const AgentStore = {
-  async create(ownerId: string, name: string, description = ""): AgentRecord {
+  async create(ownerId: string, name: string, description = ""): Promise<AgentRecord> {
     const id = `agent_${nanoid(10)}`;
     const now = Date.now();
     ensureAgentDir(id);
@@ -126,7 +126,7 @@ export const AgentStore = {
     return (await db.prepare(`SELECT * FROM agents WHERE owner_id = ? ORDER BY updated_at DESC`).all(ownerId) as AgentRow[]).map(rowToAgent);
   },
 
-  async rename(id: string, ownerId: string, name: string, description?: string): boolean {
+  async rename(id: string, ownerId: string, name: string, description?: string): Promise<boolean> {
     const r = await db.prepare(
       `UPDATE agents SET name = ?, description = COALESCE(?, description), updated_at = ? WHERE id = ? AND owner_id = ?`,
     ).run(name, description ?? null, Date.now(), id, ownerId);
@@ -134,7 +134,7 @@ export const AgentStore = {
     return r.changes > 0;
   },
 
-  async delete(id: string, ownerId: string): boolean {
+  async delete(id: string, ownerId: string): Promise<boolean> {
     const r = await db.prepare(`DELETE FROM agents WHERE id = ? AND owner_id = ?`).run(id, ownerId);
     if (r.changes > 0) {
       deleteAgentFs(id);
@@ -144,7 +144,7 @@ export const AgentStore = {
   },
 
   async clone(id: string, ownerId: string, newName?: string): Promise<AgentRecord | null> {
-    const src = AgentStore.get(id, ownerId);
+    const src = await AgentStore.get(id, ownerId);
     if (!src) return null;
     const newId = `agent_${nanoid(10)}`;
     cloneAgentFs(id, newId);
@@ -195,7 +195,7 @@ export const AgentStore = {
     return listAgentFiles(id);
   },
 
-  async updateConfig(id: string, ownerId: string, partial: Partial<AgentConfig>): AgentConfig {
+  async updateConfig(id: string, ownerId: string, partial: Partial<AgentConfig>): Promise<AgentConfig> {
     const current = readAgentConfig(id);
     const next: AgentConfig = { ...current, ...partial, sandbox: { ...current.sandbox, ...(partial.sandbox ?? {}) } };
     writeAgentConfig(id, next);
@@ -232,7 +232,7 @@ export const AgentStore = {
     return { ...packAgent(id), manifest: { ...packAgent(id).manifest, name: a.name, description: a.description } };
   },
 
-  async importPack(ownerId: string, pack: any, newId?: string): AgentRecord {
+  async importPack(ownerId: string, pack: any, newId?: string): Promise<AgentRecord> {
     const id = unpackAgent(pack, newId ? `agent_${newId}` : undefined);
     const now = Date.now();
     const hash = computeAgentHash(id);

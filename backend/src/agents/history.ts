@@ -29,7 +29,7 @@ function rowToEntry(r: HistoryRow): HistoryEntry {
 }
 
 export const HistoryStore = {
-  async record(agentId: string, filename: string, content: string): HistoryEntry {
+  async record(agentId: string, filename: string, content: string): Promise<HistoryEntry> {
     const id = `hist_${nanoid(12)}`;
     const now = Date.now();
     await db.prepare(

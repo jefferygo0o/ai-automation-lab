@@ -4,7 +4,7 @@
  * Routes are mounted under /api. Chat streaming uses Server-Sent Events.
  */
 import { Hono } from "hono";
-import { createUser, login, createSession, authenticateBearer } from "../security/auth.ts";
+import { createUser, login, authenticateBearer } from "../security/auth.ts";
 import { Audit } from "../audit/index.ts";
 import { approvalsApi } from "../approvals/api.ts";
 import { templatesApi } from "../templates/api.ts";
@@ -73,7 +73,7 @@ api.post("/api/auth/login", async (c) => {
     actor: "user",
     action: "auth.login",
     metadata: { email: body.email },
-    ipAddress: c.req.raw.headers.get("x-forwarded-for") ?? null,
+    ip: c.req.raw.headers.get("x-forwarded-for") ?? undefined,
   });
   return c.json({ token: session.token, userId: session.userId, expiresAt: session.expiresAt });
 });
@@ -93,7 +93,7 @@ api.post("/api/auth/register", async (c) => {
       actor: "user",
       action: "auth.register",
       metadata: { email: user.email },
-      ipAddress: c.req.raw.headers.get("x-forwarded-for") ?? null,
+      ip: c.req.raw.headers.get("x-forwarded-for") ?? undefined,
     });
     return c.json({ user });
   } catch (e: any) {
@@ -231,7 +231,7 @@ api.get("/api/agents/:id/history", async (c) => {
 });
 
 api.post("/api/agents/:id/history/:versionId/revert", async (c) => {
-  const version = HistoryStore.get(c.req.param("versionId"));
+  const version = await HistoryStore.get(c.req.param("versionId"));
   if (!version) return c.json({ ok: false }, 404);
   await AgentStore.writeFile(version.agentId, c.get("userId"), version.filename, version.content);
   return c.json({ ok: true });
@@ -381,7 +381,7 @@ api.post("/api/chats/:id/feedback", async (c) => {
   if (!body.messageId) return c.json({ error: "messageId required" }, 400);
   if (body.rating !== 1 && body.rating !== -1 && body.rating !== 0) return c.json({ error: "rating must be 1, -1, or 0" }, 400);
   const r = await db.prepare("UPDATE messages SET feedback_rating = ?, feedback_comment = ? WHERE id = ? AND chat_id = ?")
-    .run(body.rating, body.comment ?? null, body.messageId, c.req.param("id"));
+    .run(body.rating, body.comment ?? undefined, body.messageId, c.req.param("id"));
   if (!r.changes) return c.json({ error: "message not found" }, 404);
   Audit.record({ ownerId: userId, actor: "user", action: "chat.feedback", targetId: c.req.param("id"), targetType: "chat", metadata: { messageId: body.messageId, rating: body.rating, hasComment: !!body.comment } });
   return c.json({ ok: true });
@@ -469,7 +469,7 @@ api.post("/api/mcp/marketplace/:id/install", async (c) => {
     targetType: "mcp_server",
     metadata: { marketplace_id: entry.id, name: entry.name },
   });
-  let connectStatus: "ready" | "error" | "starting" = "starting";
+  let connectStatus: "ready" | "error" | "starting" | "stopped" = "starting";
   let connectError: string | undefined;
   try {
     const live = await mcpManager.startServer({
@@ -488,7 +488,7 @@ api.post("/api/mcp/marketplace/:id/install", async (c) => {
     server: (await McpStore.list()).find((s) => s.id === server.id),
     status: connectStatus,
     error: connectError,
-    needs_env: async (entry.envVars ?? []).filter((v) => v.required).map((v) => v.name),
+    needs_env: (entry.envVars ?? []).filter((v) => v.required).map((v) => v.name),
   });
 });
 
@@ -609,7 +609,7 @@ api.get("/api/audit", async (c) => {
   const targetType = c.req.query("targetType");
   const limit = Number(c.req.query("limit") ?? 100);
   const cursor = c.req.query("cursor") ? Number(c.req.query("cursor")) : undefined;
-  return c.json({ events: await Audit.list(userId, { action, targetType, limit, cursor }) });
+  return c.json({ events: await Audit.list(userId, { action, targetType, limit, offset: cursor }) });
 });
 
 api.get("/api/audit/stats", async (c) => {
@@ -685,7 +685,7 @@ api.post("/api/models/fetch", async (c) => {
   }
   return c.json({ models });
 });api.get("/api/models", (c) => {
-  const MODELS = [
+  const MODELS: Array<{ id: string; name: string; provider: string; model: string; baseUrl?: string; apiKeySecret?: string }> = [
     { id: "mock", name: "Mock (local test)", provider: "mock", model: "mock" },
     { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", provider: "openai", model: "gpt-4.1-mini" },
     { id: "gpt-4.1", name: "GPT-4.1", provider: "openai", model: "gpt-4.1" },
@@ -838,7 +838,7 @@ api.get("/api/agents/:id/sandbox/file", async (c) => {
   try {
     const result = sandboxReadBinary(opts, path);
     if (!result) return c.json({ error: "file not found" }, 404);
-    return new Response(result.bytes, {
+    return new Response(new Uint8Array(result.bytes), {
       headers: {
         "content-type": sandboxFileMime(path),
         "content-length": String(result.size),
