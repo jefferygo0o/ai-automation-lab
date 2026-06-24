@@ -167,8 +167,8 @@ class McpManager {
         protocolVersion: "2024-11-05",
         capabilities: {},
         clientInfo: { name: "ai-automation-lab", version: "0.1.0" },
-      }, 10_000);
-      const toolsResult = (await this.rpc(live, "tools/list", {}, 10_000)) as { tools: any[] };
+      }, 30_000);
+      const toolsResult = (await this.rpc(live, "tools/list", {}, 30_000)) as { tools: any[] };
       live.tools = toolsResult.tools ?? [];
       live.status = "ready";
       try {

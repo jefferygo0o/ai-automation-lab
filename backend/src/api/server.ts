@@ -508,7 +508,13 @@ api.post("/api/mcp/servers/:id/connect", async (c) => {
   if (!srv) return c.json({ error: "not found" }, 404);
 
   // Check if this server needs OAuth via Pipedream Connect
-  const oauthResult = await startMcpOAuthFlow(c.req.param("id"), userId);
+  let oauthResult: McpOAuthStartResult;
+  try {
+    oauthResult = await startMcpOAuthFlow(c.req.param("id"), userId);
+  } catch (e: any) {
+    return c.json({ ok: false, error: `OAuth check failed: ${e?.message ?? String(e)}`, needsEnv: [] });
+  }
+
   if (oauthResult.connectLinkUrl || oauthResult.connectionId) {
     // OAuth flow started — return the link for the frontend to open
     return c.json({
@@ -524,15 +530,24 @@ api.post("/api/mcp/servers/:id/connect", async (c) => {
     });
   }
 
-  // No OAuth needed — try to start the server directly
+  // No OAuth — if the server needs env vars, tell the frontend
+  if (oauthResult.needsEnv && oauthResult.needsEnv.length > 0) {
+    return c.json({
+      ok: true,
+      needsEnv: oauthResult.needsEnv,
+      message: oauthResult.message,
+    });
+  }
+
+  // No OAuth and no env vars needed — try to start the server directly
   try {
     const live = await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
     if (live.status === "ready") {
       return c.json({ ok: true, connected: true });
     }
-    return c.json({ ok: false, error: live.error ?? `Server ${live.status}`, needsEnv: live.error?.includes("ENOENT") ? [] : [] }, 500);
+    return c.json({ ok: false, error: live.error ?? `Server ${live.status}`, needsEnv: [] });
   } catch (e: any) {
-    return c.json({ ok: false, error: e?.message ?? String(e), needsEnv: [] }, 500);
+    return c.json({ ok: false, error: e?.message ?? String(e), needsEnv: [] });
   }
 });
 
