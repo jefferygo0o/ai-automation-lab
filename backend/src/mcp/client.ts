@@ -247,7 +247,7 @@ class McpManager {
     const enabled = Array.isArray(cfg.mcpServers) ? cfg.mcpServers as string[] : [];
     for (const serverName of enabled) {
       if (this.servers.has(serverName)) continue;
-      const all = McpStore.list();
+      const all = await McpStore.list();
       const def = all.find((s) => s.name === serverName && s.enabled);
       if (def) {
         try { await this.startServer({ name: def.name, command: def.command, args: def.args, env: def.env }); }
@@ -257,7 +257,8 @@ class McpManager {
   }
 
   async startAll() {
-    for (const s of McpStore.list().filter((x) => x.enabled)) {
+    const allServers = await McpStore.list();
+    for (const s of allServers.filter((x) => x.enabled)) {
       if (this.servers.has(s.name)) continue;
       try {
         await this.startServer({ name: s.name, command: s.command, args: s.args, env: s.env });

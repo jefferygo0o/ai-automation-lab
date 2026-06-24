@@ -484,7 +484,7 @@ api.post("/api/mcp/marketplace/:id/install", async (c) => {
     connectError = e?.message ?? String(e);
   }
   return c.json({
-    server: await McpStore.list().find((s) => s.id === server.id),
+    server: (await McpStore.list()).find((s) => s.id === server.id),
     status: connectStatus,
     error: connectError,
     needs_env: async (entry.envVars ?? []).filter((v) => v.required).map((v) => v.name),

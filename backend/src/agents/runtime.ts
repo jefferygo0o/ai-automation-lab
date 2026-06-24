@@ -371,11 +371,11 @@ export async function runAgentTurn(
         let result: any;
         let ok = true;
         const toolStart = Date.now();
-        const inv = RunStore.recordToolStart(run.id, tc.name, fnArgs, sandbox.id);
+        const inv = await RunStore.recordToolStart(run.id, tc.name, fnArgs, sandbox.id);
         if (perm === "never") {
           result = { error: `permission denied for tool ${tc.name}` };
           ok = false;
-          RunStore.recordToolFinish(inv.id, "denied", result, "denied by permission policy");
+          await RunStore.recordToolFinish(inv.id, "denied", result, "denied by permission policy");
         } else {
           try {
             result = await tool.execute(fnArgs, toolCtx);
