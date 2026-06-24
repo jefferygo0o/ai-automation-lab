@@ -48,10 +48,25 @@ async function requiresPdKey(ownerId: string, c: any): Promise<string | null> {
   return key;
 }
 
-/** Strip the full connection when returning from the API. */
+/** Strip the full connection when returning from the API, mapping to snake_case for the frontend. */
 function sanitizeConn(c: IntegrationConnection) {
-  const { credentialsRef, ...rest } = c;
-  return { ...rest, hasCredentials: !!credentialsRef };
+  return {
+    id: c.id,
+    ownerId: c.ownerId,
+    app_slug: c.appSlug,
+    app_name: c.appName,
+    app_description: c.appDescription,
+    auth_type: c.authType,
+    auth_description: c.authDescription,
+    logo_url: c.logoUrl,
+    status: c.status,
+    has_credentials: !!c.credentialsRef,
+    connected_account_id: c.connectedAccountId,
+    categories: c.categories,
+    action_count: 0,
+    created_at: c.createdAt,
+    updated_at: c.updatedAt,
+  };
 }
 
 // ---------------------------------------------------------------------------
