@@ -32,15 +32,15 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour cache for catalog
  *   2. Secrets DB (case-insensitive lookup of "pipedream_api_key").
  * Either source is accepted; the env var wins when present.
  */
-function getPdApiKey(ownerId: string): string | null {
+async function getPdApiKey(ownerId: string): Promise<string | null> {
   const envKey = process.env.PIPEDREAM_API_KEY?.trim();
   if (envKey && envKey.length > 0) return envKey;
-  return SecretStore.getCI(ownerId, "pipedream_api_key");
+  return await SecretStore.getCI(ownerId, "pipedream_api_key");
 }
 
 /** Reusable guard — returns 400 if no PD key set. */
-function requiresPdKey(ownerId: string, c: any): string | null {
-  const key = getPdApiKey(ownerId);
+async function requiresPdKey(ownerId: string, c: any): Promise<string | null> {
+  const key = await getPdApiKey(ownerId);
   if (!key) {
     c.status(400);
     return null;
@@ -54,8 +54,8 @@ function sanitizeConn(c: IntegrationConnection) {
   return { ...rest, hasCredentials: !!credentialsRef };
 }
 
-function pdKeyMissingPayload(ownerId: string) {
-  const existing = SecretStore.list(ownerId).map((s) => s.name);
+async function pdKeyMissingPayload(ownerId: string) {
+  const existing = await (await SecretStore.list(ownerId)).map((s) => s.name);
   return {
     error:
       "Pipedream API key not configured. Save it as a secret named 'pipedream_api_key' on the Secrets page, or set the PIPEDREAM_API_KEY environment variable on the server.",
@@ -79,17 +79,17 @@ async function syncCatalogFromPd(ownerId: string, pdKey: string): Promise<number
   }
   syncLocks.add(ownerId);
   console.log("[sync] starting sync for", ownerId);
-  IntegrationRegistry.updateCatalogSyncState(ownerId, "syncing", { total: 0 });
+  await IntegrationRegistry.updateCatalogSyncState(ownerId, "syncing", { total: 0 });
   try {
     const apps = await PipedreamClient.listApps(pdKey);
     console.log("[sync] Pipedream listApps returned", apps.length, "apps");
-    IntegrationRegistry.cacheAppCatalog(ownerId, apps);
-    IntegrationRegistry.updateCatalogSyncState(ownerId, "complete", { total: apps.length });
+    await IntegrationRegistry.cacheAppCatalog(ownerId, apps);
+    await IntegrationRegistry.updateCatalogSyncState(ownerId, "complete", { total: apps.length });
     console.log("[sync] complete for", ownerId, "(" + apps.length + " apps)");
     return apps.length;
   } catch (e: any) {
     console.error("[sync] error for", ownerId + ":", e?.message ?? String(e));
-    IntegrationRegistry.updateCatalogSyncState(ownerId, "error", {
+    await IntegrationRegistry.updateCatalogSyncState(ownerId, "error", {
       errorMessage: e?.message ?? String(e),
     });
     throw e;
@@ -110,7 +110,7 @@ async function syncCatalogFromPd(ownerId: string, pdKey: string): Promise<number
  */
 API.post("/catalog/sync", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = requiresPdKey(userId, c);
+  const pdKey = await requiresPdKey(userId, c);
   if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
 
   try {
@@ -129,12 +129,12 @@ API.post("/catalog/sync", async (c) => {
  */
 API.get("/categories", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = requiresPdKey(userId, c);
+  const pdKey = await requiresPdKey(userId, c);
   if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
 
   try {
-    const count = IntegrationRegistry.getCachedAppsCount(userId);
-    const fresh = IntegrationRegistry.isCacheFresh(userId, CACHE_TTL_MS);
+    const count = await IntegrationRegistry.getCachedAppsCount(userId);
+    const fresh = await IntegrationRegistry.isCacheFresh(userId, CACHE_TTL_MS);
 
     // Never block on Pipedream — return cached data immediately.
     // If the cache is empty or stale, trigger a background refresh.
@@ -142,8 +142,8 @@ API.get("/categories", async (c) => {
       syncCatalogFromPd(userId, pdKey).catch(e => console.error("[integrations] sync error:", e?.message ?? String(e)));
     }
 
-    const categories = IntegrationRegistry.getCachedCategories(userId);
-    const syncState = IntegrationRegistry.getCatalogSyncState(userId);
+    const categories = await IntegrationRegistry.getCachedCategories(userId);
+    const syncState = await IntegrationRegistry.getCatalogSyncState(userId);
 
     return c.json({
       categories,
@@ -165,7 +165,7 @@ API.get("/categories", async (c) => {
  */
 API.get("/catalog", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = requiresPdKey(userId, c);
+  const pdKey = await requiresPdKey(userId, c);
   if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
 
   const query = c.req.query("q")?.trim() ?? "";
@@ -174,8 +174,8 @@ API.get("/catalog", async (c) => {
   const category = c.req.query("category")?.toLowerCase() ?? "";
 
   try {
-    const count = IntegrationRegistry.getCachedAppsCount(userId);
-    const fresh = IntegrationRegistry.isCacheFresh(userId, CACHE_TTL_MS);
+    const count = await IntegrationRegistry.getCachedAppsCount(userId);
+    const fresh = await IntegrationRegistry.isCacheFresh(userId, CACHE_TTL_MS);
 
     // Never block on Pipedream — return cached data immediately.
     // If the cache is empty or stale, trigger a background refresh.
@@ -185,18 +185,18 @@ API.get("/catalog", async (c) => {
 
     // Get connected slugs
     const connected = new Set(
-      IntegrationRegistry.list(userId).map((i) => i.appSlug),
+      await (await IntegrationRegistry.list(userId)).map((i) => i.appSlug),
     );
 
     let apps: CachedCatalogApp[];
     let total: number;
 
     if (query) {
-      const result = IntegrationRegistry.searchCachedApps(userId, query, 1, 10000);
+      const result = await IntegrationRegistry.searchCachedApps(userId, query, 1, 10000);
       apps = result.apps;
       total = result.total;
     } else {
-      apps = IntegrationRegistry.getCachedApps(userId);
+      apps = await IntegrationRegistry.getCachedApps(userId);
       total = apps.length;
     }
 
@@ -238,8 +238,8 @@ API.get("/catalog", async (c) => {
       page,
       per_page: perPage,
       pages,
-      sync_state: (() => {
-        const s = IntegrationRegistry.getCatalogSyncState(userId);
+      sync_state: (async () => {
+        const s = await IntegrationRegistry.getCatalogSyncState(userId);
         return s ? { status: s.status, total: s.total } : null;
       })(),
     });
@@ -254,15 +254,15 @@ API.get("/catalog", async (c) => {
  */
 API.get("/catalog/:slug", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = requiresPdKey(userId, c);
+  const pdKey = await requiresPdKey(userId, c);
   if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
 
   const slug = c.req.param("slug");
 
   try {
     // Check cache first
-    const cached = IntegrationRegistry.listCachedActions(slug);
-    const cacheTs = IntegrationRegistry.getCacheTimestamp(slug);
+    const cached = await IntegrationRegistry.listCachedActions(slug);
+    const cacheTs = await IntegrationRegistry.getCacheTimestamp(slug);
     const isFresh = cacheTs && (Date.now() - cacheTs) < CACHE_TTL_MS;
 
     let app: any;
@@ -270,7 +270,7 @@ API.get("/catalog/:slug", async (c) => {
 
     if (isFresh && cached.length > 0) {
       // Use cached data — get basic app info from the first entry
-      const conn = IntegrationRegistry.getByApp(userId, slug);
+      const conn = await IntegrationRegistry.getByApp(userId, slug);
       app = {
         name_slug: slug,
         name: conn?.appName ?? slug,
@@ -297,10 +297,10 @@ API.get("/catalog/:slug", async (c) => {
         inputSchema: comp.input_schema,
         outputSchema: comp.output_schema ?? {},
       }));
-      IntegrationRegistry.cacheActions(slug, components);
+      await IntegrationRegistry.cacheActions(slug, components);
     }
 
-    const connected = !!(IntegrationRegistry.getByApp(userId, slug));
+    const connected = !!(await IntegrationRegistry.getByApp(userId, slug));
 
     return c.json({
       app: { ...app, connected },
@@ -318,7 +318,7 @@ API.get("/catalog/:slug", async (c) => {
  */
 API.post("/catalog/:slug/refresh", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = requiresPdKey(userId, c);
+  const pdKey = await requiresPdKey(userId, c);
   if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
 
   const slug = c.req.param("slug");
@@ -334,7 +334,7 @@ API.post("/catalog/:slug/refresh", async (c) => {
       inputSchema: comp.input_schema,
       outputSchema: comp.output_schema ?? {},
     }));
-    IntegrationRegistry.cacheActions(slug, components);
+    await IntegrationRegistry.cacheActions(slug, components);
     return c.json({ ok: true, count: components.length });
   } catch (e: any) {
     return c.json({ error: `Refresh failed: ${e?.message ?? String(e)}` }, 502);
@@ -347,9 +347,9 @@ API.post("/catalog/:slug/refresh", async (c) => {
  * GET /api/integrations
  * List all connected integrations for the current user.
  */
-API.get("/", (c) => {
+API.get("/", async (c) => {
   const userId = c.get("userId") as string;
-  const connections = IntegrationRegistry.list(userId);
+  const connections = await IntegrationRegistry.list(userId);
   return c.json({ connections: connections.map(sanitizeConn) });
 });
 
@@ -360,13 +360,13 @@ API.get("/", (c) => {
  */
 API.post("/connect/:slug", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = requiresPdKey(userId, c);
+  const pdKey = await requiresPdKey(userId, c);
   if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
 
   const slug = c.req.param("slug");
 
   // Check if already connected
-  const existing = IntegrationRegistry.getByApp(userId, slug);
+  const existing = await IntegrationRegistry.getByApp(userId, slug);
   if (existing) {
     return c.json({ error: "Already connected", connection: sanitizeConn(existing) }, 409);
   }
@@ -386,10 +386,10 @@ API.post("/connect/:slug", async (c) => {
       inputSchema: comp.input_schema ?? {},
       outputSchema: comp.output_schema ?? {},
     }));
-    IntegrationRegistry.cacheActions(slug, cached);
+    await IntegrationRegistry.cacheActions(slug, cached);
 
     // Create the connection record
-    const conn = IntegrationRegistry.create(userId, {
+    const conn = await IntegrationRegistry.create(userId, {
       appSlug: app.name_slug,
       appName: app.name,
       appDescription: app.description,
@@ -411,7 +411,7 @@ API.post("/connect/:slug", async (c) => {
     return c.json({ connection: sanitizeConn(conn) });
   } catch (e: any) {
     // If Pipedream fetch fails, still allow a minimal connection
-    const conn = IntegrationRegistry.create(userId, {
+    const conn = await IntegrationRegistry.create(userId, {
       appSlug: slug,
       appName: slug.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
       appDescription: "",
@@ -430,16 +430,16 @@ API.post("/connect/:slug", async (c) => {
  */
 API.put("/:id/credentials", async (c) => {
   const userId = c.get("userId") as string;
-  const conn = IntegrationRegistry.get(c.req.param("id"), userId);
+  const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
   if (!conn) return c.json({ error: "not found" }, 404);
 
   const { value } = (await c.req.json()) as { value: string };
   const refName = `int_cred_${conn.appSlug}`;
 
   // Store as a secret
-  SecretStore.set(userId, refName, value);
+  await SecretStore.set(userId, refName, value);
 
-  IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
+  await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
     credentialsRef: refName,
   });
 
@@ -461,11 +461,11 @@ API.put("/:id/credentials", async (c) => {
  */
 API.put("/:id/oauth", async (c) => {
   const userId = c.get("userId") as string;
-  const conn = IntegrationRegistry.get(c.req.param("id"), userId);
+  const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
   if (!conn) return c.json({ error: "not found" }, 404);
 
   const { connectedAccountId } = (await c.req.json()) as { connectedAccountId: string };
-  IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
+  await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
     connectedAccountId,
   });
 
@@ -487,11 +487,11 @@ API.put("/:id/oauth", async (c) => {
  */
 API.delete("/:id", async (c) => {
   const userId = c.get("userId") as string;
-  const conn = IntegrationRegistry.get(c.req.param("id"), userId);
+  const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
   if (!conn) return c.json({ error: "not found" }, 404);
 
   // Clean up the Pipedream account if it exists
-  const pdKey = getPdApiKey(userId);
+  const pdKey = await getPdApiKey(userId);
   if (pdKey && conn.connectedAccountId) {
     try {
       await PipedreamClient.deleteAccount(pdKey, conn.connectedAccountId);
@@ -502,10 +502,10 @@ API.delete("/:id", async (c) => {
 
   // Delete the credentials secret if it exists
   if (conn.credentialsRef) {
-    SecretStore.delete(userId, conn.credentialsRef);
+    await SecretStore.delete(userId, conn.credentialsRef);
   }
 
-  const ok = IntegrationRegistry.delete(conn.id, userId);
+  const ok = await IntegrationRegistry.delete(conn.id, userId);
 
   Audit.record({
     ownerId: userId,
@@ -525,12 +525,12 @@ API.delete("/:id", async (c) => {
  * GET /api/integrations/:id/actions
  * List available actions for a connected integration.
  */
-API.get("/:id/actions", (c) => {
+API.get("/:id/actions", async (c) => {
   const userId = c.get("userId") as string;
-  const conn = IntegrationRegistry.get(c.req.param("id"), userId);
+  const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
   if (!conn) return c.json({ error: "not found" }, 404);
 
-  const actions = IntegrationRegistry.listCachedActions(conn.appSlug);
+  const actions = await IntegrationRegistry.listCachedActions(conn.appSlug);
   return c.json({ actions });
 });
 
@@ -544,10 +544,10 @@ API.get("/:id/actions", (c) => {
  */
 API.post("/:id/execute", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = requiresPdKey(userId, c);
+  const pdKey = await requiresPdKey(userId, c);
   if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
 
-  const conn = IntegrationRegistry.get(c.req.param("id"), userId);
+  const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
   if (!conn) return c.json({ error: "not found" }, 404);
   if (conn.status !== "connected") {
     return c.json({ error: `Integration is not connected (status: ${conn.status})` }, 400);
@@ -569,7 +569,7 @@ API.post("/:id/execute", async (c) => {
       result = await PipedreamClient.executeAction(pdKey, actionKey, input ?? {}, accountId);
     } else if (conn.credentialsRef) {
       // For API key-based integrations, retrieve the key and pass directly
-      const storedKey = SecretStore.get(userId, conn.credentialsRef);
+      const storedKey = await SecretStore.get(userId, conn.credentialsRef);
       if (!storedKey) {
         return c.json({ error: "Stored credentials not found" }, 500);
       }
@@ -605,7 +605,7 @@ API.post("/:id/execute", async (c) => {
  */
 API.get("/pipedream/status", async (c) => {
   const userId = c.get("userId") as string;
-  const key = getPdApiKey(userId);
+  const key = await getPdApiKey(userId);
   if (!key) {
     return c.json({ configured: false, valid: false, message: "No Pipedream API key configured" });
   }
@@ -627,7 +627,7 @@ API.put("/pipedream/key", async (c) => {
   if (!value || value.length < 10) {
     return c.json({ error: "A valid Pipedream API key is required (min 10 chars)" }, 400);
   }
-  SecretStore.set(userId, "pipedream_api_key", value);
+  await SecretStore.set(userId, "pipedream_api_key", value);
   Audit.record({
     ownerId: userId,
     actor: "user",
@@ -643,9 +643,9 @@ API.put("/pipedream/key", async (c) => {
  * GET /api/integrations/stats
  * Return counts per status for the dashboard.
  */
-API.get("/stats", (c) => {
+API.get("/stats", async (c) => {
   const userId = c.get("userId") as string;
-  const byStatus = IntegrationRegistry.countByStatus(userId);
+  const byStatus = await IntegrationRegistry.countByStatus(userId);
   const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
   return c.json({ total, byStatus });
 });
