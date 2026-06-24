@@ -1,3 +1,4 @@
+import type { HonoEnv } from "../types/hono.ts";
 /**
  * Webhooks — incoming HTTP triggers that start a chat with a specific agent
  * and a templated instruction.
@@ -79,10 +80,12 @@ export const WebhookStore = {
     if (patch.enabled !== undefined) { sets.push("is_enabled = ?"); vals.push(patch.enabled ? 1 : 0); }
     if (!sets.length) return false;
     vals.push(id, ownerId);
-    return await db.prepare(`UPDATE webhook_endpoints SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals).changes > 0;
+    const r = await db.prepare(`UPDATE webhook_endpoints SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals);
+    return r.changes > 0;
   },
   async delete(id: string, ownerId: string) {
-    const ok = await db.prepare("DELETE FROM webhook_endpoints WHERE id = ? AND owner_id = ?").run(id, ownerId).changes > 0;
+    const r2 = await db.prepare("DELETE FROM webhook_endpoints WHERE id = ? AND owner_id = ?").run(id, ownerId);
+    const ok = r2.changes > 0;
     if (ok) Audit.record({ ownerId, actor: "user", action: "webhook.delete", targetId: id, targetType: "webhook" });
     return ok;
   },
@@ -96,7 +99,7 @@ export const WebhookStore = {
  * Incoming fires run the agent with the templated instruction and stream
  * the result as SSE.
  */
-export const webhooksApi = new Hono();
+export const webhooksApi = new Hono<HonoEnv>();
 
 // CRUD (auth-required)
 webhooksApi.get("/", async (c) => {
@@ -115,13 +118,14 @@ webhooksApi.post("/", async (c) => {
 webhooksApi.put("/:id", async (c) => {
   const userId = c.get("userId") as string;
   const body = await c.req.json() as { name?: string; instructionTemplate?: string; reusable?: boolean; enabled?: boolean };
-  const ok = WebhookStore.update(c.req.param("id"), userId, body);
+  const ok = await WebhookStore.update(c.req.param("id"), userId, body);
   return c.json({ ok });
 });
 
 webhooksApi.delete("/:id", async (c) => {
   const userId = c.get("userId") as string;
-  return c.json({ ok: WebhookStore.delete(c.req.param("id"), userId) });
+  const ok = await WebhookStore.delete(c.req.param("id"), userId);
+  return c.json({ ok });
 });
 
 /**
@@ -129,10 +133,10 @@ webhooksApi.delete("/:id", async (c) => {
  * Body is JSON, available to the agent as `payload`.
  * If the webhook is single-use, it is disabled after firing.
  */
-export const webhooksPublicApi = new Hono();
+export const webhooksPublicApi = new Hono<HonoEnv>();
 webhooksPublicApi.post("/api/hooks/fire/:secret", async (c) => {
   const secret = c.req.param("secret");
-  const hook = WebhookStore.bySecret(secret);
+  const hook = await WebhookStore.bySecret(secret);
   if (!hook) return c.json({ error: "invalid or disabled webhook" }, 404);
 
   const body = await c.req.json().catch(() => ({}));
@@ -146,11 +150,11 @@ webhooksPublicApi.post("/api/hooks/fire/:secret", async (c) => {
     });
 
   const owner = await db.prepare("SELECT owner_id FROM webhook_endpoints WHERE id = ?").get(hook.id) as { owner_id: string };
-  const agent = AgentStore.get(hook.agentId, owner.owner_id);
+  const agent = await AgentStore.get(hook.agentId, owner.owner_id);
   if (!agent) return c.json({ error: "agent no longer exists" }, 410);
 
-  const chat = ChatStore.create(owner.owner_id, hook.agentId, `Webhook: ${hook.name}`);
-  WebhookStore.recordFire(hook.id);
+  const chat = await ChatStore.create(owner.owner_id, hook.agentId, `Webhook: ${hook.name}`);
+  await WebhookStore.recordFire(hook.id);
   Audit.record({ ownerId: owner.owner_id, actor: "system", action: "webhook.fire", targetId: hook.id, targetType: "webhook", metadata: { agentId: hook.agentId, chatId: chat.id } });
 
   // Disable single-use webhooks
