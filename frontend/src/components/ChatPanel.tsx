@@ -861,19 +861,43 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                           e.target.value = "";
                         }}
                       />
-                      <button
-                        type="button"
-                        onClick={() => fileInputRef.current?.click()}
-                        className="rounded-lg p-2 hover:bg-paper-200 text-ink-400 hover:text-ink-700 transition-colors"
-                        aria-label="Attach files"
-                        title="Attach files or images"
-                      >
-                        <Plus size={18} />
-                      </button>
-                      <div className="h-4 w-px bg-line ml-1" />
+                      <DropdownMenu open={agentDropdownOpen} onOpenChange={setAgentDropdownOpen}>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex items-center gap-1 h-8 pl-1.5 pr-2 text-xs rounded-md text-ink-500 hover:bg-paper-200 transition-colors"
+                          >
+                            <Bot size={13} className="shrink-0 text-ink-400" />
+                            <span className="max-w-[70px] truncate">
+                              {agentsList.find((a) => a.id === (selectedAgentId || chat?.activeAgentId || chat?.agentId))?.name ?? "Agent"}
+                            </span>
+                            <ChevronDown size={11} className="shrink-0 text-ink-400 opacity-40" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="start" side="top" sideOffset={6} className="min-w-[10rem]">
+                          {agentsList.map((a) => (
+                            <DropdownMenuItem
+                              key={a.id}
+                              onSelect={() => {
+                                setSelectedAgentId(a.id);
+                                if (chatId) Chats.setActiveAgent(chatId, a.id);
+                              }}
+                              className="flex items-center justify-between gap-2"
+                            >
+                              <div className="flex items-center gap-2">
+                                <Bot size={14} className="shrink-0 text-ink-400" />
+                                <span>{a.name}</span>
+                              </div>
+                              {(selectedAgentId || chat?.activeAgentId || chat?.agentId) === a.id && (
+                                <Check size={14} className="text-ink-700" />
+                              )}
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                       {hasRunningTools && (
-                        <div className="flex items-center justify-center w-6 h-6" title="AI agent running">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" width="22" height="22">
+                        <div className="flex items-center justify-center h-8 w-6" title="AI agent running">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 50 50" className="w-5 h-5">
                             <defs>
                               <style>{`
                                 .box { fill: #111; }
@@ -956,40 +980,16 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                           </svg>
                         </div>
                       )}
-                      <DropdownMenu open={agentDropdownOpen} onOpenChange={setAgentDropdownOpen}>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
-                            className="flex items-center gap-1 h-8 pl-1.5 pr-2 text-xs rounded-md text-ink-500 hover:bg-paper-200 transition-colors"
-                          >
-                            <Bot size={13} className="shrink-0 text-ink-400" />
-                            <span className="max-w-[70px] truncate">
-                              {agentsList.find((a) => a.id === (selectedAgentId || chat?.activeAgentId || chat?.agentId))?.name ?? "Agent"}
-                            </span>
-                            <ChevronDown size={11} className="shrink-0 text-ink-400 opacity-40" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="start" side="top" sideOffset={6} className="min-w-[10rem]">
-                          {agentsList.map((a) => (
-                            <DropdownMenuItem
-                              key={a.id}
-                              onSelect={() => {
-                                setSelectedAgentId(a.id);
-                                if (chatId) Chats.setActiveAgent(chatId, a.id);
-                              }}
-                              className="flex items-center justify-between gap-2"
-                            >
-                              <div className="flex items-center gap-2">
-                                <Bot size={14} className="shrink-0 text-ink-400" />
-                                <span>{a.name}</span>
-                              </div>
-                              {(selectedAgentId || chat?.activeAgentId || chat?.agentId) === a.id && (
-                                <Check size={14} className="text-ink-700" />
-                              )}
-                            </DropdownMenuItem>
-                          ))}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                      <div className="h-4 w-px bg-line ml-1" />
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        className="rounded-lg p-2 hover:bg-paper-200 text-ink-400 hover:text-ink-700 transition-colors"
+                        aria-label="Attach files"
+                        title="Attach files or images"
+                      >
+                        <Plus size={18} />
+                      </button>
                     </div>
                     <button
                       type="button"
