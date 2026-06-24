@@ -126,7 +126,7 @@ function rowToConnection(r: IntegrationRow): IntegrationConnection {
     appSlug: r.app_slug,
     appName: r.app_name,
     appDescription: r.app_description,
-    authType: r.auth_type as IntegrationConnection["auth_type"],
+    authType: r.auth_type as IntegrationConnection["authType"],
     authDescription: r.auth_description,
     logoUrl: r.logo_url,
     status: r.status as IntegrationConnection["status"],
@@ -162,20 +162,20 @@ function rowToCatalogApp(r: CatalogAppRow): CachedCatalogApp {
 export const IntegrationRegistry = {
   // ---- Connections CRUD ----
 
-  async list(ownerId: string): IntegrationConnection[] {
+  async list(ownerId: string): Promise<IntegrationConnection[]> {
     return await (await db.prepare(
       `SELECT * FROM integration_connections WHERE owner_id = ? ORDER BY updated_at DESC`
     ).all(ownerId) as IntegrationRow[]).map(rowToConnection);
   },
 
-  async get(id: string, ownerId: string): IntegrationConnection | null {
+  async get(id: string, ownerId: string): Promise<IntegrationConnection | null> {
     const r = await db.prepare(
       `SELECT * FROM integration_connections WHERE id = ? AND owner_id = ?`
     ).get(id, ownerId) as IntegrationRow | undefined;
     return r ? rowToConnection(r) : null;
   },
 
-  async getByApp(ownerId: string, appSlug: string): IntegrationConnection | null {
+  async getByApp(ownerId: string, appSlug: string): Promise<IntegrationConnection | null> {
     const r = await db.prepare(
       `SELECT * FROM integration_connections WHERE owner_id = ? AND app_slug = ?`
     ).get(ownerId, appSlug) as IntegrationRow | undefined;
@@ -188,12 +188,12 @@ export const IntegrationRegistry = {
       appSlug: string;
       appName: string;
       appDescription: string;
-      authType: IntegrationConnection["auth_type"];
+      authType: IntegrationConnection["authType"];
       authDescription: string;
       logoUrl: string;
       categories?: string[];
     },
-  ): IntegrationConnection {
+  ): Promise<IntegrationConnection> {
     const id = `int_${nanoid(12)}`;
     const now = Date.now();
     const categories = JSON.stringify(opts.categories ?? []);
@@ -208,7 +208,7 @@ export const IntegrationRegistry = {
       opts.authType, opts.authDescription,
       opts.logoUrl, categories, now, now,
     );
-    return this.get(id, ownerId)!;
+    return await this.get(id, ownerId)!;
   },
 
   async updateStatus(
@@ -268,7 +268,7 @@ export const IntegrationRegistry = {
     }
   },
 
-  async listCachedActions(appSlug: string): CachedAction[] {
+  async listCachedActions(appSlug: string): Promise<CachedAction[]> {
     return await (await db.prepare(
       `SELECT * FROM integration_action_cache WHERE app_slug = ? ORDER BY type, name`
     ).all(appSlug) as ActionRow[]).map((r) => ({
@@ -283,7 +283,7 @@ export const IntegrationRegistry = {
     }));
   },
 
-  async getCachedAction(appSlug: string, actionKey: string): CachedAction | null {
+  async getCachedAction(appSlug: string, actionKey: string): Promise<CachedAction | null> {
     const r = await db.prepare(
       `SELECT * FROM integration_action_cache WHERE app_slug = ? AND action_key = ?`
     ).get(appSlug, actionKey) as ActionRow | undefined;
@@ -316,7 +316,7 @@ export const IntegrationRegistry = {
   },
 
   /** Count connections by status for dashboard. */
-  async countByStatus(ownerId: string): Record<string, number> {
+  async countByStatus(ownerId: string): Promise<Record<string, number>> {
     const rows = await db.prepare(
       `SELECT status, COUNT(*) as count FROM integration_connections
        WHERE owner_id = ? GROUP BY status`
@@ -328,7 +328,7 @@ export const IntegrationRegistry = {
 
   // ---- Catalog App Cache ----
 
-  async getCachedApps(ownerId: string): CachedCatalogApp[] {
+  async getCachedApps(ownerId: string): Promise<CachedCatalogApp[]> {
     return await (await db.prepare(
       `SELECT * FROM catalog_app_cache WHERE owner_id = ? ORDER BY name ASC`
     ).all(ownerId) as CatalogAppRow[]).map(rowToCatalogApp);
@@ -341,14 +341,14 @@ export const IntegrationRegistry = {
     return r?.count ?? 0;
   },
 
-  async getCachedAppsPage(ownerId: string, page: number, perPage: number): CachedCatalogApp[] {
+  async getCachedAppsPage(ownerId: string, page: number, perPage: number): Promise<CachedCatalogApp[]> {
     const offset = (page - 1) * perPage;
     return await (await db.prepare(
       `SELECT * FROM catalog_app_cache WHERE owner_id = ? ORDER BY name ASC LIMIT ? OFFSET ?`
     ).all(ownerId, perPage, offset) as CatalogAppRow[]).map(rowToCatalogApp);
   },
 
-  async searchCachedApps(ownerId: string, query: string, page: number, perPage: number): { apps: CachedCatalogApp[]; total: number } {
+  async searchCachedApps(ownerId: string, query: string, page: number, perPage: number): Promise<{ apps: CachedCatalogApp[]; total: number }> {
     const offset = (page - 1) * perPage;
     const like = `%${query}%`;
     const total = await (await db.prepare(
@@ -360,7 +360,7 @@ export const IntegrationRegistry = {
     return { apps: rows.map(rowToCatalogApp), total };
   },
 
-  async getCachedAppBySlug(ownerId: string, slug: string): CachedCatalogApp | null {
+  async getCachedAppBySlug(ownerId: string, slug: string): Promise<CachedCatalogApp | null> {
     const r = await db.prepare(
       `SELECT * FROM catalog_app_cache WHERE owner_id = ? AND app_slug = ?`
     ).get(ownerId, slug) as CatalogAppRow | undefined;
@@ -373,7 +373,7 @@ export const IntegrationRegistry = {
     ).all(ownerId) as { categories_json: string }[];
     const cats = new Set<string>();
     for (const r of rows) {
-      const parsed = safeJsonParse<string[]>(r.categories_json, null);
+      const parsed = safeJsonParse<string[]>(r.categories_json, []);
       if (Array.isArray(parsed)) {
         for (const c of parsed) cats.add(c);
       }
@@ -424,7 +424,7 @@ export const IntegrationRegistry = {
     });
   },
 
-  async getCatalogSyncState(ownerId: string): { status: string; total: number; errorMessage: string | null; startedAt: number; completedAt: number | null } | null {
+  async getCatalogSyncState(ownerId: string): Promise<{ status: string; total: number; errorMessage: string | null; startedAt: number; completedAt: number | null } | null> {
     const r = await db.prepare(
       `SELECT * FROM catalog_sync_state WHERE owner_id = ?`
     ).get(ownerId) as { owner_id: string; status: string; total: number; error_message: string | null; started_at: number; completed_at: number | null } | undefined;

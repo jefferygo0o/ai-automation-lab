@@ -52,6 +52,79 @@ function convertInsertOrReplace(sql: string): string {
   return sql.replace(/INSERT\s+OR\s+(REPLACE|IGNORE)\s+INTO/gi, "INSERT INTO");
 }
 
+function splitSqlStatements(sql: string): string[] {
+  const statements: string[] = [];
+  let current = "";
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inDollarQuote = false;
+  let dollarQuoteMarker = "";
+  let i = 0;
+  while (i < sql.length) {
+    const char = sql[i];
+    if (inSingleQuote) {
+      if (char === "'") {
+        if (sql[i + 1] === "'") {
+          current += "'";
+          i += 2;
+          continue;
+        } else {
+          inSingleQuote = false;
+        }
+      } else {
+        current += char;
+      }
+    } else if (inDoubleQuote) {
+      if (char === '"') {
+        if (sql[i + 1] === '"') {
+          current += '"';
+          i += 2;
+          continue;
+        } else {
+          inDoubleQuote = false;
+        }
+      } else {
+        current += char;
+      }
+    } else if (inDollarQuote) {
+      if (char === "$" && sql[i + 1] === "$" && dollarQuoteMarker === "$$") {
+        inDollarQuote = false;
+        dollarQuoteMarker = "";
+        current += "$$";
+        i += 2;
+        continue;
+      } else {
+        current += char;
+      }
+    } else {
+      if (char === "'") {
+        inSingleQuote = true;
+      } else if (char === '"') {
+        inDoubleQuote = true;
+      } else if (char === "$") {
+        if (sql[i + 1] === "$") {
+          dollarQuoteMarker = "$$";
+          inDollarQuote = true;
+          i += 2;
+          continue;
+        } else {
+          current += char;
+        }
+      } else if (char === ";") {
+        statements.push(current);
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    i++;
+  }
+  if (current) {
+    statements.push(current);
+  }
+  return statements;
+}
+
 class PGStatement<T = any> {
   private pool: Pool;
   private sql: string;
@@ -77,7 +150,17 @@ class PgDbShim {
   query<T = any>(sql: string): PGStatement<T> { return new PGStatement<T>(getPool(), sql); }
   prepare<T = any>(sql: string): PGStatement<T> { return new PGStatement<T>(getPool(), sql); }
   exec(sql: string): Promise<{ changes: number }> {
-    return getPool().query(sql).then(r => ({ changes: r.rowCount ?? 0 }));
+    const statements = splitSqlStatements(sql);
+    let totalChanges = 0;
+    const runNext = async (): Promise<{ changes: number }> => {
+      for (const stmt of statements) {
+        if (!stmt.trim()) continue;
+        const r = await getPool().query(stmt);
+        totalChanges += r.rowCount ?? 0;
+      }
+      return { changes: totalChanges };
+    };
+    return runNext();
   }
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
     const client = await getPool().connect();
