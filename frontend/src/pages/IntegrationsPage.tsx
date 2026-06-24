@@ -337,17 +337,18 @@ function AppCard({
 // ==============================================================
 
 // Featured apps for Quick Connect section
-const FEATURED_SLUGS = [
-  "gmail",
-  "microsoft_outlook",
-  "twitter",
-  "slack",
-  "n8n",
-  "github",
-  "cloudflare",
-  "stripe",
-  "linkedin",
-  "moltbook",
+// These serve as both slug references and fallback data when the catalog cache is empty.
+const FEATURED_APPS = [
+  { slug: "gmail", name: "Gmail", auth_type: "oauth" as const, description: "Send and receive emails via Google Gmail" },
+  { slug: "microsoft_outlook", name: "Microsoft Outlook", auth_type: "oauth" as const, description: "Email, calendar, and contacts via Microsoft 365" },
+  { slug: "twitter", name: "X / Twitter", auth_type: "oauth" as const, description: "Post tweets and send direct messages" },
+  { slug: "slack", name: "Slack", auth_type: "oauth" as const, description: "Send messages and notifications to channels" },
+  { slug: "n8n", name: "n8n", auth_type: "oauth" as const, description: "Advanced workflow automation" },
+  { slug: "github", name: "GitHub", auth_type: "oauth" as const, description: "Manage repos, issues, PRs, and Actions" },
+  { slug: "cloudflare", name: "Cloudflare", auth_type: "api_key" as const, description: "DNS, Workers, and other Cloudflare services" },
+  { slug: "stripe", name: "Stripe", auth_type: "oauth" as const, description: "Payment processing and billing" },
+  { slug: "linkedin", name: "LinkedIn", auth_type: "oauth" as const, description: "Share updates and manage LinkedIn presence" },
+  { slug: "moltbook", name: "MoltBook", auth_type: "oauth" as const, description: "AI-powered bookkeeping and accounting" },
 ];
 
 function FeaturedAppCard({
@@ -399,22 +400,49 @@ function CatalogView({
   const [featuredLoading, setFeaturedLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Fetch featured apps on mount
+  // Fetch featured apps on mount — with fallback data so Quick Connect
+  // always shows cards even when the catalog cache hasn't been populated yet.
   useEffect(() => {
     setFeaturedLoading(true);
     Promise.all(
-      FEATURED_SLUGS.map((slug) =>
-        Integrations.catalog({ q: slug, per_page: 5 })
+      FEATURED_APPS.map((fallback) =>
+        Integrations.catalog({ q: fallback.slug, per_page: 5 })
           .then((res) => {
             const match = res.apps.find(
-              (a) => a.name_slug === slug || a.name.toLowerCase().replace(/[^a-z0-9]/g, "_") === slug
+              (a) => a.name_slug === fallback.slug || a.name.toLowerCase().replace(/[^a-z0-9]/g, "_") === fallback.slug
             );
-            return match ?? null;
+            if (match) return match;
+            // Fallback to hardcoded info when catalog doesn't have it yet
+            return {
+              id: fallback.slug,
+              name: fallback.name,
+              name_slug: fallback.slug,
+              description: fallback.description,
+              auth_type: fallback.auth_type,
+              auth_description: "",
+              action_count: 0,
+              trigger_count: 0,
+              logo_url: "",
+              categories: [],
+              connected: false,
+            } as PdApp;
           })
-          .catch(() => null)
+          .catch(() => ({
+            id: fallback.slug,
+            name: fallback.name,
+            name_slug: fallback.slug,
+            description: fallback.description,
+            auth_type: fallback.auth_type,
+            auth_description: "",
+            action_count: 0,
+            trigger_count: 0,
+            logo_url: "",
+            categories: [],
+            connected: false,
+          } as PdApp))
       )
     ).then((apps) => {
-      setFeatured(apps.filter(Boolean) as PdApp[]);
+      setFeatured(apps);
       setFeaturedLoading(false);
     });
   }, []);
