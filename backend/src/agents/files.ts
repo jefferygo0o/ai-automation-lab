@@ -181,11 +181,31 @@ export function readAgentFile(agentId: string, name: string): string {
   if (!AGENT_FILE_NAMES.includes(name as AgentFileName) && !name.startsWith("skills/")) {
     throw new Error(`file not allowed: ${name}`);
   }
-  const path = resolve(join(agentDir(agentId), name));
-  if (!path.startsWith(resolve(agentDir(agentId)))) {
+  const dir = agentDir(agentId);
+  const path = resolve(join(dir, name));
+  if (!path.startsWith(resolve(dir))) {
     throw new Error("path traversal");
   }
-  return readFileSync(path, "utf8");
+  try {
+    return readFileSync(path, "utf8");
+  } catch (err: any) {
+    if (err?.code === "ENOENT") {
+      // The agent directory or file is missing — this happens when the
+      // filesystem path shifts between deploys (e.g. local vs Render) or
+      // the ephemeral container disk was wiped while the DB record persists.
+      // Recreate the full agent directory, then retry.
+      ensureAgentDir(agentId);
+      try {
+        return readFileSync(path, "utf8");
+      } catch {
+        // The agent directory now exists but this specific file (e.g. a
+        // skill or a user-created file) still doesn't — return empty string
+        // so the caller can degrade gracefully.
+        return "";
+      }
+    }
+    throw err;
+  }
 }
 
 export function writeAgentFile(agentId: string, name: string, content: string): void {
