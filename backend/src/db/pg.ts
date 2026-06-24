@@ -3,14 +3,31 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 
-const DEFAULT_URL = "postgresql://postgres:postgres@localhost:5432/lab";
 let _pool: Pool | null = null;
 
 function getPool(): Pool {
-  if (!_pool) {
-    const url = process.env.POSTGRES_URL || process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || DEFAULT_URL;
-    _pool = new Pool({ connectionString: url, max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 5000 });
+  if (_pool) return _pool;
+  const url =
+    process.env.SUPABASE_DB_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.DATABASE_URL ||
+    "";
+  if (!url) {
+    console.error(
+      "[db] FATAL: no Postgres connection string configured. Set SUPABASE_DB_URL (Supabase transaction-mode pooler, port 6543) in the environment, then restart."
+    );
+    throw new Error("SUPABASE_DB_URL is not set");
   }
+  _pool = new Pool({
+    connectionString: url,
+    max: 2,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+    ssl: url.includes("supabase") ? { rejectUnauthorized: false } : undefined,
+  });
+  _pool.on("error", (err) => {
+    console.error("[db] idle client error:", err?.message ?? err);
+  });
   return _pool;
 }
 
@@ -76,6 +93,13 @@ export const db = new PgDbShim();
 export async function initSchema(): Promise<void> {
   const dir = fileURLToPath(new URL(".", import.meta.url));
   const p = join(dir, "schema.pg.sql");
+  try {
+    // pgcrypto is required for gen_random_uuid() on Supabase.
+    await db.exec("CREATE EXTENSION IF NOT EXISTS pgcrypto");
+    console.log("[db] pgcrypto extension ensured");
+  } catch (e: any) {
+    console.error("[db] pgcrypto extension ensure failed:", e?.message ?? e);
+  }
   try {
     await db.exec(readFileSync(p, "utf8"));
     console.log("[db] schema applied from", p);
