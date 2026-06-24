@@ -30,8 +30,13 @@ export default function RunsPage() {
   const [loading, setLoading] = useState(false);
 
   async function reload() {
-    const { runs } = await Runs.list();
-    setRuns(runs);
+    try {
+      const { runs } = await Runs.list();
+      setRuns(runs);
+    } catch (err) {
+      console.warn("Runs.list failed:", err);
+      setRuns([]);
+    }
   }
   useEffect(() => { reload(); }, []);
 
@@ -42,6 +47,9 @@ export default function RunsPage() {
     try {
       const d = await Runs.get(id);
       setDetail(d);
+    } catch (err) {
+      console.warn("Runs.get failed:", err);
+      setDetail(null);
     } finally { setLoading(false); }
   }
 
@@ -125,29 +133,22 @@ export default function RunsPage() {
                           </div>
                         </div>
                       </div>
-                      {detail.toolInvocations?.length > 0 && (
-                        <div>
-                          <div className="eyebrow mb-2">Tool invocations</div>
-                          <div className="border border-line rounded divide-y divide-line">
-                            {detail.toolInvocations.map((t: any) => (
-                              <div key={t.id} className="px-3 py-2 text-2xs">
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="font-mono text-ink-700">{t.toolName}</span>
-                                  <span className="text-ink-300 font-mono">{t.durationMs}ms · {t.status}</span>
-                                </div>
-                                <pre className="bg-paper-100 p-2 rounded text-2xs overflow-x-auto max-h-32">
-                                  {JSON.stringify(t.arguments, null, 2)}
-                                </pre>
-                                {t.result !== null && t.result !== undefined && (
-                                  <pre className="bg-paper-100 p-2 rounded text-2xs overflow-x-auto max-h-32 mt-1">
-                                    {typeof t.result === "string" ? t.result : JSON.stringify(t.result, null, 2)}
-                                  </pre>
-                                )}
-                              </div>
-                            ))}
+                      {(detail.invocations ?? []).map((t: any) => (
+                        <div key={t.id} className="px-3 py-2 text-2xs">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-mono text-ink-700">{t.toolName}</span>
+                            <span className="text-ink-300 font-mono">{t.durationMs}ms · {t.status}</span>
                           </div>
+                          <pre className="bg-paper-100 p-2 rounded text-2xs overflow-x-auto max-h-32">
+                            {JSON.stringify(t.arguments, null, 2)}
+                          </pre>
+                          {t.result !== null && t.result !== undefined && (
+                            <pre className="bg-paper-100 p-2 rounded text-2xs overflow-x-auto max-h-32 mt-1">
+                              {typeof t.result === "string" ? t.result : JSON.stringify(t.result, null, 2)}
+                            </pre>
+                          )}
                         </div>
-                      )}
+                      ))}
                     </div>
                   )}
                 </div>

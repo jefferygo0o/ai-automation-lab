@@ -205,15 +205,20 @@ export default function McpPage() {
   }
 
   async function reload() {
-    const { servers } = await MCP.list();
-    setServers(servers);
-    const t: Record<string, McpTool[]> = {};
-    for (const s of servers) {
-      if (s.connected) {
-        try { const r = await MCP.tools(s.id); t[s.id] = r.tools; } catch { t[s.id] = []; }
+    try {
+      const { servers } = await MCP.list();
+      setServers(servers);
+      const t: Record<string, McpTool[]> = {};
+      for (const s of servers) {
+        if (s.connected) {
+          try { const r = await MCP.tools(s.id); t[s.id] = r.tools; } catch { t[s.id] = []; }
+        }
       }
+      setTools(t);
+    } catch (err) {
+      console.warn("MCP.list failed:", err);
+      setServers([]); setTools({});
     }
-    setTools(t);
   }
   useEffect(() => { reload(); }, []);
 

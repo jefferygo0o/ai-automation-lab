@@ -10,8 +10,13 @@ export default function SkillsPage() {
   const [saving, setSaving] = useState(false);
 
   async function reload() {
-    const { skills } = await Skills.list();
-    setSkills(skills);
+    try {
+      const { skills } = await Skills.list();
+      setSkills(skills);
+    } catch (err) {
+      console.warn("Skills.list failed:", err);
+      setSkills([]);
+    }
   }
   useEffect(() => { reload(); }, []);
 
@@ -37,7 +42,11 @@ export default function SkillsPage() {
 
   async function del(id: string) {
     if (!confirm("Delete this skill?")) return;
-    await Skills.remove(id);
+    try {
+      await Skills.remove(id);
+    } catch (err) {
+      console.warn("Skills.remove failed:", err);
+    }
     if (editing === id) startNew();
     await reload();
   }

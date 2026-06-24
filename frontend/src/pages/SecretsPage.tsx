@@ -17,8 +17,13 @@ export default function SecretsPage() {
   const [copyTarget, setCopyTarget] = useState<string | null>(null);
 
   async function reload() {
-    const { secrets } = await Secrets.list();
-    setItems(secrets);
+    try {
+      const { secrets } = await Secrets.list();
+      setItems(secrets);
+    } catch (err) {
+      console.warn("Secrets.list failed:", err);
+      setItems([]);
+    }
   }
   useEffect(() => { reload(); }, []);
 
@@ -33,6 +38,11 @@ export default function SecretsPage() {
     if (!confirm(`Delete secret "${n}"? This cannot be undone.`)) return;
     await Secrets.remove(n);
     reload();
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await save();
   }
 
   function copyRef(n: string) {
@@ -54,7 +64,10 @@ export default function SecretsPage() {
       </div>
 
       {/* Add secret */}
-      <div className="border border-line rounded bg-paper mb-6">
+      <form
+        onSubmit={onSubmit}
+        className="border border-line rounded bg-paper mb-6"
+      >
         <div className="px-5 py-3 border-b border-line flex items-center gap-2">
           <KeyRound className="w-3.5 h-3.5 stroke-[1.75] text-ink-700" />
           <span className="text-sm font-medium text-ink-700">Add a secret</span>
@@ -90,12 +103,12 @@ export default function SecretsPage() {
             />
           </div>
           <div className="flex justify-end">
-            <button onClick={save} disabled={!name.trim() || !value.trim()} className="btn btn-primary">
+            <button type="submit" disabled={!name.trim() || !value.trim()} className="btn btn-primary">
               <Plus className="w-3.5 h-3.5 stroke-[1.75]" /> Save
             </button>
           </div>
         </div>
-      </div>
+      </form>
 
       {/* List */}
       <div className="space-y-1.5">

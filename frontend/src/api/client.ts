@@ -30,7 +30,17 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
     const t = await res.text();
     let body: any = t;
     try { body = JSON.parse(t); } catch {}
-    throw new ApiError(res.status, body?.error || res.statusText, body);
+    const status = res.status;
+    if (status === 401) {
+      setToken(null);
+      const onAuthPage = typeof window !== "undefined" && (window.location.pathname === "/login" || window.location.pathname === "/signup" || window.location.pathname.startsWith("/auth/"));
+      if (!onAuthPage) {
+        console.warn("401 Unauthorized");
+        window.location.href = "/login";
+      }
+      throw new ApiError(status, body?.error || res.statusText, body);
+    }
+    throw new ApiError(status, body?.error || res.statusText, body);
   }
   if (res.headers.get("content-type")?.includes("application/json")) return res.json() as Promise<T>;
   return res.text() as unknown as T;

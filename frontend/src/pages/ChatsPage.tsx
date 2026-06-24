@@ -13,26 +13,32 @@ export default function ChatsPage() {
   const { openChat } = useChatPanel();
 
   async function reload() {
-    const { chats } = await Chats.list();
-    setChats(chats);
-    const { agents } = await import("../api").then(m => m.Agents.list());
-    setAgents(agents);
+    try {
+      const { chats } = await Chats.list();
+      setChats(chats);
+      const { agents } = await import("../api").then(m => m.Agents.list());
+      setAgents(agents);
+    } catch (err) {
+      console.warn("Chats reload failed:", err);
+      setChats([]); setAgents([]);
+    }
   }
   useEffect(() => { reload(); }, []);
 
   async function create() {
     if (!agentId) return;
     setBusy(true);
-    const { chat } = await Chats.create(agentId, title || undefined);
-    setTitle(""); setCreating(false);
-    setBusy(false);
-    await reload();
-    openChat(chat.id);
+    try {
+      const { chat } = await Chats.create(agentId, title || undefined);
+      setTitle(""); setCreating(false);
+      await reload();
+      openChat(chat.id);
+    } catch (err) { console.warn("Chats.create failed:", err); }
+    finally { setBusy(false); }
   }
   async function remove(id: string) {
     if (!confirm("Delete this chat?")) return;
-    await Chats.remove(id);
-    await reload();
+    try { await Chats.remove(id); await reload(); } catch (err) { console.warn("Chats.remove failed:", err); }
   }
 
   return (

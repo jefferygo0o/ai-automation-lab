@@ -15,33 +15,63 @@ export default function AgentsPage() {
   const [filter, setFilter] = useState("");
 
   async function reload() {
-    const { agents } = await Agents.list();
-    setAgents(agents);
+    try {
+      const { agents } = await Agents.list();
+      setAgents(agents);
+    } catch (err) {
+      console.warn("Agents.list failed:", err);
+      setAgents([]);
+    }
   }
-  useEffect(() => { reload(); }, []);
+  useEffect(() => {
+    (async () => {
+      try {
+        await reload();
+      } catch (err) {
+        console.warn("reload() in useEffect failed:", err);
+      }
+    })();
+  }, []);
 
   async function create() {
     if (!newName.trim()) return;
     setBusy(true);
-    const { agent } = await Agents.create(newName, newDesc);
-    setNewName(""); setNewDesc("");
-    setBusy(false);
-    nav(`/agents/${agent.id}`);
+    try {
+      const { agent } = await Agents.create(newName, newDesc);
+      setNewName(""); setNewDesc("");
+      nav(`/agents/${agent.id}`);
+    } catch (err: any) {
+      console.warn("Agents.create failed:", err);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function clone(id: string) {
-    const { agent } = await Agents.clone(id);
-    reload();
-    nav(`/agents/${agent.id}`);
+    try {
+      const { agent } = await Agents.clone(id);
+      reload();
+      nav(`/agents/${agent.id}`);
+    } catch (err) {
+      console.warn("Agents.clone failed:", err);
+    }
   }
   async function del(id: string) {
     if (!confirm("Delete this agent and all its files?")) return;
-    await Agents.remove(id);
-    reload();
+    try {
+      await Agents.remove(id);
+      reload();
+    } catch (err) {
+      console.warn("Agents.remove failed:", err);
+    }
   }
   async function startChat(id: string) {
-    const { chat } = await import("../api").then(m => m.Chats.create(id));
-    nav(`/chats/${chat.id}`);
+    try {
+      const { chat } = await import("../api").then(m => m.Chats.create(id));
+      nav(`/chats/${chat.id}`);
+    } catch (err) {
+      console.warn("Chats.create failed:", err);
+    }
   }
   async function exportOne(id: string) {
     const pack = await Agents.exportPack(id);
