@@ -111,7 +111,7 @@ function rowToTool(r: ToolRow): ToolInvocation {
 }
 
 export const RunStore = {
-  async start(chatId: string, userId: string, agentId: string): Run {
+  async start(chatId: string, userId: string, agentId: string): Promise<Run> {
     const id = `run_${nanoid(12)}`;
     const now = Date.now();
     const aRow = await db.prepare(`SELECT hash, runtime FROM agents WHERE id = ?`).get(agentId) as
@@ -153,20 +153,20 @@ export const RunStore = {
     ).run(usage.promptTokens ?? 0, usage.completionTokens ?? 0, usage.totalTokens ?? 0, id);
   },
 
-  async get(id: string, userId?: string): Run | null {
+  async get(id: string, userId?: string): Promise<Run | null> {
     const row = userId
       ? (await db.prepare(`SELECT * FROM runs WHERE id = ? AND user_id = ?`).get(id, userId) as RunRow | undefined)
       : (await db.prepare(`SELECT * FROM runs WHERE id = ?`).get(id) as RunRow | undefined);
     return row ? rowToRun(row) : null;
   },
 
-  async listForChat(chatId: string, limit = 50): Run[] {
+  async listForChat(chatId: string, limit = 50): Promise<Run[]> {
     return await (await db.prepare(
       `SELECT * FROM runs WHERE chat_id = ? ORDER BY started_at DESC LIMIT ?`,
     ).all(chatId, limit) as RunRow[]).map(rowToRun);
   },
 
-  async listForUser(userId: string, limit = 100): Run[] {
+  async listForUser(userId: string, limit = 100): Promise<Run[]> {
     return await (await db.prepare(
       `SELECT * FROM runs WHERE user_id = ? ORDER BY started_at DESC LIMIT ?`,
     ).all(userId, limit) as RunRow[]).map(rowToRun);
@@ -174,7 +174,7 @@ export const RunStore = {
 
   // ---- tool invocations ----
 
-  async recordToolStart(runId: string, toolName: string, args: unknown, sandboxId: string | null = null): ToolInvocation {
+  async recordToolStart(runId: string, toolName: string, args: unknown, sandboxId: string | null = null): Promise<ToolInvocation> {
     const id = `inv_${nanoid(12)}`;
     const now = Date.now();
     await db.prepare(
@@ -193,7 +193,7 @@ export const RunStore = {
     ).run(status, JSON.stringify(result ?? null), error, now, dur, id);
   },
 
-  async listForRun(runId: string): ToolInvocation[] {
+  async listForRun(runId: string): Promise<ToolInvocation[]> {
     return await (await db.prepare(
       `SELECT * FROM tool_invocations WHERE run_id = ? ORDER BY started_at ASC`,
     ).all(runId) as ToolRow[]).map(rowToTool);
