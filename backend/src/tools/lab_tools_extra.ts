@@ -144,33 +144,92 @@ async function fetchText(url: string, opts: { timeoutMs?: number; headers?: Reco
   }
 }
 
-/** Run a binary, capture stdout/stderr, with a timeout. */
-function runCommand(command: string, args: string[], opts: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {}): Promise<{ ok: boolean; exitCode: number | null; stdout: string; stderr: string }> {
-  return new Promise((resolveP) => {
-    let proc;
+// -------------------------------------------------------------------
+// DEPENDENCY DETECTION HELPERS
+// -------------------------------------------------------------------
+
+/** Check if Playwright Chromium browser binary is installed. */
+function chromiumAvailable(): boolean {
+  const envDir = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  const homedir = process.env.HOME || "/root";
+  const candidates = envDir
+    ? [envDir]
+    : [join(homedir, ".cache", "ms-playwright"), "/root/.cache/ms-playwright"];
+  for (const dir of candidates) {
     try {
-      proc = spawn(command, args, { cwd: opts.cwd, env: { ...process.env, ...(opts.env ?? {}) }, stdio: ["ignore", "pipe", "pipe"] });
-    } catch (e: any) {
-      return resolveP({ ok: false, exitCode: null, stdout: "", stderr: e?.message ?? String(e) });
+      if (existsSync(dir)) {
+        const entries = readdirSync(dir);
+        if (entries.some((e) => e.startsWith("chromium"))) return true;
+      }
+    } catch {
+      /* skip */
     }
-    let stdout = "";
-    let stderr = "";
-    let killed = false;
-    const t = setTimeout(() => {
-      killed = true;
-      try { proc.kill("SIGKILL"); } catch {}
-    }, opts.timeoutMs ?? 30_000);
-    proc.stdout?.on("data", (c) => (stdout += c.toString("utf8")));
-    proc.stderr?.on("data", (c) => (stderr += c.toString("utf8")));
-    proc.on("exit", (code) => {
-      clearTimeout(t);
-      resolveP({ ok: !killed && code === 0, exitCode: code, stdout, stderr });
-    });
-    proc.on("error", (e) => {
-      clearTimeout(t);
-      resolveP({ ok: false, exitCode: null, stdout, stderr: stderr + "\n" + (e?.message ?? String(e)) });
-    });
-  });
+  }
+  return false;
+}
+
+/** Check if ffmpeg is installed. */
+function ffmpegAvailable(): boolean {
+  try {
+    const r = spawnSync("ffmpeg", ["-version"], { stdio: "ignore" });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Check if the `d2` CLI is installed. */
+function d2Available(): boolean {
+  try {
+    const r = spawnSync("d2", ["version"], { stdio: "ignore" });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Check if apt-get is available (whether we're root and can install packages). */
+function aptAvailable(): boolean {
+  try {
+    const r = spawnSync("apt-get", ["--version"], { stdio: "ignore" });
+    return r.status === 0;
+  } catch {
+    return false;
+  }
+}
+
+/** Return a structured report of which tool-chain dependencies are available. */
+function checkDeps(): { name: string; available: boolean; hint: string }[] {
+  return [
+    {
+      name: "ffmpeg",
+      available: ffmpegAvailable(),
+      hint: ffmpegAvailable()
+        ? ""
+        : "apt-get install -y ffmpeg\n   (requires root, typical in Docker containers)",
+    },
+    {
+      name: "playwright-chromium",
+      available: chromiumAvailable(),
+      hint: chromiumAvailable()
+        ? ""
+        : "cd <backend_dir> && bunx playwright install chromium\n   Downloads ~300 MB Chromium browser for headless browsing tools.",
+    },
+    {
+      name: "d2",
+      available: d2Available(),
+      hint: d2Available()
+        ? ""
+        : "curl -fsSL https://d2lang.com/install.sh | sh -s --\n   Enables lab_generate_d2_diagram.",
+    },
+    {
+      name: "apt-get",
+      available: aptAvailable(),
+      hint: aptAvailable()
+        ? "available (root)"
+        : "not available — install system packages manually",
+    },
+  ];
 }
 
 // -------------------------------------------------------------------
@@ -943,6 +1002,12 @@ const browserSessions = new Map<string, {
 }>();
 
 async function openAndExtractText(url: string, timeoutMs: number): Promise<string> {
+  if (!chromiumAvailable()) {
+    throw new Error(
+      "Playwright Chromium browser is not installed. " +
+      "Run `lab_install_dependency` with name='playwright-chromium' to install it."
+    );
+  }
   const script = join(tmpdir(), `lab_open_${randomBytes(6).toString("hex")}.mjs`);
   const code = `
 import { chromium } from "playwright";
@@ -972,6 +1037,12 @@ await browser.close();
 function ensureSession(agentId: string) {
   let s = browserSessions.get(agentId);
   if (s) return s;
+  if (!chromiumAvailable()) {
+    throw new Error(
+      "Playwright Chromium browser is not installed. " +
+      "Run `lab_install_dependency` with name='playwright-chromium' to install it."
+    );
+  }
   // Spawn a long-lived playwright script that accepts JSON commands on stdin
   // and returns JSON results on stdout. Each command is a single line.
   const script = join(tmpdir(), `lab_browser_${randomBytes(6).toString("hex")}.mjs`);
@@ -1625,15 +1696,6 @@ toolRegistry.register({
   },
 });
 
-function ffmpegAvailable(): boolean {
-  try {
-    const r = Bun.spawnSync(["ffmpeg", "-version"], { stdout: "ignore", stderr: "ignore" });
-    return r.exitCode === 0;
-  } catch {
-    return false;
-  }
-}
-
 toolRegistry.register({
   name: "lab_generate_d2_diagram",
   description:
@@ -1664,5 +1726,157 @@ toolRegistry.register({
     } catch (e: any) {
       return err(`lab_generate_d2_diagram failed: ${e?.message ?? String(e)}`);
     }
+  },
+});
+
+// ===========================================================================
+// DEPENDENCY MANAGEMENT TOOLS
+// ===========================================================================
+
+toolRegistry.register({
+  name: "lab_check_dependencies",
+  description:
+    "Check which external dependencies are available on this machine. " +
+    "Use this before attempting to use browser, audio/video, diagram, or system tools. " +
+    "Returns a table showing each dependency, whether it's installed, and how to install it if missing.",
+  parameters: {},
+  defaultPermission: "always",
+  async execute(_args, _ctx) {
+    const deps = checkDeps();
+    const rows = deps.map((d) => {
+      const icon = d.available ? "✅" : "❌";
+      return `${icon} **${d.name}**${d.available ? " — available" : ` — not installed\n   ${d.hint}`}`;
+    });
+    const summary = deps.filter((d) => d.available).length;
+    return ok(
+      `# Dependency Status\n\n${rows.join("\n")}\n\n---\n${summary}/${deps.length} dependencies available.\n\n` +
+      `To install missing dependencies, use the \`lab_install_dependency\` tool.`
+    );
+  },
+});
+
+toolRegistry.register({
+  name: "lab_install_dependency",
+  description:
+    "Install a missing external dependency on this machine. " +
+    "Use this when a tool reports that a dependency is missing. " +
+    "Supported: ffmpeg (apt), playwright-chromium (browser), d2 (diagrams), whisper (transcription), " +
+    "or any apt package by name.",
+  parameters: {
+    name: {
+      type: "string",
+      description: "Dependency to install. Supported values: 'ffmpeg', 'playwright-chromium', 'd2', 'whisper', or any apt package name (e.g. 'curl', 'git', 'python3-pip').",
+      required: true,
+    },
+    timeoutMs: { type: "number", description: "max time in ms for the installation (default 120_000)", required: false },
+  },
+  defaultPermission: "ask",
+  async execute(args, ctx) {
+    if (!args.name) return err("name is required");
+    const name = String(args.name).toLowerCase();
+    const timeout = typeof args.timeoutMs === "number" ? args.timeoutMs : 120_000;
+
+    if (name === "playwright-chromium" || name === "playwright" || name === "chromium") {
+      // Install Playwright Chromium browser
+      const backendDir = process.env.LAB_BACKEND_ROOT ?? join(
+        process.env.LAB_PROJECT_ROOT ?? "/app", "backend"
+      );
+      if (!existsSync(join(backendDir, "node_modules", "playwright"))) {
+        return err("Playwright npm package is not installed. Run `bun install` in the backend directory first.");
+      }
+      try {
+        const r = await runCommand("bunx", ["playwright", "install", "chromium"], {
+          cwd: backendDir,
+          timeoutMs: timeout,
+        });
+        if (r.ok) {
+          // Verify installation
+          if (chromiumAvailable()) {
+            return ok(`✅ Playwright Chromium installed successfully.\n\n${r.stdout.slice(0, 2000)}`);
+          }
+          return err("bunx playwright install reported success but chromium is not found. Try running `apt-get update && apt-get install -y libnss3 libnspr4 libatk1.0-0t64 libatk-bridge2.0-0t64 libcups2t64 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2 libgdk-pixbuf2.0-0 libgtk-3-0t64 libxshmfence1` and then retry.");
+        }
+        return err(`playwright install failed (exit ${r.exitCode}):\n${r.stderr.slice(0, 2000)}`);
+      } catch (e: any) {
+        return err(`playwright install exception: ${e?.message ?? String(e)}`);
+      }
+    }
+
+    if (name === "ffmpeg") {
+      try {
+        // Try apt first
+        if (aptAvailable()) {
+          const r = await runCommand("apt-get", ["install", "-y", "ffmpeg"], {
+            timeoutMs: timeout,
+            env: { DEBIAN_FRONTEND: "noninteractive" },
+          });
+          if (r.ok) {
+            if (ffmpegAvailable()) return ok(`✅ ffmpeg installed via apt.\n\n${r.stdout.slice(-1000)}`);
+            return err("apt reported success but `ffmpeg -version` still fails.");
+          }
+          return err(`apt-get install ffmpeg failed (exit ${r.exitCode}):\n${r.stderr.slice(0, 1000)}`);
+        }
+        // Fallback: try brew or download
+        const r = await runCommand("apt-get", ["update"], {
+          timeoutMs: 60_000,
+          env: { DEBIAN_FRONTEND: "noninteractive" },
+        });
+        if (!r.ok) return err("apt-get update failed and no alternative package manager found. Install ffmpeg manually: https://ffmpeg.org/download.html");
+        return err("apt-get update succeeded but apt is not available for install. Run `apt-get install -y ffmpeg` manually.");
+      } catch (e: any) {
+        return err(`ffmpeg install exception: ${e?.message ?? String(e)}`);
+      }
+    }
+
+    if (name === "d2") {
+      try {
+        const r2 = await runCommand("bash", ["-c",
+          "curl -fsSL https://d2lang.com/install.sh | sh -s --"
+        ], { timeoutMs: timeout });
+        if (r2.ok) {
+          if (d2Available()) return ok(`✅ d2 installed.\n\n${r2.stdout.slice(0, 2000)}`);
+          return err("d2 install script ran but `d2` is not on PATH. You may need to add it to PATH or restart the server.");
+        }
+        return err(`d2 install failed:\n${r2.stderr.slice(0, 1000)}\n\nManual install: https://d2lang.com/tour/install`);
+      } catch (e: any) {
+        return err(`d2 install exception: ${e?.message ?? String(e)}`);
+      }
+    }
+
+    if (name === "whisper" || name === "whisper.cpp") {
+      return err(
+        "whisper.cpp installation is complex and requires compilation.\n\n" +
+        "Option 1 (easier): Set CF_ACCOUNT_ID and CF_API_TOKEN secrets in the Secrets page, " +
+        "then the transcription tools will use Cloudflare Workers AI instead.\n\n" +
+        "Option 2 (manual): Follow https://github.com/ggerganov/whisper.cpp to build whisper.cpp, " +
+        "then ensure the `whisper` binary is on PATH."
+      );
+    }
+
+    // If we get here, try as an apt package
+    if (name.match(/^[a-z0-9._-]+$/)) {
+      if (!aptAvailable()) {
+        return err(`Cannot install '${name}' — apt is not available on this system. Try installing manually.`);
+      }
+      try {
+        const r = await runCommand("apt-get", ["install", "-y", name], {
+          timeoutMs: timeout,
+          env: { DEBIAN_FRONTEND: "noninteractive" },
+        });
+        // Verify by checking if the binary is now on PATH (simple check)
+        const verify = Bun.spawnSync(["which", name], { stdout: "ignore", stderr: "ignore" });
+        if (r.ok && verify.exitCode === 0) {
+          return ok(`✅ Installed apt package: ${name}\n\n${r.stdout.slice(0, 2000)}`);
+        }
+        if (r.ok) {
+          return ok(`apt installed ${name} (but 'which ${name}' failed — may not be a standalone binary).\n\n${r.stdout.slice(0, 2000)}`);
+        }
+        return err(`apt-get install ${name} failed (exit ${r.exitCode}):\n${r.stderr.slice(0, 1000)}`);
+      } catch (e: any) {
+        return err(`apt install exception: ${e?.message ?? String(e)}`);
+      }
+    }
+
+    return err(`Unknown dependency: '${name}'. Supported: ffmpeg, playwright-chromium, d2, whisper, or any apt package name.`);
   },
 });

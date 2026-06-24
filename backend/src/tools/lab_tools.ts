@@ -68,6 +68,19 @@ async function readWebpage(url: string, timeoutMs = 15_000): Promise<string> {
 
 /** Playwright-based screenshot capture. Returns a base64 PNG data URI. */
 async function playwrightScreenshot(url: string, fullPage = true): Promise<string> {
+  // Check if Chromium browser is installed before attempting to launch
+  {
+    const home = process.env.HOME || "/root";
+    const cacheDir = process.env.PLAYWRIGHT_BROWSERS_PATH || join(home, ".cache", "ms-playwright");
+    const { existsSync, readdirSync } = await import("node:fs");
+    const hasChromium = existsSync(cacheDir) && readdirSync(cacheDir).some(e => e.startsWith("chromium"));
+    if (!hasChromium) {
+      throw new Error(
+        "Playwright Chromium browser is not installed. " +
+        "Run a shell tool with: cd /app/backend && bun x playwright install chromium"
+      );
+    }
+  }
   const script = join("/tmp", `screenshot_${nanoid(8)}.mjs`);
   const code = `
 import { chromium } from "playwright";

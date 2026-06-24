@@ -220,6 +220,35 @@ self-contained toolkit that does NOT depend on the Zo Computer platform.
 registering 27 `lab_*` tools in the existing tool registry. Every tool
 runs entirely inside the lab — bun's `fetch`,
 
+### 2026-06-24: Self-healing dependency management for agents
+
+**Issue:** The lab's browser, audio/video, and diagram tools all depend on external binaries (Playwright Chromium, ffmpeg, d2, whisper).
+On fresh deploy these were always missing, and agents got hard-to-interpret failures with no recovery path.
+
+**Fix:** Added three-layer self-healing system:
+
+1. **`lab_check_dependencies` tool** — agents can ask "what's installed?" and get a table with ✅/❌ for every dep plus install hints.
+
+2. **`lab_install_dependency` tool** — agents can install missing deps by name:
+   - `playwright-chromium` → runs `bunx playwright install chromium` in backend dir
+   - `ffmpeg` → runs `apt-get install -y ffmpeg`
+   - `d2` → runs the d2lang install script
+   - `whisper` → returns guidance (complex; recommends Cloudflare creds instead)
+   - Any apt package name → runs `apt-get install -y <name>`
+
+3. **Graceful Playwright errors** — all three Playwright launch points
+   (`openAndExtractText`, `ensureSession`, `playwrightScreenshot`) now check
+   `chromiumAvailable()` first and return a clear, actionable message:
+   "Playwright Chromium browser is not installed. Run \`lab_install_dependency\`
+   with name='playwright-chromium' to install it."
+
+**Pattern:** Agents detect missing deps → install them → retry. No need to
+predict every dependency at build time.
+
+**Files touched:**
+- `backend/src/tools/lab_tools_extra.ts` — added dependency helpers (`chromiumAvailable`, `d2Available`, `aptAvailable`, `checkDeps`), graceful checks in `openAndExtractText` and `ensureSession`, new `lab_check_dependencies` and `lab_install_dependency` tools. Removed duplicate `ffmpegAvailable` that was left from the old location.
+- `backend/src/tools/lab_tools.ts` — added graceful chromium check in `playwrightScreenshot`.
+
 ## Project Layout
 
 ```markdown
