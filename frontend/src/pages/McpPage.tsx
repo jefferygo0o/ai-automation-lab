@@ -638,7 +638,7 @@ export default function McpPage() {
                       </button>
                     ) : (
                       <button
-                        onClick={() => connectServer(s.id)}
+                        onClick={() => connectServer(s)}
                         disabled={connectingId === s.id || (oauthServer?.id === s.id)}
                         className="btn"
                       >
