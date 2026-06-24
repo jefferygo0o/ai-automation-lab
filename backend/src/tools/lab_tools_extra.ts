@@ -38,7 +38,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSy
 import { join, resolve, isAbsolute, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 
 const LAB_PROJECT_ROOT = process.env.LAB_PROJECT_ROOT ?? "/home/workspace/Projects/ai-automation-lab";
 const LAB_BACKEND_ROOT = process.env.LAB_BACKEND_ROOT ?? join(LAB_PROJECT_ROOT, "backend");
@@ -142,6 +142,60 @@ async function fetchText(url: string, opts: { timeoutMs?: number; headers?: Reco
   } finally {
     clearTimeout(t);
   }
+}
+
+/**
+ * Run a command, capturing stdout and stderr. Returns an object with the exit
+ * code, stdout string, stderr string, and whether it succeeded (exit code 0).
+ * Throws on timeout or spawn failure.
+ */
+async function runCommand(
+  cmd: string,
+  args: string[],
+  opts: { cwd?: string; timeoutMs?: number; env?: Record<string, string> } = {},
+): Promise<{ ok: boolean; exitCode: number; stdout: string; stderr: string }> {
+  const child = spawn(cmd, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    cwd: opts.cwd,
+    env: opts.env ? { ...process.env, ...opts.env } : process.env,
+  });
+
+  const timeout = opts.timeoutMs ?? 30_000;
+  const timer = setTimeout(() => {
+    child.kill("SIGTERM");
+    // Send SIGKILL 2 seconds later if still alive
+    setTimeout(() => {
+      try { child.kill("SIGKILL"); } catch {}
+    }, 2000);
+  }, timeout);
+
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  child.stdout!.on("data", (d: Buffer) => stdout.push(d));
+  child.stderr!.on("data", (d: Buffer) => stderr.push(d));
+
+  return new Promise((resolvePromise) => {
+    child.on("close", (exitCode) => {
+      clearTimeout(timer);
+      const out = Buffer.concat(stdout).toString("utf8");
+      const err = Buffer.concat(stderr).toString("utf8");
+      resolvePromise({
+        ok: exitCode === 0,
+        exitCode: exitCode ?? -1,
+        stdout: out,
+        stderr: err,
+      });
+    });
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolvePromise({
+        ok: false,
+        exitCode: -1,
+        stdout: "",
+        stderr: e.message,
+      });
+    });
+  });
 }
 
 // -------------------------------------------------------------------
