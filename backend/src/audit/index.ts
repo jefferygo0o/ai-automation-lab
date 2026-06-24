@@ -9,7 +9,7 @@
 import { nanoid } from "nanoid";
 import { db } from "../db/index.ts";
 
-export type AuditActor = "user" | "agent" | "system" | "webhook";
+export type AuditActor = "user" | "agent" | "system" | "webhook" | "anonymous";
 
 export interface AuditEvent {
   id: string;

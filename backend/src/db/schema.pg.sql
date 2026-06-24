@@ -310,3 +310,78 @@ CREATE TABLE IF NOT EXISTS observability_metrics (
   UNIQUE(owner_id, metric, bucket)
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_owner ON observability_metrics(owner_id, metric, updated_at DESC);
+
+-- ============================================================
+-- MISSING TABLES (added by migration)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS integration_connections (
+  id TEXT PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  app_slug TEXT NOT NULL,
+  app_name TEXT NOT NULL,
+  app_description TEXT NOT NULL DEFAULT '',
+  auth_type TEXT NOT NULL DEFAULT 'oauth',
+  auth_description TEXT NOT NULL DEFAULT '',
+  logo_url TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'disconnected',
+  credentials_ref TEXT,
+  connected_account_id TEXT,
+  categories TEXT NOT NULL DEFAULT '[]',
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_integration_owner ON integration_connections(owner_id, app_slug);
+
+CREATE TABLE IF NOT EXISTS integration_action_cache (
+  id TEXT PRIMARY KEY,
+  app_slug TEXT NOT NULL,
+  action_key TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  type TEXT NOT NULL DEFAULT 'action',
+  input_schema TEXT NOT NULL DEFAULT '{}',
+  output_schema TEXT NOT NULL DEFAULT '{}',
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_action_cache_app ON integration_action_cache(app_slug, action_key);
+
+CREATE TABLE IF NOT EXISTS catalog_app_cache (
+  id TEXT PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  app_slug TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  auth_type TEXT NOT NULL DEFAULT '',
+  auth_description TEXT NOT NULL DEFAULT '',
+  action_count INTEGER NOT NULL DEFAULT 0,
+  trigger_count INTEGER NOT NULL DEFAULT 0,
+  logo_url TEXT NOT NULL DEFAULT '',
+  categories_json TEXT NOT NULL DEFAULT '[]',
+  fetched_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_owner ON catalog_app_cache(owner_id, name);
+
+CREATE TABLE IF NOT EXISTS catalog_sync_state (
+  owner_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'idle',
+  total INTEGER NOT NULL DEFAULT 0,
+  error_message TEXT,
+  started_at BIGINT NOT NULL,
+  completed_at BIGINT
+);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  id TEXT PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  key_hash TEXT NOT NULL,
+  scopes TEXT NOT NULL DEFAULT '[]',
+  last_used_at BIGINT,
+  created_at BIGINT NOT NULL,
+  expires_at BIGINT
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_owner ON api_keys(owner_id);
+
+-- Migration: add is_enabled column to webhook_endpoints
+ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS is_enabled INTEGER NOT NULL DEFAULT 1;
