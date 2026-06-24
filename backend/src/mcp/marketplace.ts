@@ -412,6 +412,21 @@ export const MCP_MARKETPLACE: McpMarketplaceEntry[] = [
   },
 ];
 
+/** Map marketplace entry IDs to Pipedream app slugs for OAuth/credentials. */
+export const MCP_TO_PIPEDREAM_MAP: Record<string, string> = {
+  "cloudflare": "cloudflare",
+  "github": "github",
+  "slack": "slack",
+  "notion": "notion",
+  "linear": "linear",
+  "sentry": "sentry",
+  "brave-search": "brave",
+  "google-maps": "google_maps",
+  "postgres": "postgres",
+  "redis": "redis",
+  "puppeteer": "puppeteer",
+};
+
 /** Look up a marketplace entry by id. */
 export function findMarketplaceEntry(id: string): McpMarketplaceEntry | undefined {
   return MCP_MARKETPLACE.find((e) => e.id === id);

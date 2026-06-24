@@ -166,11 +166,22 @@ export const MCP = {
   list: () => api<{ servers: McpServer[] }>("/api/mcp/servers"),
   save: (name: string, command: string, args: string[], env?: Record<string, string>) =>
     api<{ server: McpServer }>("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name, command, args, env }) }),
-  connect: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}/connect`, { method: "POST" }),
+  connect: (id: string) =>
+    api<{ ok: boolean; needs_oauth?: boolean; oauth?: { connectLinkUrl?: string; connectionId?: string; authType?: string }; needsEnv?: string[]; error?: string }>(
+      `/api/mcp/servers/${id}/connect`, { method: "POST" }
+    ),
   disconnect: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}/disconnect`, { method: "POST" }),
   delete: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}`, { method: "DELETE" }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}`, { method: "DELETE" }),
   tools: (id: string) => api<{ tools: McpTool[] }>(`/api/mcp/servers/${id}/tools`),
+  verifyOAuth: (id: string) =>
+    api<{ connected: boolean; connectedAccountId?: string; error?: string }>(
+      `/api/mcp/servers/${id}/verify-oauth`, { method: "POST" }
+    ),
+  setEnv: (id: string, env: Record<string, string>) =>
+    api<{ ok: boolean; error?: string }>(
+      `/api/mcp/servers/${id}/env`, { method: "PUT", body: JSON.stringify({ env }) }
+    ),
 };
 
 export const Secrets = {

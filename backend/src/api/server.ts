@@ -19,6 +19,7 @@ import { ChatStore } from "../chats/index.ts";
 import { runAgentTurn, type StreamEvent } from "../agents/runtime.ts";
 import { Skills } from "../skills/index.ts";
 import { mcpManager, McpStore } from "../mcp/client.ts";
+import { startMcpOAuthFlow, verifyMcpOAuth, setMcpEnvAndStart } from "../mcp/connect.ts";
 import { MemoryStore } from "../memory/index.ts";
 import { readAgentConfig, AGENTS_DIR } from "../agents/files.ts";
 import { toolRegistry } from "../tools/registry.ts";
@@ -502,10 +503,55 @@ api.post("/api/mcp/servers", async (c) => {
 });
 
 api.post("/api/mcp/servers/:id/connect", async (c) => {
+  const userId = c.get("userId") as string;
   const srv = await McpStore.get(c.req.param("id"));
   if (!srv) return c.json({ error: "not found" }, 404);
-  await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
-  return c.json({ ok: true });
+
+  // Check if this server needs OAuth via Pipedream Connect
+  const oauthResult = await startMcpOAuthFlow(c.req.param("id"), userId);
+  if (oauthResult.connectLinkUrl || oauthResult.connectionId) {
+    // OAuth flow started — return the link for the frontend to open
+    return c.json({
+      ok: true,
+      needs_oauth: true,
+      oauth: {
+        connectLinkUrl: oauthResult.connectLinkUrl,
+        connectionId: oauthResult.connectionId,
+        authType: oauthResult.authType,
+      },
+      needsEnv: oauthResult.needsEnv,
+      message: oauthResult.message,
+    });
+  }
+
+  // No OAuth needed — try to start the server directly
+  try {
+    await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
+    return c.json({ ok: true, connected: mcpManager.isConnected(srv.name) });
+  } catch (e: any) {
+    return c.json({ ok: false, error: e?.message ?? String(e), needsEnv: [] }, 500);
+  }
+});
+
+api.post("/api/mcp/servers/:id/verify-oauth", async (c) => {
+  const userId = c.get("userId") as string;
+  const result = await verifyMcpOAuth(c.req.param("id"), userId);
+  return c.json(result);
+});
+
+api.put("/api/mcp/servers/:id/env", async (c) => {
+  const userId = c.get("userId") as string;
+  const { env } = (await c.req.json()) as { env: Record<string, string> };
+  const result = await setMcpEnvAndStart(c.req.param("id"), env);
+  return c.json(result);
+});
+
+api.post("/api/mcp/servers/:id/oauth-callback", async (c) => {
+  // This is called by Pipedream's webhook after OAuth completes.
+  // The connect.ts module handles verification via verifyMcpOAuth.
+  // For now, just log and acknowledge.
+  console.log("[mcp] oauth-callback received for server", c.req.param("id"));
+  return c.json({ received: true });
 });
 
 api.post("/api/mcp/servers/:id/disconnect", async (c) => {
