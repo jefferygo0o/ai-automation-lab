@@ -40,8 +40,9 @@ import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 
-const LAB_BACKEND_ROOT = process.env.LAB_BACKEND_ROOT ?? "/home/workspace/Projects/ai-automation-lab/backend";
-const DATA_DIR = join(LAB_BACKEND_ROOT, "data");
+const LAB_PROJECT_ROOT = process.env.LAB_PROJECT_ROOT ?? "/home/workspace/Projects/ai-automation-lab";
+const LAB_BACKEND_ROOT = process.env.LAB_BACKEND_ROOT ?? join(LAB_PROJECT_ROOT, "backend");
+const DATA_DIR = process.env.LAB_DATA_DIR ?? join(LAB_BACKEND_ROOT, "data");
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -550,7 +551,7 @@ toolRegistry.register({
 
 toolRegistry.register({
   name: "lab_bash",
-  description: "Run a shell command inside the lab data directory (backend/data). Use for file operations, git, scripts, and system tools. Working directory: /home/workspace/Projects/ai-automation-lab/backend/data. Enforces timeout and output cap.",
+  description: "Run a shell command inside the lab data directory. Use for file operations, git, scripts, and system tools. Enforces timeout and output cap.",
   parameters: {
     command: { type: "string", description: "shell command to execute (can include pipes, redirects, env vars)", required: true },
     timeoutMs: { type: "number", description: "max wall time in ms (default 30000)", required: false },
