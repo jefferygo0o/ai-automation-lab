@@ -100,10 +100,26 @@ class McpManager {
       // stale — replace
       this.servers.delete(cfg.name);
     }
-    const proc = spawn(cfg.command, cfg.args ?? [], {
-      env: { ...process.env, ...(cfg.env ?? {}) },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    let proc: ChildProcessWithoutNullStreams;
+    try {
+      proc = spawn(cfg.command, cfg.args ?? [], {
+        env: { ...process.env, ...(cfg.env ?? {}) },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+    } catch (e: any) {
+      // Command not found (ENOENT) or other spawn failures — return a failed live server
+      const failed: LiveServer = {
+        name: cfg.name,
+        proc: null as any,
+        tools: [],
+        status: "error",
+        error: e?.message ?? String(e),
+        nextId: 1,
+        pending: new Map(),
+      };
+      this.servers.set(cfg.name, failed);
+      return failed;
+    }
     const live: LiveServer = {
       name: cfg.name,
       proc,
@@ -262,11 +278,11 @@ class McpManager {
     const allServers = await McpStore.list();
     for (const s of allServers.filter((x) => x.enabled)) {
       if (this.servers.has(s.name)) continue;
-      try {
-        await this.startServer({ name: s.name, command: s.command, args: s.args, env: s.env });
+      const live = await this.startServer({ name: s.name, command: s.command, args: s.args, env: s.env });
+      if (live.status === "ready") {
         console.log(`[mcp] started ${s.name}`);
-      } catch (e) {
-        console.warn(`[mcp] failed to start ${s.name}:`, e);
+      } else {
+        console.warn(`[mcp] failed to start ${s.name}:`, live.error ?? live.status);
       }
     }
   }

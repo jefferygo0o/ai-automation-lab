@@ -20,7 +20,7 @@ Skills.seedUserSkills();
 await initSchema(); // run PG schema migrations
 
 // Boot any saved MCP servers
-mcpManager.startAll();
+mcpManager.startAll().catch((e) => console.warn("[lab] mcp.startAll error:", e));
 
 // Start the automation scheduler (background loop).
 AutomationScheduler.start();

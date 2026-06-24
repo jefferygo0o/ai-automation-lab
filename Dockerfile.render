@@ -29,6 +29,13 @@ RUN mkdir -p backend/dist-spa && cp -r frontend/dist/* backend/dist-spa/
 # --- Runtime stage: minimal image with only what's needed to run ---
 FROM base AS runtime
 WORKDIR /app
+# Install Node.js (npm/npx) and Python uv (uvx) for MCP server spawning
+RUN apt-get update -qq && apt-get install -y --no-install-recommends \
+    curl ca-certificates nodejs npm python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/* && \
+    curl -fsSL https://astral.sh/uv/install.sh | sh \
+    && rm -rf /root/.cargo  # uv installs to /root/.local/bin
+ENV PATH="/root/.local/bin:${PATH}"
 # Copy the source tree (includes node_modules from install stage via COPY)
 COPY --from=install /app/backend/node_modules ./backend/node_modules
 COPY --from=install /app/frontend/node_modules ./frontend/node_modules

@@ -526,8 +526,11 @@ api.post("/api/mcp/servers/:id/connect", async (c) => {
 
   // No OAuth needed — try to start the server directly
   try {
-    await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
-    return c.json({ ok: true, connected: mcpManager.isConnected(srv.name) });
+    const live = await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
+    if (live.status === "ready") {
+      return c.json({ ok: true, connected: true });
+    }
+    return c.json({ ok: false, error: live.error ?? `Server ${live.status}`, needsEnv: live.error?.includes("ENOENT") ? [] : [] }, 500);
   } catch (e: any) {
     return c.json({ ok: false, error: e?.message ?? String(e), needsEnv: [] }, 500);
   }
