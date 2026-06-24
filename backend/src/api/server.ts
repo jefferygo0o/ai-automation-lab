@@ -399,7 +399,8 @@ api.get("/api/chats/:id/feedback", async (c) => {
 api.get("/api/skills", async (c) => {
   const userId = c.get("userId") as string;
   const userSkills = await Skills.listForUser(userId);
-  const allSkills = Skills.list().filter(s => !s.source === "builtin" || !userSkills.find(u => u.id === s.id));
+  const userSkillIds = new Set(userSkills.map((u) => u.id));
+  const allSkills = Skills.list().filter((s) => !userSkillIds.has(s.id));
   const combined = [...allSkills, ...userSkills];
   const seen = new Set<string>();
   const dedu = combined.filter(s => seen.has(s.id) ? false : (seen.add(s.id), true));
