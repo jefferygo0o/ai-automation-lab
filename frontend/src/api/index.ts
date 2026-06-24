@@ -304,7 +304,7 @@ export const Integrations = {
   list: () =>
     api<{ connections: IntegrationConnection[]; total?: number }>("/api/integrations"),
   connect: (slug: string) =>
-    api<{ connection: IntegrationConnection; warning?: string }>(
+    api<{ connection: IntegrationConnection; warning?: string; oauth?: { connectLinkUrl: string; token: string }; connect_link_url?: string }>(
       `/api/integrations/connect/${slug}`, { method: "POST" }
     ),
   setCredentials: (id: string, value: string) =>
@@ -332,4 +332,10 @@ export const Integrations = {
     api<{ total: number; byStatus: Record<string, number> }>("/api/integrations/stats"),
   categories: () =>
     api<{ categories: string[]; total: number }>("/api/integrations/categories"),
+  connectConfig: () =>
+    api<{ configured: boolean; hasProjectId: boolean; hasClientId: boolean; environment: string }>("/api/integrations/connect-config"),
+  verifyOAuth: (id: string) =>
+    api<{ connected: boolean; status: string; connectedAccountId?: string; message?: string; error?: string }>(
+      `/api/integrations/${id}/verify-oauth`, { method: "POST" }
+    ),
 };

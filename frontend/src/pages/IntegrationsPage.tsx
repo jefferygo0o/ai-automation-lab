@@ -886,19 +886,56 @@ function ApiKeyDialog({
   const [key, setKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [step, setStep] = useState<"connect" | "credentials">("connect");
+  const [step, setStep] = useState<"connect" | "credentials" | "oauth" | "oauth-verify">("connect");
+  const [connectLinkUrl, setConnectLinkUrl] = useState("");
+  const [connectionId, setConnectionId] = useState("");
+  const [oauthStatus, setOauthStatus] = useState("");
+
+  const isOAuth = app.auth_type === "oauth";
 
   const handleConnect = async () => {
     setSaving(true);
     setError("");
     try {
-      const res = await Integrations.connect(app.name_slug);
-      if (res.connection) {
-        // Now set the credentials
+      const res: any = await Integrations.connect(app.name_slug);
+
+      if (isOAuth && res.connect_link_url) {
+        // OAuth flow — open Pipedream Connect Link
+        setConnectionId(res.connection?.id || "");
+        setConnectLinkUrl(res.connect_link_url);
+        setStep("oauth");
+        // Open the link in a new window/tab
+        window.open(res.connect_link_url, "_blank", "noopener,noreferrer");
+      } else if (res.connection) {
+        // API key or non-OAuth — show credentials step
+        setConnectionId(res.connection.id);
         setStep("credentials");
+      } else {
+        setError("Failed to create connection");
       }
     } catch (e: any) {
       setError(e?.message || "Failed to connect");
+    }
+    setSaving(false);
+  };
+
+  const handleVerifyOAuth = async () => {
+    if (!connectionId) return;
+    setSaving(true);
+    setError("");
+    setOauthStatus("checking...");
+    try {
+      const res = await Integrations.verifyOAuth(connectionId);
+      if (res.connected && res.connectedAccountId) {
+        setOauthStatus("connected");
+        onConnected();
+      } else {
+        setOauthStatus("not_connected");
+        if (res.message) setError(res.message);
+      }
+    } catch (e: any) {
+      setOauthStatus("not_connected");
+      setError(e?.message || "Not connected yet. Complete the authorization in the new window, then click Verify.");
     }
     setSaving(false);
   };
@@ -908,7 +945,6 @@ function ApiKeyDialog({
     setSaving(true);
     setError("");
     try {
-      // We need to get the connection ID first
       const listRes = await Integrations.list();
       const conn = listRes.connections.find((c) => c.app_slug === app.name_slug);
       if (conn) {
@@ -949,10 +985,10 @@ function ApiKeyDialog({
 
         {/* Body */}
         <div className="p-5">
-          {step === "connect" ? (
+          {step === "connect" && !isOAuth && (
             <div className="space-y-4">
               <p className="text-sm text-ink-600">
-                This app uses <strong>{app.auth_type === "oauth" ? "OAuth" : "API Key"}</strong> authentication.
+                This app uses <strong>API Key</strong> authentication.
               </p>
               <p className="text-xs text-ink-500">{app.auth_description || `${app.name} will be added to your connected integrations.`}</p>
               {error && (
@@ -974,13 +1010,83 @@ function ApiKeyDialog({
                 {saving ? "Connecting..." : `Connect ${app.name}`}
               </button>
             </div>
-          ) : (
+          )}
+
+          {step === "connect" && isOAuth && (
             <div className="space-y-4">
               <p className="text-sm text-ink-600">
-                {app.auth_type === "api_key"
-                  ? `Enter your ${app.name} API key to complete the connection.`
-                  : `Enter your ${app.name} credentials.`
-                }
+                This app uses <strong>OAuth</strong> authentication.
+              </p>
+              <p className="text-xs text-ink-500">
+                {app.auth_description || `${app.name} will be authorized via Pipedream.`}
+              </p>
+              {error && (
+                <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  {error}
+                </div>
+              )}
+              <button
+                onClick={handleConnect}
+                disabled={saving}
+                className="btn btn-primary w-full justify-center"
+              >
+                {saving ? (
+                  <AnimatedDots invert size={16} />
+                ) : (
+                  <Plug className="w-3.5 h-3.5" />
+                )}
+                {saving ? "Connecting..." : `Connect ${app.name}`}
+              </button>
+            </div>
+          )}
+
+          {step === "oauth" && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-xs">
+                <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  A new window opened to authorize {app.name} on Pipedream. Complete the authorization there, then come back.
+                </span>
+              </div>
+              {connectLinkUrl && (
+                <div className="flex items-center gap-1 text-xs">
+                  <span className="text-ink-400">Didn't open? </span>
+                  <a
+                    href={connectLinkUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline text-blue-600 hover:text-blue-800"
+                  >
+                    Open again
+                  </a>
+                </div>
+              )}
+              <button
+                onClick={handleVerifyOAuth}
+                disabled={saving}
+                className="btn btn-primary w-full justify-center"
+              >
+                {saving ? (
+                  <AnimatedDots invert size={16} />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                {saving ? "Verifying..." : "I've Authorized — Verify Connection"}
+              </button>
+              <button
+                onClick={() => { setConnectionId(""); setStep("connect"); }}
+                className="btn btn-ghost w-full text-xs text-ink-400"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+
+          {step === "credentials" && (
+            <div className="space-y-4">
+              <p className="text-sm text-ink-600">
+                Enter your {app.name} API key to complete the connection.
               </p>
               <div>
                 <label className="label text-xs text-ink-500 mb-1">API Key / Token</label>
@@ -1010,6 +1116,13 @@ function ApiKeyDialog({
                   {saving ? "Saving..." : "Save & Connect"}
                 </button>
               </div>
+            </div>
+          )}
+
+          {error && step !== "connect" && (
+            <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2.5 mt-4">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              {error}
             </div>
           )}
         </div>

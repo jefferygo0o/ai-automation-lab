@@ -54,6 +54,47 @@ function sanitizeConn(c: IntegrationConnection) {
   return { ...rest, hasCredentials: !!credentialsRef };
 }
 
+// ---------------------------------------------------------------------------
+// Pipedream Connect API helpers
+// ---------------------------------------------------------------------------
+
+interface ConnectConfig {
+  clientId: string;
+  clientSecret: string;
+  projectId: string;
+  environment: string;
+}
+
+function getConnectConfig(): ConnectConfig | null {
+  const clientId = process.env.PIPEDREAM_CLIENT_ID?.trim();
+  const clientSecret = process.env.PIPEDREAM_CLIENT_SECRET?.trim();
+  const projectId = process.env.PIPEDREAM_PROJECT_ID?.trim();
+  if (!clientId || !clientSecret || !projectId) return null;
+  return {
+    clientId,
+    clientSecret,
+    projectId,
+    environment: process.env.PIPEDREAM_ENVIRONMENT?.trim() ?? "production",
+  };
+}
+
+async function requiresConnectConfig(c: any): Promise<ConnectConfig | null> {
+  const cfg = getConnectConfig();
+  if (!cfg) {
+    c.status(400);
+    return null;
+  }
+  return cfg;
+}
+
+/**
+ * Get a fresh OAuth token for the Pipedream Connect API.
+ */
+async function getConnectOAuthToken(cfg: ConnectConfig): Promise<string> {
+  const tokenResp = await PipedreamClient.createOAuthToken(cfg.clientId, cfg.clientSecret);
+  return tokenResp.access_token;
+}
+
 async function pdKeyMissingPayload(ownerId: string) {
   const existing = await (await SecretStore.list(ownerId)).map((s) => s.name);
   return {
@@ -408,6 +449,46 @@ API.post("/connect/:slug", async (c) => {
       metadata: { appSlug: slug, appName: app.name },
     });
 
+    // For OAuth apps, try to create a Pipedream Connect token
+    // so the frontend can redirect the user through the OAuth flow.
+    if (app.auth_type === "oauth") {
+      const connectCfg = getConnectConfig();
+      if (connectCfg) {
+        try {
+          const oauthTokenRes = await PipedreamClient.createOAuthToken(
+            connectCfg.clientId,
+            connectCfg.clientSecret,
+          );
+          const host = c.req.header("host") ?? "";
+          const proto = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
+          const baseUrl = `${proto}://${host}`;
+          const ctRes = await PipedreamClient.createConnectToken(
+            oauthTokenRes.access_token,
+            connectCfg.projectId,
+            `lab_${userId}`,
+            {
+              app: slug,
+              successRedirectUri: `${baseUrl}/integrations?oauth_success=${conn.id}`,
+              webhookUri: `${baseUrl}/api/integrations/oauth-webhook`,
+              environment: connectCfg.environment,
+            },
+          );
+          // Mark the connection as "connecting" until OAuth completes
+          await IntegrationRegistry.updateStatus(conn.id, userId, "connecting");
+          return c.json({
+            connection: sanitizeConn(conn),
+            oauth: {
+              connectLinkUrl: ctRes.connect_link_url + (slug ? `&app=${slug}` : ""),
+              token: ctRes.token,
+            },
+          });
+        } catch (oauthErr: any) {
+          console.warn("[integrations] OAuth connect token failed:", oauthErr?.message ?? String(oauthErr));
+          // Fall through — return the connection without OAuth URL, user can try again
+        }
+      }
+    }
+
     return c.json({ connection: sanitizeConn(conn) });
   } catch (e: any) {
     // If Pipedream fetch fails, still allow a minimal connection
@@ -648,6 +729,137 @@ API.get("/stats", async (c) => {
   const byStatus = await IntegrationRegistry.countByStatus(userId);
   const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
   return c.json({ total, byStatus });
+});
+
+// ----- Pipedream Connect (OAuth flow) -----
+
+/**
+ * GET /api/integrations/connect-config
+ * Check if Pipedream Connect (OAuth) is configured.
+ * Returns the config status without exposing secrets.
+ */
+API.get("/connect-config", async (c) => {
+  const cfg = getConnectConfig();
+  return c.json({
+    configured: !!cfg,
+    hasProjectId: !!cfg?.projectId,
+    hasClientId: !!cfg?.clientId,
+    environment: cfg?.environment ?? "production",
+  });
+});
+
+/**
+ * POST /api/integrations/oauth-webhook
+ * Called by Pipedream after a user completes the OAuth flow via Connect Link.
+ * Expects a JSON body with connected_account_id, app_slug, and external_user_id.
+ *
+ * This endpoint is intentionally unauthenticated because Pipedream calls it
+ * directly with the payload it receives after OAuth completion. The
+ * external_user_id is a lab-specific prefix (lab_{userId}) that scopes the
+ * account to the correct user.
+ */
+API.post("/oauth-webhook", async (c) => {
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "invalid JSON" }, 400);
+  }
+
+  const connectedAccountId = body.connected_account_id || body.id;
+  const appSlug = body.app_slug || body.app;
+  const externalUserId = body.external_user_id || body.externalUserId;
+
+  if (!connectedAccountId || !appSlug || !externalUserId) {
+    // Pipedream may send different shapes; log and ack regardless
+    console.log("[integrations] oauth-webhook received unexpected payload:", JSON.stringify(body));
+    return c.json({ received: true });
+  }
+
+  // external_user_id is prefixed with "lab_"
+  const userId = externalUserId.startsWith("lab_")
+    ? externalUserId.slice(4)
+    : externalUserId;
+
+  const conn = await IntegrationRegistry.getByApp(userId, appSlug);
+  if (!conn) {
+    console.log(`[integrations] oauth-webhook no connection found for ${appSlug} / user ${userId}`);
+    return c.json({ received: true, note: "no matching connection" });
+  }
+
+  await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
+    connectedAccountId,
+  });
+
+  Audit.record({
+    ownerId: userId,
+    actor: "user",
+    action: "integration.oauth_connect",
+    targetId: conn.id,
+    targetType: "integration",
+    metadata: { appSlug, connectedAccountId },
+  });
+
+  console.log(`[integrations] oauth-webhook connection ${conn.id} updated for ${appSlug}`);
+  return c.json({ received: true, ok: true });
+});
+
+/**
+ * POST /api/integrations/:id/verify-oauth
+ * After the user returns from the Pipedream OAuth flow, the frontend calls
+ * this to check whether the OAuth account was connected. If the webhook
+ * already processed it, the connection will have a connectedAccountId and
+ * status "connected". If not, this endpoint tries to find the account on
+ * Pipedream and save it.
+ */
+API.post("/:id/verify-oauth", async (c) => {
+  const userId = c.get("userId") as string;
+  const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
+  if (!conn) return c.json({ error: "not found" }, 404);
+
+  // Already connected via webhook
+  if (conn.status === "connected" && conn.connectedAccountId) {
+    return c.json({ connected: true, status: "connected", connectedAccountId: conn.connectedAccountId });
+  }
+
+  // Try to find the account on Pipedream via Connect API
+  const connectCfg = getConnectConfig();
+  if (!connectCfg) {
+    return c.json({ connected: false, status: conn.status, message: "Pipedream Connect not configured" });
+  }
+
+  try {
+    const oauthTokenRes = await PipedreamClient.createOAuthToken(
+      connectCfg.clientId,
+      connectCfg.clientSecret,
+    );
+    const accounts = await PipedreamClient.listConnectAccounts(
+      oauthTokenRes.access_token,
+      connectCfg.projectId,
+      `lab_${userId}`,
+      connectCfg.environment,
+    );
+    const matching = accounts.find((a: any) => a.app_slug === conn.appSlug);
+
+    if (matching) {
+      await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
+        connectedAccountId: matching.id,
+      });
+      Audit.record({
+        ownerId: userId,
+        actor: "user",
+        action: "integration.oauth_verify",
+        targetId: conn.id,
+        targetType: "integration",
+        metadata: { appSlug: conn.appSlug, connectedAccountId: matching.id },
+      });
+      return c.json({ connected: true, status: "connected", connectedAccountId: matching.id });
+    }
+
+    return c.json({ connected: false, status: "connecting", message: "No matching connected account found yet" });
+  } catch (e: any) {
+    return c.json({ connected: false, status: conn.status, error: e?.message ?? String(e) });
+  }
 });
 
 export { API as integrationsApi };

@@ -262,7 +262,114 @@ export const PipedreamClient = {
       return false;
     }
   },
-};
+
+  // -----------------------------------------------------------------------
+  // Connect API (requires OAuth client credentials, not the PD API key)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Create an OAuth access token for the Pipedream Connect API.
+   * Uses the client_credentials grant.
+   */
+  async createOAuthToken(
+    clientId: string,
+    clientSecret: string,
+    scope = "connect:accounts:write connect:accounts:read"
+  ): Promise<{ access_token: string; expires_in: number }> {
+    const url = `${PD_API_BASE}/oauth/token`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "client_credentials",
+        scope,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Pipedream OAuth token request failed (${res.status}): ${body.slice(0, 300)}`);
+    }
+    return await res.json();
+  },
+
+  /**
+   * Create a Connect token for a user.
+   * Returns a connect_link_url that the user should be redirected to
+   * in order to authorize an app through Pipedream's OAuth flow.
+   *
+   * https://pipedream.com/docs/connect/api-reference/create-connect-token
+   */
+  async createConnectToken(
+    oauthToken: string,
+    projectId: string,
+    externalUserId: string,
+    opts: {
+      app?: string;
+      successRedirectUri?: string;
+      webhookUri?: string;
+      environment?: string;
+    } = {},
+  ): Promise<{ token: string; connect_link_url: string; expires_at: string }> {
+    const env = opts.environment ?? "production";
+    const url = `${PD_API_BASE}/connect/${projectId}/tokens`;
+    const body: Record<string, unknown> = {
+      external_user_id: externalUserId,
+    };
+    if (opts.app) body.app = opts.app;
+    if (opts.successRedirectUri) body.success_redirect_uri = opts.successRedirectUri;
+    if (opts.webhookUri) body.webhook_uri = opts.webhookUri;
+
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        "Content-Type": "application/json",
+        "x-pd-environment": env,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Pipedream createConnectToken failed (${res.status}): ${body.slice(0, 300)}`);
+    }
+    return await res.json();
+  },
+
+  /**
+   * List connected accounts for a user through Pipedream Connect.
+   */
+  async listConnectAccounts(
+    oauthToken: string,
+    projectId: string,
+    externalUserId: string,
+    environment = "production",
+  ): Promise<PdAccount[]> {
+    const url = `${PD_API_BASE}/connect/${projectId}/accounts?external_user_id=${encodeURIComponent(externalUserId)}`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        "x-pd-environment": environment,
+      },
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Pipedream listConnectAccounts failed (${res.status}): ${body.slice(0, 300)}`);
+    }
+    const json = await res.json();
+    return (json.data ?? json.accounts ?? []).map((a: any) => ({
+      id: a.id ?? "",
+      name: a.name ?? a.app_slug ?? "",
+      app_id: a.app_id ?? "",
+      app_slug: a.app_slug ?? "",
+      status: a.status ?? "unknown",
+      healthy: a.healthy ?? a.status === "active",
+      created_at: a.created_at ?? a.ts ?? Date.now(),
+      updated_at: a.updated_at ?? Date.now(),
+    }));
+  },
+} as const;
 
 // ---------------------------------------------------------------------------
 // Helpers

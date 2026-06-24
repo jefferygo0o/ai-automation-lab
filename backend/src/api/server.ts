@@ -46,7 +46,8 @@ api.use("/api/*", async (c, next) => {
   const PUBLIC =
     path === "/api/auth/login" ||
     path === "/api/auth/register" ||
-    path === "/api/health";
+    path === "/api/health" ||
+    path === "/api/integrations/oauth-webhook";
   if (!PUBLIC) {
     const auth = await authenticateBearer(c.req.raw.headers.get("authorization") ?? undefined);
     if (!auth) return c.json({ error: "unauthorized" }, 401);
