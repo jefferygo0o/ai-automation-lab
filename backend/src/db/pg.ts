@@ -62,12 +62,15 @@ function convertInsertOrReplace(sql: string): string {
   const rm = sql.match(/INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
   if (rm) {
     const cols = rm[2].split(",").map(c => c.trim().replace(/["`]/g, ""));
+    const firstCol = cols[0];
     const assigns = cols.map(c => `${c} = EXCLUDED.${c}`).join(", ");
-    return `${sql.replace(/INSERT\s+OR\s+REPLACE\s+INTO/i, "INSERT INTO")} ON CONFLICT DO UPDATE SET ${assigns}`;
+    return `${sql.replace(/INSERT\s+OR\s+REPLACE\s+INTO/i, "INSERT INTO")} ON CONFLICT (${firstCol}) DO UPDATE SET ${assigns}`;
   }
   const im = sql.match(/INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
   if (im) {
-    return `${sql.replace(/INSERT\s+OR\s+IGNORE\s+INTO/i, "INSERT INTO")} ON CONFLICT DO NOTHING`;
+    const cols = im[2].split(",").map(c => c.trim().replace(/["`]/g, ""));
+    const firstCol = cols[0];
+    return `${sql.replace(/INSERT\s+OR\s+IGNORE\s+INTO/i, "INSERT INTO")} ON CONFLICT (${firstCol}) DO NOTHING`;
   }
   return sql.replace(/INSERT\s+OR\s+(REPLACE|IGNORE)\s+INTO/gi, "INSERT INTO");
 }
@@ -90,6 +93,7 @@ function splitSqlStatements(sql: string): string[] {
           continue;
         } else {
           inSingleQuote = false;
+          current += "'";
         }
       } else {
         current += char;
@@ -102,6 +106,7 @@ function splitSqlStatements(sql: string): string[] {
           continue;
         } else {
           inDoubleQuote = false;
+          current += '"';
         }
       } else {
         current += char;
@@ -119,12 +124,15 @@ function splitSqlStatements(sql: string): string[] {
     } else {
       if (char === "'") {
         inSingleQuote = true;
+        current += "'";
       } else if (char === '"') {
         inDoubleQuote = true;
+        current += '"';
       } else if (char === "$") {
         if (sql[i + 1] === "$") {
           dollarQuoteMarker = "$$";
           inDollarQuote = true;
+          current += "$$";
           i += 2;
           continue;
         } else {
