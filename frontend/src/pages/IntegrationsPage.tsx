@@ -876,13 +876,13 @@ function ApiKeyDialog({
     try {
       const res: any = await Integrations.connect(app.name_slug);
 
-      if (isOAuth && res.connect_link_url) {
+      if (isOAuth && res.oauth?.connectLinkUrl) {
         // OAuth flow — open Pipedream Connect Link
         setConnectionId(res.connection?.id || "");
-        setConnectLinkUrl(res.connect_link_url);
+        setConnectLinkUrl(res.oauth.connectLinkUrl);
         setStep("oauth");
         // Open the link in a new window/tab
-        window.open(res.connect_link_url, "_blank", "noopener,noreferrer");
+        window.open(res.oauth.connectLinkUrl, "_blank", "noopener,noreferrer");
       } else if (res.connection) {
         // API key or non-OAuth — show credentials step
         setConnectionId(res.connection.id);
