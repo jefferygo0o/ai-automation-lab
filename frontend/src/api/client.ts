@@ -20,12 +20,21 @@ export class ApiError extends Error {
   }
 }
 
+export function getApiBase(): string {
+  // Vite injects import.meta.env.VITE_API_BASE_URL at build time.
+  const raw = (import.meta as any).env?.VITE_API_BASE_URL as string | undefined;
+  if (!raw) return "";
+  return raw.replace(/\/+$/, "");
+}
+
 export async function api<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  const base = getApiBase();
+  const url = /^https?:\/\//i.test(path) || !base ? path : base + path;
   const headers = new Headers(init.headers);
   if (!headers.has("content-type") && init.body) headers.set("content-type", "application/json");
   const token = getToken();
   if (token) headers.set("authorization", `Bearer ${token}`);
-  const res = await fetch(path, { ...init, headers });
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const t = await res.text();
     let body: any = t;
@@ -47,7 +56,9 @@ export async function api<T = any>(path: string, init: RequestInit = {}): Promis
 }
 
 export async function streamSSE(path: string, body: any, onEvent: (e: { event: string; data: string }) => void, signal?: AbortSignal): Promise<void> {
-  const res = await fetch(path, {
+  const base = getApiBase();
+  const url = /^https?:\/\//i.test(path) || !base ? path : base + path;
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",

@@ -4,6 +4,7 @@
  * Routes are mounted under /api. Chat streaming uses Server-Sent Events.
  */
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { createUser, login, authenticateBearer } from "../security/auth.ts";
 import { Audit } from "../audit/index.ts";
 import { approvalsApi } from "../approvals/api.ts";
@@ -38,6 +39,28 @@ import { dashboardApi } from "../dashboard/api.ts";
 import { MCP_MARKETPLACE, findMarketplaceEntry } from "../mcp/marketplace.ts";
 
 const api = new Hono<{ Variables: { userId: string } }>();
+
+// ---- CORS (must run before auth so OPTIONS preflight works) ----
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const DEFAULT_ORIGINS = [
+  "http://localhost:5173",
+  "http://localhost:3000",
+  "https://ai-automation-lab.netlify.app",
+];
+const originAllowList = ALLOWED_ORIGINS.length ? ALLOWED_ORIGINS : DEFAULT_ORIGINS;
+api.use(
+  "/api/*",
+  cors({
+    origin: (origin) => (origin && originAllowList.includes(origin) ? origin : originAllowList[0]),
+    allowHeaders: ["Content-Type", "Authorization"],
+    allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    credentials: true,
+    maxAge: 86400,
+  }),
+);
 
 // ---- Auth + rate limit middleware (applies to all /api/* except public) ----
 api.use("/api/*", async (c, next) => {
