@@ -399,51 +399,9 @@ ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS is_enabled INTEGER NOT NU
 -- ============================================================
 -- AGENT WORKSPACE SNAPSHOTS (persistent agent files in Supabase)
 -- ============================================================
--- Each snapshot zips an agent's local data/agents/<id> directory
--- and stores it in Supabase Storage. Index rows here enable
--- restore on cold start and across deploys.
-
-CREATE TABLE IF NOT EXISTS agent_snapshots (
-  id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
-  owner_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  trigger TEXT NOT NULL,                          -- 'run_complete' | 'run_failed' | 'manual' | 'startup_orphan'
-  status TEXT NOT NULL DEFAULT 'uploading',       -- 'uploading' | 'ready' | 'failed'
-  storage_bucket TEXT NOT NULL,
-  storage_path TEXT NOT NULL,                     -- bucket-relative path
-  byte_size BIGINT NOT NULL DEFAULT 0,
-  file_count INTEGER NOT NULL DEFAULT 0,
-  content_hash TEXT NOT NULL DEFAULT '',          -- sha256 of zip, for dedupe + integrity
-  error_message TEXT,
-  created_at BIGINT NOT NULL,
-  expires_at BIGINT NOT NULL                      -- now + retention window
-);
-CREATE INDEX IF NOT EXISTS idx_snapshots_agent ON agent_snapshots(agent_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_snapshots_owner ON agent_snapshots(owner_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_snapshots_expiry ON agent_snapshots(expires_at);
-
--- ============================================================
--- AGENT WORKSPACE SNAPSHOTS (persistent agent files in Supabase)
--- ============================================================
--- Each snapshot is a zipped copy of an agent's data directory
--- (system.md, persona.md, skills/, workdir/, config.json, etc.)
--- stored in Supabase Storage. The DB row is just metadata so we
--- can list/restore/prune without re-reading blobs.
-
-CREATE TABLE IF NOT EXISTS agent_snapshots (
-  id TEXT PRIMARY KEY,
-  agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
-  run_id TEXT REFERENCES runs(id) ON DELETE SET NULL,
-  trigger TEXT NOT NULL DEFAULT 'manual',
-  status TEXT NOT NULL DEFAULT 'pending',
-  byte_size BIGINT NOT NULL DEFAULT 0,
-  file_count INTEGER NOT NULL DEFAULT 0,
-  content_hash TEXT NOT NULL DEFAULT '',
-  storage_path TEXT NOT NULL,
-  error_message TEXT,
-  created_at BIGINT NOT NULL,
-  expires_at BIGINT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_snapshots_agent ON agent_snapshots(agent_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_snapshots_status ON agent_snapshots(status, created_at DESC);
+-- NOTE: An earlier revision of this schema declared the
+-- `agent_snapshots` table twice (once with a Supabase-Storage
+-- bucket column, once without). Nothing in the codebase reads or
+-- writes `agent_snapshots`, so both definitions are intentionally
+-- dropped here. If a future feature needs agent workspace
+-- snapshots, recreate the table in a dedicated migration.
