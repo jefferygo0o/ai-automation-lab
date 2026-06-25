@@ -274,7 +274,7 @@ export const PipedreamClient = {
   async createOAuthToken(
     clientId: string,
     clientSecret: string,
-    scope = "connect:accounts:write connect:accounts:read"
+    scope = "*"
   ): Promise<{ access_token: string; expires_in: number }> {
     const url = `${PD_API_BASE}/oauth/token`;
     const res = await fetch(url, {
