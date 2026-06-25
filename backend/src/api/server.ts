@@ -261,6 +261,37 @@ api.post("/api/agents/import", async (c) => {
   return c.json({ agent: await AgentStore.importPack(userId, body) });
 });
 
+// ---- Snapshots (Supabase Storage) ----
+api.get("/api/agents/:id/snapshots", async (c) => {
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id");
+  if (!(await AgentStore.get(id, userId))) return c.json({ error: "not found" }, 404);
+  const limit = Number(c.req.query("limit") ?? 20);
+  const { listSnapshots } = await import("../snapshots/index.ts");
+  return c.json({ snapshots: await listSnapshots(id, limit) });
+});
+
+api.post("/api/agents/:id/snapshot", async (c) => {
+  const userId = c.get("userId") as string;
+  const id = c.req.param("id");
+  if (!(await AgentStore.get(id, userId))) return c.json({ error: "not found" }, 404);
+  const { createSnapshot } = await import("../snapshots/index.ts");
+  const snap = await createSnapshot({ agentId: id, trigger: "manual" });
+  return c.json({ snapshot: snap });
+});
+
+api.post("/api/snapshots/:id/restore", async (c) => {
+  const { restoreSnapshot } = await import("../snapshots/index.ts");
+  const result = await restoreSnapshot(c.req.param("id"));
+  return c.json(result, result.ok ? 200 : 400);
+});
+
+api.post("/api/snapshots/restore-all", async (c) => {
+  const { hydrateAllAgents } = await import("../snapshots/index.ts");
+  const result = await hydrateAllAgents();
+  return c.json(result);
+});
+
 // ---- Chats ----
 api.get("/api/chats", async (c) => {
   const userId = c.get("userId") as string;

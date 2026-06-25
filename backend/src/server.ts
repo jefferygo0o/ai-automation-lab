@@ -15,6 +15,7 @@ import api from "./api/server.ts";
 import { mcpManager } from "./mcp/client.ts";
 import { AutomationScheduler } from "./automations/scheduler.ts";
 import { backfillAgentConfigs } from "./agents/registry.ts";
+import { hydrateAllAgents, ensureSnapshotBucket } from "./snapshots/index.ts";
 
 Skills.init();
 Skills.seedUserSkills();
@@ -23,6 +24,15 @@ await initSchema(); // run PG schema migrations
 // Backfill any existing filesystem agent configs into the DB.
 // This runs once and silently skips agents that already have config_json set.
 backfillAgentConfigs().catch((e) => console.error("[lab] config backfill error:", e));
+
+// Ensure the snapshot storage bucket exists, then restore any agent
+// directories that are missing on disk (Render ephemeral filesystem wipes
+// /var/data on every deploy). Runs in the background so startup doesn't
+// block on network — agents will repopulate on first read if needed.
+ensureSnapshotBucket()
+  .then(() => hydrateAllAgents())
+  .then((r) => console.log(`[lab] snapshot hydrate summary: ${JSON.stringify(r)}`))
+  .catch((e) => console.warn("[lab] snapshot hydrate error:", e?.message ?? e));
 
 // Boot any saved MCP servers
 mcpManager.startAll().catch((e) => console.warn("[lab] mcp.startAll error:", e));

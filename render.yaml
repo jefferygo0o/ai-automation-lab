@@ -28,6 +28,9 @@ services:
         description: "Supabase project URL (Settings → API)"
       - key: SUPABASE_SERVICE_ROLE_KEY
         description: "Supabase service_role key (NOT anon key)"
+      - key: SUPABASE_SNAPSHOT_BUCKET
+        value: "agent-snapshots"
+        description: "Supabase Storage bucket name for agent workspace snapshots. Auto-created on first run if missing."
       - key: SUPABASE_DB_URL
         description: "Supabase DB connection string — Transaction pooler, port 6543. Example: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres"
       # === Pipedream Connect config (set these to enable OAuth integrations) ===

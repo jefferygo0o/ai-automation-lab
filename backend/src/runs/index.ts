@@ -8,6 +8,7 @@
 
 import { nanoid } from "nanoid";
 import { db } from "../db/index.ts";
+import { createSnapshot } from "../snapshots/index.ts";
 
 export interface Run {
   id: string;
@@ -140,11 +141,30 @@ export const RunStore = {
     } else {
       await db.prepare(`UPDATE runs SET status = 'completed', finished_at = ? WHERE id = ?`).run(now, id);
     }
+    // Snapshot agent files in the background. Failure must not affect run completion.
+    try {
+      const run = await RunStore.get(id);
+      if (run) {
+        createSnapshot({ agentId: run.agentId, trigger: "run_complete", runId: id })
+          .catch((e) => console.warn(`[runs] snapshot error (complete):`, e?.message ?? e));
+      }
+    } catch (e: any) {
+      console.warn(`[runs] snapshot lookup error (complete):`, e?.message ?? e);
+    }
   },
 
   async fail(id: string, error: string) {
     await db.prepare(`UPDATE runs SET status = 'failed', finished_at = ?, error_message = ? WHERE id = ?`)
       .run(Date.now(), error, id);
+    try {
+      const run = await RunStore.get(id);
+      if (run) {
+        createSnapshot({ agentId: run.agentId, trigger: "run_fail", runId: id })
+          .catch((e) => console.warn(`[runs] snapshot error (fail):`, e?.message ?? e));
+      }
+    } catch (e: any) {
+      console.warn(`[runs] snapshot lookup error (fail):`, e?.message ?? e);
+    }
   },
 
   async addUsage(id: string, usage: { promptTokens?: number; completionTokens?: number; totalTokens?: number }) {
