@@ -768,15 +768,51 @@ API.get("/connect-config", async (c) => {
  * Called by Pipedream after a user completes the OAuth flow via Connect Link.
  * Expects a JSON body with connected_account_id, app_slug, and external_user_id.
  *
- * This endpoint is intentionally unauthenticated because Pipedream calls it
- * directly with the payload it receives after OAuth completion. The
- * external_user_id is a lab-specific prefix (lab_{userId}) that scopes the
- * account to the correct user.
+ * Verifies the request using Pipedream's webhook signing key (stored as
+ * PIPEDREAM_WEBHOOK_SIGNING_KEY env var) via HMAC-SHA256 of the raw body.
+ * If the signing key is set, unverified requests are rejected with 401.
+ * If the signing key is not set, the endpoint accepts unverified requests
+ * (legacy behaviour for backward compatibility).
  */
 API.post("/oauth-webhook", async (c) => {
+  const signingKey = process.env.PIPEDREAM_WEBHOOK_SIGNING_KEY?.trim();
+
+  // Read raw body for signature verification, then parse as JSON
+  let rawBody: string;
+  try {
+    rawBody = await c.req.text();
+  } catch {
+    return c.json({ error: "cannot read body" }, 400);
+  }
+
+  if (signingKey) {
+    const signature = c.req.header("x-pd-webhook-signature");
+    if (!signature) {
+      console.warn("[integrations] oauth-webhook missing x-pd-webhook-signature header");
+      return c.json({ error: "missing signature" }, 401);
+    }
+    const expected = await crypto.subtle
+      .importKey("raw", new TextEncoder().encode(signingKey), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+      .then((key) => crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody)))
+      .then((sig) => Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join(""));
+    // Constant-time compare
+    if (expected.length !== signature.length) {
+      console.warn("[integrations] oauth-webhook invalid signature (length mismatch)");
+      return c.json({ error: "invalid signature" }, 401);
+    }
+    let mismatch = 0;
+    for (let i = 0; i < expected.length; i++) {
+      mismatch |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
+    }
+    if (mismatch !== 0) {
+      console.warn("[integrations] oauth-webhook invalid signature (mismatch)");
+      return c.json({ error: "invalid signature" }, 401);
+    }
+  }
+
   let body: any;
   try {
-    body = await c.req.json();
+    body = JSON.parse(rawBody);
   } catch {
     return c.json({ error: "invalid JSON" }, 400);
   }
