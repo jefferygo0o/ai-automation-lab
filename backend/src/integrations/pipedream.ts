@@ -2,26 +2,36 @@
  * Pipedream Connect API client.
  *
  * Talks to Pipedream's REST API for:
- *   - Browsing the app catalog (2,500+ apps)
+ *   - Browsing the app catalog (~2,500 apps)
  *   - Listing actions/triggers for each app
  *   - Managing connected accounts
  *   - Executing actions on behalf of a connected account
  *
- * The user's Pipedream API key is stored as a lab secret named "pipedream_api_key".
- * For OAuth-based integrations, Pipedream Connect handles the full OAuth flow;
- * the lab stores the resulting `connected_account_id` for each integration.
+ * Pipedream has TWO distinct sets of credentials, both required for full
+ * functionality:
+ *
+ *   1. **PIPEDREAM_API_KEY** (user API key, "pd_*" prefix) — authenticates
+ *      against the project-scoped Connect catalog endpoints:
+ *        - GET  /v1/connect/apps
+ *        - GET  /v1/connect/apps/{app_id_or_slug}
+ *        - GET  /v1/connect/apps/{app_id_or_slug}/categories
+ *
+ *   2. **PIPEDREAM_CLIENT_ID + CLIENT_SECRET + PROJECT_ID** — an OAuth
+ *      client_credentials grant. Used for everything tied to a specific
+ *      project/environment:
+ *        - POST /v1/oauth/token                       (exchange client creds)
+ *        - POST /v1/connect/{project}/tokens          (create connect token)
+ *        - GET  /v1/connect/{project}/users/{ext}/accounts
+ *        - GET  /v1/connect/{project}/components?app=
+ *        - POST /v1/connect/{project}/actions/run     (run action)
+ *
+ * The user's PIPEDREAM_API_KEY is stored as a lab secret named
+ * "pipedream_api_key"; Connect credentials are server-side env vars
+ * (PIPEDREAM_CLIENT_ID, PIPEDREAM_CLIENT_SECRET, PIPEDREAM_PROJECT_ID,
+ * PIPEDREAM_ENVIRONMENT).
  */
 
 const PD_API_BASE = "https://api.pipedream.com/v1";
-
-/** Headers used for all Pipedream API calls. */
-function headers(apiKey: string) {
-  return {
-    Authorization: `Bearer ${apiKey}`,
-    "Content-Type": "application/json",
-    Accept: "application/json",
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -80,16 +90,106 @@ export interface PdAccount {
 }
 
 // ---------------------------------------------------------------------------
+// Connect config + OAuth token cache
+// ---------------------------------------------------------------------------
+
+interface ConnectConfig {
+  clientId: string;
+  clientSecret: string;
+  projectId: string;
+  environment: string;
+}
+
+interface CachedOAuthToken {
+  token: string;
+  expiresAt: number;
+}
+
+export function getConnectConfig(): ConnectConfig | null {
+  const clientId = process.env.PIPEDREAM_CLIENT_ID?.trim();
+  const clientSecret = process.env.PIPEDREAM_CLIENT_SECRET?.trim();
+  const projectId = process.env.PIPEDREAM_PROJECT_ID?.trim();
+  if (!clientId || !clientSecret || !projectId) return null;
+  return {
+    clientId,
+    clientSecret,
+    projectId,
+    environment: process.env.PIPEDREAM_ENVIRONMENT?.trim() ?? "production",
+  };
+}
+
+let oauthTokenCache: CachedOAuthToken | null = null;
+
+async function getCachedConnectOAuthToken(cfg: ConnectConfig): Promise<string> {
+  if (oauthTokenCache && oauthTokenCache.expiresAt > Date.now() + 30_000) {
+    return oauthTokenCache.token;
+  }
+  const tok = await PipedreamClient.createOAuthToken(cfg.clientId, cfg.clientSecret);
+  oauthTokenCache = {
+    token: tok.access_token,
+    expiresAt: Date.now() + (tok.expires_in ?? 3600) * 1000,
+  };
+  return oauthTokenCache.token;
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function headers(apiKey: string) {
+  return {
+    Authorization: `Bearer ${apiKey}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+}
+
+function connectHeaders(oauthToken: string, environment: string) {
+  return {
+    Authorization: `Bearer ${oauthToken}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    "x-pd-environment": environment,
+  };
+}
+
+function normalizeApp(raw: any): PdApp {
+  return {
+    id: raw.id ?? raw._id ?? "",
+    name: raw.name ?? "",
+    name_slug: raw.name_slug ?? raw.slug ?? "",
+    description: raw.description ?? "",
+    auth_type: (raw.auth_type ?? raw.authType ?? "none") as PdApp["auth_type"],
+    auth_description: raw.auth_description ?? raw.authDescription ?? "",
+    action_count: raw.action_count ?? raw.actions?.length ?? 0,
+    trigger_count: raw.trigger_count ?? raw.triggers?.length ?? 0,
+    logo_url: raw.img_src ?? raw.logo_url ?? raw.logoUrl ?? raw.logo ?? "",
+    categories: raw.categories ?? raw.tags ?? [],
+  };
+}
+
+function normalizeComponent(raw: any): PdComponent {
+  const isTrigger = (raw.component_type ?? raw.type) === "trigger";
+  return {
+    id: raw.id ?? raw.key ?? "",
+    name: raw.name ?? "",
+    key: raw.key ?? raw.id ?? "",
+    description: raw.description ?? "",
+    type: isTrigger ? "trigger" : "action",
+    input_schema: raw.configurable_props ?? raw.input_schema ?? raw.props ?? {},
+    output_schema: raw.output_schema ?? {},
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Client
 // ---------------------------------------------------------------------------
 
 export const PipedreamClient = {
   /**
-   * Fetch the full app catalog from Pipedream.
-   *
-   * Returns all pages from the /apps endpoint — currently ~2,500 apps in
-   * Pipedream's catalog. We do not cap the result size here; per-page is
-   * 100 and we keep walking the cursor until the API stops returning one.
+   * Fetch the full app catalog from Pipedream Connect.
+   * Walks the paginated cursor on `/v1/connect/apps` until exhausted.
+   * Requires a user API key (PIPEDREAM_API_KEY).
    */
   async listApps(apiKey: string): Promise<PdApp[]> {
     const all: PdApp[] = [];
@@ -98,7 +198,7 @@ export const PipedreamClient = {
     do {
       const params = new URLSearchParams({ limit: "100" });
       if (cursor) params.set("start_cursor", cursor);
-      const url = `${PD_API_BASE}/apps?${params.toString()}`;
+      const url = `${PD_API_BASE}/connect/apps?${params.toString()}`;
       const res = await fetch(url, { headers: headers(apiKey) });
       if (!res.ok) {
         const body = await res.text().catch(() => "");
@@ -109,7 +209,7 @@ export const PipedreamClient = {
       all.push(...apps);
       cursor = json.page_info?.end_cursor ?? null;
       pages += 1;
-    } while (cursor && pages < 100); // hard cap at 10,000 apps as a safety net
+    } while (cursor && pages < 100);
     return all;
   },
 
@@ -118,7 +218,7 @@ export const PipedreamClient = {
    */
   async searchApps(apiKey: string, query: string): Promise<PdApp[]> {
     const params = new URLSearchParams({ q: query, limit: "50" });
-    const url = `${PD_API_BASE}/apps?${params.toString()}`;
+    const url = `${PD_API_BASE}/connect/apps?${params.toString()}`;
     const res = await fetch(url, { headers: headers(apiKey) });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -129,10 +229,16 @@ export const PipedreamClient = {
   },
 
   /**
-   * Get detailed info for a single app, including its action/trigger components.
+   * Get detailed info for a single app.
+   * Uses `/v1/connect/apps/{id_or_slug}` with the user API key. Auth type
+   * and category breakdown come from `/apps/{id_or_slug}/categories`
+   * (best-effort). Components are NOT included here — call listComponents.
    */
-  async getApp(apiKey: string, appSlug: string): Promise<{ app: PdApp; components: PdComponent[] }> {
-    const url = `${PD_API_BASE}/apps/${appSlug}`;
+  async getApp(
+    apiKey: string,
+    appIdOrSlug: string,
+  ): Promise<{ app: PdApp; components: PdComponent[] }> {
+    const url = `${PD_API_BASE}/connect/apps/${encodeURIComponent(appIdOrSlug)}`;
     const res = await fetch(url, { headers: headers(apiKey) });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -140,45 +246,60 @@ export const PipedreamClient = {
     }
     const json = await res.json();
     const app = normalizeApp(json.data ?? json);
-    const components: PdComponent[] = (json.components ?? json.actions ?? []).map((c: any) => ({
-      id: c.id ?? c.key ?? "",
-      name: c.name ?? "",
-      key: c.key ?? c.id ?? "",
-      description: c.description ?? "",
-      type: c.type === "trigger" ? "trigger" : "action",
-      input_schema: c.input_schema ?? c.props ?? {},
-      output_schema: c.output_schema ?? {},
-    }));
-    return { app, components };
+
+    // Best-effort: enrich with auth_type + categories.
+    try {
+      const catRes = await fetch(
+        `${PD_API_BASE}/connect/apps/${encodeURIComponent(appIdOrSlug)}/categories`,
+        { headers: headers(apiKey) },
+      );
+      if (catRes.ok) {
+        const catJson = await catRes.json();
+        const root = catJson.data ?? catJson;
+        const inner = root.categories ?? root;
+        if (inner.auth_type) app.auth_type = inner.auth_type as PdApp["auth_type"];
+        if (inner.auth_description) app.auth_description = inner.auth_description;
+        if (Array.isArray(inner.categories) && inner.categories.length) {
+          app.categories = inner.categories;
+        }
+        if (inner.description && !app.description) app.description = inner.description;
+      }
+    } catch {
+      // Non-fatal — keep the basic info.
+    }
+    return { app, components: [] };
   },
 
   /**
    * List components (actions + triggers) for a specific app.
+   * Requires Connect OAuth credentials. Falls back to an empty list if
+   * Connect is not configured (frontend should already warn the user).
    */
   async listComponents(apiKey: string, appSlug: string): Promise<PdComponent[]> {
-    const url = `${PD_API_BASE}/components?app=${appSlug}`;
-    const res = await fetch(url, { headers: headers(apiKey) });
+    // Backward-compat: if Connect is not configured, we cannot list
+    // components from the new API. Return [] so callers degrade gracefully.
+    const cfg = getConnectConfig();
+    if (!cfg) return [];
+    const oauthToken = await getCachedConnectOAuthToken(cfg);
+    const params = new URLSearchParams({ app: appSlug, limit: "100" });
+    const url = `${PD_API_BASE}/connect/${cfg.projectId}/components?${params.toString()}`;
+    const res = await fetch(url, {
+      headers: connectHeaders(oauthToken, cfg.environment),
+    });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(`Pipedream listComponents failed (${res.status}): ${body.slice(0, 300)}`);
     }
     const json = await res.json();
-    return (json.data ?? json.components ?? []).map((c: any) => ({
-      id: c.id ?? c.key ?? "",
-      name: c.name ?? "",
-      key: c.key ?? c.id ?? "",
-      description: c.description ?? "",
-      type: c.type === "trigger" ? "trigger" : "action",
-      input_schema: c.input_schema ?? c.props ?? {},
-      output_schema: c.output_schema ?? {},
-    }));
+    return (json.data ?? json.components ?? []).map(normalizeComponent);
   },
 
   /**
-   * List connected accounts for the Pipedream user.
+   * List connected accounts for the Pipedream user (legacy, user-API-key
+   * authenticated). Prefer `listConnectAccounts` for OAuth-managed accounts.
    */
   async listAccounts(apiKey: string): Promise<PdAccount[]> {
-    const url = `${PD_API_BASE}/accounts`;
+    const url = `${PD_API_BASE}/connect/accounts`;
     const res = await fetch(url, { headers: headers(apiKey) });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -199,38 +320,56 @@ export const PipedreamClient = {
 
   /**
    * Delete a connected account from Pipedream.
+   * Uses the Connect API (project-scoped) so it works for both legacy
+   * and Connect accounts. Requires Connect credentials.
    */
   async deleteAccount(apiKey: string, accountId: string): Promise<boolean> {
-    const url = `${PD_API_BASE}/accounts/${accountId}`;
-    const res = await fetch(url, { method: "DELETE", headers: headers(apiKey) });
+    const cfg = getConnectConfig();
+    if (!cfg) return false;
+    const oauthToken = await getCachedConnectOAuthToken(cfg);
+    const url = `${PD_API_BASE}/connect/${cfg.projectId}/accounts/${encodeURIComponent(accountId)}`;
+    const res = await fetch(url, {
+      method: "DELETE",
+      headers: connectHeaders(oauthToken, cfg.environment),
+    });
     return res.ok || res.status === 404;
   },
 
   /**
-   * Execute an action on a connected account.
+   * Execute an action on a connected account via Pipedream Connect.
    *
-   * Uses Pipedream Connect API:
-   *   POST /connect/{project_id}/actions/run
+   * POST /v1/connect/{project}/actions/run
+   * Body:
+   *   { id: <action-key>, external_user_id, configured_props: {...} }
    *
-   * The request body includes:
-   *   - external_user_id: the connected account's owner
-   *   - action: the action key (e.g., "slack-send-message")
-   *   - input: the action parameters
-   *   - auth_provision_id: the connected account ID
+   * The `externalUserId` must match the value used when the connect token
+   * was minted (the lab uses `lab_${userId}`). `connectedAccountId` is
+   * accepted for call-site compatibility but not used directly — Pipedream
+   * resolves the account from `external_user_id` and the action's
+   * configurable props at run time.
    */
   async executeAction(
     apiKey: string,
     actionKey: string,
     input: Record<string, unknown>,
-    connectedAccountId: string,
+    _connectedAccountId: string, // accepted for signature compat, unused
+    externalUserId: string = "",
   ): Promise<PdExecuteResult> {
-    const url = `${PD_API_BASE}/components/${actionKey}/invoke`;
+    const cfg = getConnectConfig();
+    if (!cfg) {
+      throw new Error(
+        "Pipedream Connect is not configured (missing PIPEDREAM_CLIENT_ID/SECRET/PROJECT_ID). Cannot execute actions.",
+      );
+    }
+    const oauthToken = await getCachedConnectOAuthToken(cfg);
+    const url = `${PD_API_BASE}/connect/${cfg.projectId}/actions/run`;
     const res = await fetch(url, {
       method: "POST",
-      headers: headers(apiKey),
+      headers: connectHeaders(oauthToken, cfg.environment),
       body: JSON.stringify({
-        connected_account_id: connectedAccountId,
-        input,
+        id: actionKey,
+        external_user_id: externalUserId || `lab_unknown`,
+        configured_props: input ?? {},
       }),
     });
     if (!res.ok) {
@@ -241,7 +380,7 @@ export const PipedreamClient = {
     return {
       id: json.id ?? "",
       status: json.status === "error" ? "error" : "success",
-      outputs: json.outputs ?? json.data ?? {},
+      outputs: json.outputs ?? json.data ?? json.ret ?? {},
       error: json.error ?? json.err ?? undefined,
       duration_ms: json.duration_ms ?? 0,
       retry_count: json.retry_count ?? 0,
@@ -253,7 +392,7 @@ export const PipedreamClient = {
    */
   async ping(apiKey: string): Promise<boolean> {
     try {
-      const res = await fetch(`${PD_API_BASE}/apps?limit=1`, {
+      const res = await fetch(`${PD_API_BASE}/connect/apps?limit=1`, {
         headers: headers(apiKey),
         signal: AbortSignal.timeout(5000),
       });
@@ -274,7 +413,7 @@ export const PipedreamClient = {
   async createOAuthToken(
     clientId: string,
     clientSecret: string,
-    scope = "*"
+    scope = "*",
   ): Promise<{ access_token: string; expires_in: number }> {
     const url = `${PD_API_BASE}/oauth/token`;
     const res = await fetch(url, {
@@ -333,13 +472,12 @@ export const PipedreamClient = {
     if (!res.ok) {
       const raw = await res.text().catch(() => "");
       const detail = raw.length > 0 ? raw.slice(0, 500) : "(empty body)";
-      // Include extra context for 403s — common Pipedream Connect config issues
       const hint =
         res.status === 403
-          ? "Check that: (1) PIPEDREAM_PROJECT_ID matches a project under Pipedream → Connect → Projects, (2) PIPEDREAM_ENVIRONMENT (currently '" + env + "') matches the project's environment (development/production), and (3) the OAuth client (PIPEDREAM_CLIENT_ID) is linked to this project in Pipedream's Connect settings."
+          ? " Check that: (1) PIPEDREAM_PROJECT_ID matches a project under Pipedream → Connect → Projects, (2) PIPEDREAM_ENVIRONMENT (currently '" + env + "') matches the project's environment (development/production), and (3) the OAuth client (PIPEDREAM_CLIENT_ID) is linked to this project in Pipedream's Connect settings."
           : "";
       throw new Error(
-        `Pipedream createConnectToken failed (${res.status}): ${detail}. ${hint}`.trim()
+        `Pipedream createConnectToken failed (${res.status}): ${detail}.${hint}`.trim(),
       );
     }
     return await res.json();
@@ -348,8 +486,7 @@ export const PipedreamClient = {
   /**
    * List connected accounts for a Pipedream Connect user.
    *
-   * Uses path-based routing per Pipedream docs:
-   *   GET /connect/{project_id}/users/{external_user_id}/accounts
+   * GET /v1/connect/{project_id}/users/{external_user_id}/accounts
    */
   async listConnectAccounts(
     oauthToken: string,
@@ -359,10 +496,7 @@ export const PipedreamClient = {
   ): Promise<PdAccount[]> {
     const url = `${PD_API_BASE}/connect/${projectId}/users/${encodeURIComponent(externalUserId)}/accounts`;
     const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${oauthToken}`,
-        "x-pd-environment": environment,
-      },
+      headers: connectHeaders(oauthToken, environment),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -380,23 +514,4 @@ export const PipedreamClient = {
       updated_at: a.updated_at ?? Date.now(),
     }));
   },
-} as const;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function normalizeApp(raw: any): PdApp {
-  return {
-    id: raw.id ?? raw._id ?? "",
-    name: raw.name ?? "",
-    name_slug: raw.name_slug ?? raw.slug ?? "",
-    description: raw.description ?? "",
-    auth_type: (raw.auth_type ?? raw.authType ?? "none") as PdApp["auth_type"],
-    auth_description: raw.auth_description ?? raw.authDescription ?? "",
-    action_count: raw.action_count ?? raw.actions?.length ?? 0,
-    trigger_count: raw.trigger_count ?? raw.triggers?.length ?? 0,
-    logo_url: raw.logo_url ?? raw.logoUrl ?? raw.logo ?? raw.img_src ?? "",
-    categories: raw.categories ?? raw.tags ?? [],
-  };
-}
+};

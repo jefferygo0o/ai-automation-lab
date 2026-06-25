@@ -10,7 +10,7 @@
  */
 
 import { Hono } from "hono";
-import { PipedreamClient } from "./pipedream.ts";
+import { PipedreamClient, type PdComponent } from "./pipedream.ts";
 import { IntegrationRegistry, type IntegrationConnection, type CachedCatalogApp } from "./registry.ts";
 import { SecretStore } from "../secrets/store.ts";
 import { Audit } from "../audit/index.ts";
@@ -340,20 +340,32 @@ API.get("/catalog/:slug", async (c) => {
         cached: true,
       };
     } else {
-      // Fetch from Pipedream and cache
+      // Fetch app + components from Pipedream.
+      // Note: Pipedream Connect split these into two endpoints — getApp
+      // returns app metadata only; components come from listComponents.
       const result = await PipedreamClient.getApp(pdKey, slug);
       app = result.app;
-      components = result.components.map((comp: any) => ({
-        id: comp.id,
-        appSlug: slug,
-        actionKey: comp.key,
-        name: comp.name,
-        description: comp.description,
-        type: comp.type,
-        inputSchema: comp.input_schema,
-        outputSchema: comp.output_schema ?? {},
-      }));
-      await IntegrationRegistry.cacheActions(slug, components);
+      try {
+        const list = await PipedreamClient.listComponents(pdKey, slug);
+        components = list.map((comp: any) => ({
+          id: comp.id,
+          appSlug: slug,
+          actionKey: comp.key,
+          name: comp.name,
+          description: comp.description,
+          type: comp.type,
+          inputSchema: comp.input_schema,
+          outputSchema: comp.output_schema ?? {},
+        }));
+      } catch (componentErr: any) {
+        // If components can't be fetched (e.g. Connect not configured),
+        // return app metadata only rather than failing the whole request.
+        console.warn("[integrations] listComponents failed for", slug + ":", componentErr?.message ?? String(componentErr));
+        components = [];
+      }
+      if (components.length > 0) {
+        await IntegrationRegistry.cacheActions(slug, components);
+      }
     }
 
     const connected = !!(await IntegrationRegistry.getByApp(userId, slug));
@@ -379,8 +391,11 @@ API.post("/catalog/:slug/refresh", async (c) => {
 
   const slug = c.req.param("slug");
   try {
-    const result = await PipedreamClient.getApp(pdKey, slug);
-    const components = result.components.map((comp: any) => ({
+    // Pipedream Connect split the legacy /apps/{slug} endpoint: app
+    // metadata comes from getApp, components come from listComponents.
+    await PipedreamClient.getApp(pdKey, slug);
+    const list = await PipedreamClient.listComponents(pdKey, slug);
+    const components = list.map((comp: any) => ({
       id: comp.id,
       appSlug: slug,
       actionKey: comp.key,
@@ -429,7 +444,19 @@ API.post("/connect/:slug", async (c) => {
 
   // Fetch app details from Pipedream
   try {
-    const { app, components } = await PipedreamClient.getApp(pdKey, slug);
+    const { app } = await PipedreamClient.getApp(pdKey, slug);
+
+    // Components now come from a separate endpoint in the new Connect API.
+    let components: PdComponent[] = [];
+    try {
+      components = await PipedreamClient.listComponents(pdKey, slug);
+    } catch (componentErr: any) {
+      console.warn(
+        "[integrations] listComponents failed for",
+        slug + ":",
+        componentErr?.message ?? String(componentErr),
+      );
+    }
 
     // Cache the components
     const cached = components.map((comp) => ({
@@ -442,7 +469,9 @@ API.post("/connect/:slug", async (c) => {
       inputSchema: comp.input_schema ?? {},
       outputSchema: comp.output_schema ?? {},
     }));
-    await IntegrationRegistry.cacheActions(slug, cached);
+    if (cached.length > 0) {
+      await IntegrationRegistry.cacheActions(slug, cached);
+    }
 
     // Create the connection record
     const conn = await IntegrationRegistry.create(userId, {
@@ -671,18 +700,23 @@ API.post("/:id/execute", async (c) => {
 
     if (accountId) {
       // Use Pipedream Connect API for OAuth-connected accounts
-      result = await PipedreamClient.executeAction(pdKey, actionKey, input ?? {}, accountId);
+      result = await PipedreamClient.executeAction(pdKey, actionKey, input ?? {}, accountId, `lab_${userId}`);
     } else if (conn.credentialsRef) {
-      // For API key-based integrations, retrieve the key and pass directly
+      // For API key-based integrations, retrieve the stored key and
+      // pass it as `configured_props.api_key` — the Pipedream-standard
+      // name for the API key config prop in most Connect apps. The
+      // user's input is merged on top so explicit overrides win.
       const storedKey = await SecretStore.get(userId, conn.credentialsRef);
       if (!storedKey) {
         return c.json({ error: "Stored credentials not found" }, 500);
       }
-      // Try the Pipedream API with the stored credentials as the API key
-      result = await PipedreamClient.executeAction(pdKey, actionKey, {
-        ...(input ?? {}),
-        apiKey: storedKey,
-      }, "");
+      result = await PipedreamClient.executeAction(
+        pdKey,
+        actionKey,
+        { api_key: storedKey, ...(input ?? {}) },
+        "",
+        `lab_${userId}`,
+      );
     } else {
       return c.json({ error: "No credentials or connected account. Provide credentials first." }, 400);
     }

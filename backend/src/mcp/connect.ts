@@ -136,7 +136,9 @@ export async function startMcpOAuthFlow(
     };
   }
 
-  // Fetch app details from Pipedream to know auth type
+  // Fetch app details from Pipedream to know auth type. Components are
+  // NOT in getApp's response under the new Connect API — we fetch them
+  // separately via listComponents (best-effort, non-fatal).
   let app: any;
   try {
     const result = await PipedreamClient.getApp(pdKey, pipedreamSlug);
@@ -154,9 +156,9 @@ export async function startMcpOAuthFlow(
     };
   }
 
-  // Cache the action components
+  // Cache the action components (best-effort, non-fatal)
   try {
-    const { components } = await PipedreamClient.getApp(pdKey, pipedreamSlug);
+    const components = await PipedreamClient.listComponents(pdKey, pipedreamSlug);
     const cached = components.map((comp: any) => ({
       id: comp.id,
       appSlug: pipedreamSlug,

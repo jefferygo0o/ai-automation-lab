@@ -118,11 +118,14 @@ toolRegistry.register({
       const conn = await IntegrationRegistry.getByApp(ctx.ownerId, args.app as string);
       const accountId = conn?.connectedAccountId ?? "";
 
+      // Pass the lab-prefixed external user id used at OAuth time.
+      // The new Connect actions/run endpoint requires it.
       const result = await PipedreamClient.executeAction(
         pdKey,
         args.action as string,
         args.params as Record<string, unknown>,
         accountId,
+        `lab_${ctx.ownerId}`,
       );
 
       return text(
@@ -285,7 +288,9 @@ toolRegistry.register({
           let total = 0;
           for (const app of cachedApps.slice(0, 20)) {
             try {
-              const { components } = await PipedreamClient.getApp(pdKey, app.appSlug);
+              // The new Connect API split: getApp returns metadata,
+              // listComponents returns the actions/triggers for the app.
+              const components = await PipedreamClient.listComponents(pdKey, app.appSlug);
               const actions = components.map((c: any) => ({
                 id: c.id,
                 appSlug: app.appSlug,
