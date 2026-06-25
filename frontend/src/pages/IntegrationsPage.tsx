@@ -1121,6 +1121,12 @@ export default function IntegrationsPage() {
   const [pdStatus, setPdStatus] = useState<{ configured: boolean; valid: boolean; message: string } | null>(null);
   const [showKeySetup, setShowKeySetup] = useState(false);
   const [stats, setStats] = useState<{ total: number; byStatus: Record<string, number> } | null>(null);
+  const [oauthVerificationState, setOauthVerificationState] = useState<{
+    status: "verifying" | "success" | "failed";
+    connectionId: string;
+    appName?: string;
+    error?: string;
+  } | null>(null);
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -1142,6 +1148,53 @@ export default function IntegrationsPage() {
   }, []);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // Handle oauth_success query param — auto-verify after OAuth redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauthSuccessId = params.get("oauth_success");
+    if (!oauthSuccessId) return;
+
+    // Clean the param from the URL so refresh doesn't re-trigger
+    const cleanUrl = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, "", cleanUrl);
+
+    // Find the connection to get the app name
+    const conn = connections.find((c) => c.id === oauthSuccessId);
+    setOauthVerificationState({
+      status: "verifying",
+      connectionId: oauthSuccessId,
+      appName: conn?.app_name,
+    });
+
+    Integrations.verifyOAuth(oauthSuccessId)
+      .then((res) => {
+        if (res.connected && res.connectedAccountId) {
+          setOauthVerificationState({
+            status: "success",
+            connectionId: oauthSuccessId,
+            appName: conn?.app_name,
+          });
+          // Refetch connections to show updated status
+          fetchAll();
+        } else {
+          setOauthVerificationState({
+            status: "failed",
+            connectionId: oauthSuccessId,
+            appName: conn?.app_name,
+            error: res.message || "Not connected yet. Try clicking Verify on the connection.",
+          });
+        }
+      })
+      .catch((e: any) => {
+        setOauthVerificationState({
+          status: "failed",
+          connectionId: oauthSuccessId,
+          appName: conn?.app_name,
+          error: e?.message || "Verification failed. The connection may still be pending.",
+        });
+      });
+  }, []); // Run once on mount
 
   // Handle connecting an app
   const handleConnect = useCallback((app: PdApp) => {
@@ -1230,6 +1283,79 @@ export default function IntegrationsPage() {
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <div className="flex-1">{error}</div>
           <button onClick={() => setError("")} className="shrink-0"><X className="w-3 h-3" /></button>
+        </div>
+      )}
+
+      {/* OAuth verification banner */}
+      {oauthVerificationState && (
+        <div className={`flex items-start gap-3 p-4 border rounded ${
+          oauthVerificationState.status === "verifying"
+            ? "bg-blue-50 border-blue-200 text-blue-800"
+            : oauthVerificationState.status === "success"
+            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+            : "bg-amber-50 border-amber-200 text-amber-800"
+        }`}>
+          {oauthVerificationState.status === "verifying" ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">Verifying your connection{oauthVerificationState.appName ? ` to ${oauthVerificationState.appName}` : ""}...</p>
+                <p className="text-xs mt-1 opacity-80">Checking with Pipedream that the authorization was successful.</p>
+              </div>
+            </>
+          ) : oauthVerificationState.status === "success" ? (
+            <>
+              <Check className="w-5 h-5 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">Connected{oauthVerificationState.appName ? ` to ${oauthVerificationState.appName}` : ""} successfully!</p>
+                <p className="text-xs mt-1 opacity-80">Your integration is ready. You can now browse its actions and use them in your agents.</p>
+              </div>
+              <button onClick={() => setOauthVerificationState(null)} className="shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+            </>
+          ) : (
+            <>
+              <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">Connection pending{oauthVerificationState.appName ? ` for ${oauthVerificationState.appName}` : ""}</p>
+                <p className="text-xs mt-1 opacity-80">
+                  {oauthVerificationState.error || "The OAuth flow didn't complete yet."}
+                  {" "}If you completed the authorization in the Pipedream window, try refreshing this page or clicking "I've Authorized" on the connection.
+                </p>
+              </div>
+              <button
+                onClick={async () => {
+                  setOauthVerificationState((prev) => prev ? { ...prev, status: "verifying" } : null);
+                  try {
+                    const res = await Integrations.verifyOAuth(oauthVerificationState.connectionId);
+                    if (res.connected && res.connectedAccountId) {
+                      setOauthVerificationState((prev) => prev ? { ...prev, status: "success" } : null);
+                      fetchAll();
+                    } else {
+                      setOauthVerificationState((prev) => prev ? {
+                        ...prev,
+                        status: "failed",
+                        error: res.message || "Still not connected. Try completing the authorization in Pipedream.",
+                      } : null);
+                    }
+                  } catch (e: any) {
+                    setOauthVerificationState((prev) => prev ? {
+                      ...prev,
+                      status: "failed",
+                      error: e?.message || "Verification failed.",
+                    } : null);
+                  }
+                }}
+                className="btn btn-sm btn-outline shrink-0 text-xs"
+              >
+                <RefreshCw className="w-3 h-3" /> Retry Verification
+              </button>
+              <button onClick={() => setOauthVerificationState(null)} className="shrink-0">
+                <X className="w-4 h-4" />
+              </button>
+            </>
+          )}
         </div>
       )}
 

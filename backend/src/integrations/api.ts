@@ -893,13 +893,24 @@ API.post("/:id/verify-oauth", async (c) => {
       connectCfg.clientId,
       connectCfg.clientSecret,
     );
-    const accounts = await PipedreamClient.listConnectAccounts(
-      oauthTokenRes.access_token,
-      connectCfg.projectId,
-      `lab_${userId}`,
-      connectCfg.environment,
-    );
-    const matching = accounts.find((a: any) => a.app_slug === conn.appSlug);
+
+    // Try the configured environment first, then fall back to the other
+    const environments = [connectCfg.environment, connectCfg.environment === "production" ? "development" : "production"];
+    let matching: any = null;
+
+    for (const env of environments) {
+      const accounts = await PipedreamClient.listConnectAccounts(
+        oauthTokenRes.access_token,
+        connectCfg.projectId,
+        `lab_${userId}`,
+        env,
+      );
+      matching = accounts.find((a: any) => a.app_slug === conn.appSlug);
+      if (matching) {
+        console.log(`[integrations] verify-oauth found matching account in environment "${env}"`);
+        break;
+      }
+    }
 
     if (matching) {
       await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
