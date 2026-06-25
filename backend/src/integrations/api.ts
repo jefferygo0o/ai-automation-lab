@@ -826,9 +826,19 @@ API.post("/oauth-webhook", async (c) => {
     return c.json({ error: "invalid JSON" }, 400);
   }
 
-  const connectedAccountId = body.connected_account_id || body.id;
-  const appSlug = body.app_slug || body.app;
-  const externalUserId = body.external_user_id || body.externalUserId;
+  // Pipedream Connect webhook payload shape:
+  // {
+  //   "event": "CONNECTION_SUCCESS",
+  //   "connect_token": "ctok_xxx",
+  //   "account": {
+  //     "id": "apn_xxx",
+  //     "external_id": "user-abc-123",
+  //     "app": { "name_slug": "google_sheets", ... }
+  //   }
+  // }
+  const connectedAccountId = body.account?.id;
+  const appSlug = body.account?.app?.name_slug;
+  const externalUserId = body.account?.external_id;
 
   if (!connectedAccountId || !appSlug || !externalUserId) {
     // Pipedream may send different shapes; log and ack regardless
@@ -869,12 +879,8 @@ API.post("/oauth-webhook", async (c) => {
  * After the user returns from the Pipedream OAuth flow, the frontend calls
  * this to check whether the OAuth account was connected. If the webhook
  * already processed it, the connection will have a connectedAccountId and
- * status "connected". If not, this endpoint tries to find the account using
- * one of these methods (in order):
- *
- *   1. Exchange the one-time token from the success_redirect_uri (most direct)
- *   2. Query Pipedream's listConnectAccounts API (fallback)
- *   3. Retry with the alternate environment (last resort)
+ * status "connected". If not, this endpoint tries to find the account by
+ * querying Pipedream's listConnectAccounts API across environments.
  */
 API.post("/:id/verify-oauth", async (c) => {
   const userId = c.get("userId") as string;
@@ -897,40 +903,7 @@ API.post("/:id/verify-oauth", async (c) => {
       connectCfg.clientSecret,
     );
 
-    // --- Method 1: Exchange the one-time token (most direct) ---
-    let body: { token?: string } = {};
-    try { body = await c.req.json(); } catch { /* no body */ }
-    const oneTimeToken = body?.token;
-
-    if (oneTimeToken) {
-      try {
-        const exchangeResult = await PipedreamClient.exchangeConnectToken(
-          oauthTokenRes.access_token,
-          connectCfg.projectId,
-          oneTimeToken,
-          connectCfg.environment,
-        );
-        if (exchangeResult?.id) {
-          await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
-            connectedAccountId: exchangeResult.id,
-          });
-          Audit.record({
-            ownerId: userId,
-            actor: "user",
-            action: "integration.oauth_verify",
-            targetId: conn.id,
-            targetType: "integration",
-            metadata: { appSlug: conn.appSlug, connectedAccountId: exchangeResult.id, method: "token_exchange" },
-          });
-          console.log(`[integrations] verify-oauth connected ${conn.id} via token exchange`);
-          return c.json({ connected: true, status: "connected", connectedAccountId: exchangeResult.id });
-        }
-      } catch (exchangeErr: any) {
-        console.warn(`[integrations] token exchange failed, falling back: ${exchangeErr?.message}`);
-      }
-    }
-
-    // --- Method 2: Query Pipedream's connected accounts ---
+    // Query Pipedream's connected accounts — try primary env then fallback
     const environments = [connectCfg.environment, connectCfg.environment === "production" ? "development" : "production"];
     let matching: any = null;
 
@@ -963,7 +936,7 @@ API.post("/:id/verify-oauth", async (c) => {
       return c.json({ connected: true, status: "connected", connectedAccountId: matching.id });
     }
 
-    return c.json({ connected: false, status: "connecting", message: "No matching connected account found yet" });
+    return c.json({ connected: false, status: "connecting", message: "No matching connected account found yet. The webhook from Pipedream may still be processing — try again in a few seconds." });
   } catch (e: any) {
     return c.json({ connected: false, status: conn.status, error: e?.message ?? String(e) });
   }
