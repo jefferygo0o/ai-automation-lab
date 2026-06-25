@@ -400,6 +400,26 @@ function CatalogView({
   const [featuredLoading, setFeaturedLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // --- Category browser state ---
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [categoryApps, setCategoryApps] = useState<PdApp[] | null>(null);
+  const [categoryLoading, setCategoryLoading] = useState(false);
+
+  // Load categories when the view mounts (and when a sync finishes)
+  const refreshCategories = useCallback(async () => {
+    try {
+      const res = await Integrations.categories();
+      if (Array.isArray(res.categories)) setCategories(res.categories);
+    } catch {
+      // Non-fatal — chip bar simply won't show.
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCategories();
+  }, [refreshCategories]);
+
   // Fetch featured apps on mount — with fallback data so Quick Connect
   // always shows cards even when the catalog cache hasn't been populated yet.
   useEffect(() => {
@@ -461,6 +481,32 @@ function CatalogView({
     }
     setLoading(false);
   }, [search]);
+
+  // Load apps for a category whenever the user picks one
+  useEffect(() => {
+    if (!selectedCategory) {
+      setCategoryApps(null);
+      return;
+    }
+    let cancelled = false;
+    setCategoryLoading(true);
+    Integrations.catalog({ category: selectedCategory, per_page: 60 })
+      .then((res) => {
+        if (!cancelled) setCategoryApps(res.apps);
+      })
+      .catch((e: any) => {
+        if (!cancelled) setError(e?.message || "Failed to load category");
+      })
+      .finally(() => {
+        if (!cancelled) setCategoryLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedCategory]);
+
+  const handleSelectCategory = (slug: string) => {
+    setSelectedCategory((prev) => (prev === slug ? null : slug));
+    setCategoryApps(null);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter") handleSearch();
@@ -564,6 +610,80 @@ function CatalogView({
                   onRefresh={() => {}}
                 />
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Browse by category */}
+      {showFeatured && categories.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="serif text-lg text-ink-900">Browse by category</h2>
+            <span className="text-xs text-ink-400">{categories.length} categories</span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {categories.map((cat) => {
+              const active = selectedCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => handleSelectCategory(cat)}
+                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                    active
+                      ? "bg-ink-900 text-paper border-ink-900"
+                      : "bg-paper text-ink-600 border-line hover:bg-paper-200/60"
+                  }`}
+                >
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedCategory && (
+            <div className="pt-2">
+              {categoryLoading ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="h-[88px] rounded-lg bg-paper-100/50 border border-line animate-pulse" />
+                  ))}
+                </div>
+              ) : categoryApps && categoryApps.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-ink-500">
+                      {categoryApps.length} apps in <span className="font-medium text-ink-700">{selectedCategory}</span>
+                    </p>
+                    <button
+                      onClick={() => handleSelectCategory(selectedCategory)}
+                      className="text-xs text-ink-500 hover:text-ink-800 underline"
+                    >
+                      Clear filter
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {categoryApps.map((app) => (
+                      <AppCard
+                        key={app.name_slug}
+                        app={app}
+                        onConnect={onConnect}
+                        onRefresh={() => {}}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between py-8 text-ink-400 text-sm">
+                  <span>No apps in {selectedCategory} yet.</span>
+                  <button
+                    onClick={() => handleSelectCategory(selectedCategory)}
+                    className="btn btn-sm btn-ghost"
+                  >
+                    Clear filter
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

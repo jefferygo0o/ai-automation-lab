@@ -10,7 +10,7 @@
  */
 
 import { Hono } from "hono";
-import { PipedreamClient, type PdComponent } from "./pipedream.ts";
+import { PipedreamClient, type PdComponent, type PdApp } from "./pipedream.ts";
 import { IntegrationRegistry, type IntegrationConnection, type CachedCatalogApp } from "./registry.ts";
 import { SecretStore } from "../secrets/store.ts";
 import { Audit } from "../audit/index.ts";
@@ -233,21 +233,75 @@ API.get("/catalog", async (c) => {
     const count = await IntegrationRegistry.getCachedAppsCount(userId);
     const fresh = await IntegrationRegistry.isCacheFresh(userId, CACHE_TTL_MS);
 
-    // Never block on Pipedream — return cached data immediately.
-    // If the cache is empty or stale, trigger a background refresh.
-    if (count === 0 || !fresh) {
-      syncCatalogFromPd(userId, pdKey).catch(e => console.error("[integrations] sync error:", e?.message ?? String(e)));
-    }
-
-    // Get connected slugs
+    // Get connected slugs up front
     const connected = new Set(
-      await (await IntegrationRegistry.list(userId)).map((i) => i.appSlug),
+      (await IntegrationRegistry.list(userId)).map((i) => i.appSlug),
     );
+
+    // --- Live fallback for cold / empty cache ---
+    // On a fresh deploy (e.g. Render) the local cache is empty, so the
+    // original "background sync + return cached" strategy returned [] for
+    // every request. To make search and browse work immediately, when the
+    // cache has zero apps for this user we synchronously fetch from
+    // Pipedream and persist the result. For search queries, we also fall
+    // back to Pipedream live when the local cache has no matches.
+    let liveFetched: PdApp[] | null = null;
+    if (count === 0) {
+      try {
+        liveFetched = query
+          ? await PipedreamClient.searchApps(pdKey, query)
+          : await PipedreamClient.listApps(pdKey);
+        if (liveFetched.length > 0) {
+          await IntegrationRegistry.cacheAppCatalog(userId, liveFetched);
+        }
+      } catch (e: any) {
+        console.error("[catalog] live fetch failed:", e?.message ?? String(e));
+      }
+      // Also kick off a full sync in the background so the cache fills in.
+      syncCatalogFromPd(userId, pdKey).catch(e =>
+        console.error("[integrations] background sync error:", e?.message ?? String(e)),
+      );
+    } else if (query) {
+      // Cache has apps but search yielded nothing — try Pipedream live as a supplement.
+      const localResult = await IntegrationRegistry.searchCachedApps(userId, query, 1, 10000);
+      if (localResult.total === 0) {
+        try {
+          liveFetched = await PipedreamClient.searchApps(pdKey, query);
+          if (liveFetched.length > 0) {
+            await IntegrationRegistry.cacheAppCatalog(userId, liveFetched);
+          }
+        } catch (e: any) {
+          console.error("[catalog] live search failed:", e?.message ?? String(e));
+        }
+      }
+    } else if (!fresh) {
+      // Cache exists but is stale — refresh in the background.
+      syncCatalogFromPd(userId, pdKey).catch(e =>
+        console.error("[integrations] background sync error:", e?.message ?? String(e)),
+      );
+    }
 
     let apps: CachedCatalogApp[];
     let total: number;
 
-    if (query) {
+    if (liveFetched) {
+      // Use the live results directly (already cached for next time).
+      apps = liveFetched.map((a): CachedCatalogApp => ({
+        id: `cat_live_${a.name_slug}`,
+        ownerId: userId,
+        appSlug: a.name_slug,
+        name: a.name,
+        description: a.description ?? "",
+        authType: (a.auth_type ?? "") as CachedCatalogApp["authType"],
+        authDescription: a.auth_description ?? "",
+        actionCount: a.action_count ?? 0,
+        triggerCount: a.trigger_count ?? 0,
+        logoUrl: a.logo_url ?? "",
+        categories: a.categories ?? [],
+        fetchedAt: Date.now(),
+      }));
+      total = apps.length;
+    } else if (query) {
       const result = await IntegrationRegistry.searchCachedApps(userId, query, 1, 10000);
       apps = result.apps;
       total = result.total;
@@ -294,10 +348,9 @@ API.get("/catalog", async (c) => {
       page,
       per_page: perPage,
       pages,
-      sync_state: (async () => {
-        const s = await IntegrationRegistry.getCatalogSyncState(userId);
-        return s ? { status: s.status, total: s.total } : null;
-      })(),
+      sync_state: await IntegrationRegistry.getCatalogSyncState(userId).then(s =>
+        s ? { status: s.status, total: s.total } : null,
+      ),
     });
   } catch (e: any) {
     return c.json({ error: `Failed to fetch catalog: ${e?.message ?? String(e)}` }, 502);
