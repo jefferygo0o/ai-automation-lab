@@ -399,13 +399,29 @@ export const IntegrationRegistry = {
 
     if (batch.length === 0) return;
 
+    // Upsert on (owner_id, app_slug) so re-syncs refresh in place instead of
+    // appending duplicate rows. Without this, every catalog page load when
+    // the cache is stale inserted a new row with a fresh nanoid id, and the
+    // /api/integrations/catalog endpoint returned all of them — producing
+    // hundreds of duplicates per app over a few days of usage.
     await db.transaction(async () => {
       for (const item of batch) {
         await db.prepare(
           `INSERT INTO catalog_app_cache
            (id, owner_id, app_slug, name, description, auth_type, auth_description,
             action_count, trigger_count, logo_url, categories_json, fetched_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           ON CONFLICT (owner_id, app_slug) DO UPDATE SET
+             id            = EXCLUDED.id,
+             name          = EXCLUDED.name,
+             description   = EXCLUDED.description,
+             auth_type     = EXCLUDED.auth_type,
+             auth_description = EXCLUDED.auth_description,
+             action_count  = EXCLUDED.action_count,
+             trigger_count = EXCLUDED.trigger_count,
+             logo_url      = EXCLUDED.logo_url,
+             categories_json = EXCLUDED.categories_json,
+             fetched_at    = EXCLUDED.fetched_at`
         ).run(
           item.id,
           ownerId,

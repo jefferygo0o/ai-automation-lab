@@ -356,6 +356,26 @@ CREATE TABLE IF NOT EXISTS integration_action_cache (
 );
 CREATE INDEX IF NOT EXISTS idx_action_cache_app ON integration_action_cache(app_slug, action_key);
 
+-- Dedupe legacy catalog_app_cache rows before we add the UNIQUE constraint.
+-- The earlier schema had no uniqueness on (owner_id, app_slug), and the
+-- earlier cacheAppCatalog did a plain INSERT, so re-syncs accumulated many
+-- rows per app. We must collapse to one row per (owner_id, app_slug) before
+-- the UNIQUE constraint is added below, otherwise CREATE TABLE would fail.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_name = 'catalog_app_cache'
+  ) THEN
+    -- legacy databases may have many rows per (owner_id, app_slug); collapse them.
+    DELETE FROM catalog_app_cache c
+    USING catalog_app_cache newer
+    WHERE c.owner_id = newer.owner_id
+      AND c.app_slug = newer.app_slug
+      AND (newer.fetched_at, newer.ctid) > (c.fetched_at, c.ctid);
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS catalog_app_cache (
   id TEXT PRIMARY KEY,
   owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -368,9 +388,28 @@ CREATE TABLE IF NOT EXISTS catalog_app_cache (
   trigger_count INTEGER NOT NULL DEFAULT 0,
   logo_url TEXT NOT NULL DEFAULT '',
   categories_json TEXT NOT NULL DEFAULT '[]',
-  fetched_at BIGINT NOT NULL
+  fetched_at BIGINT NOT NULL,
+  CONSTRAINT catalog_app_cache_owner_slug_unique UNIQUE (owner_id, app_slug)
 );
+-- Name-based browse index. The UNIQUE (owner_id, app_slug) constraint above
+-- also serves lookups by slug within a user.
 CREATE INDEX IF NOT EXISTS idx_catalog_owner ON catalog_app_cache(owner_id, name);
+
+-- Belt-and-suspenders for existing deploys: CREATE TABLE IF NOT EXISTS
+-- skips when the table already exists, which would leave the old (no
+-- constraint) table in place. Explicitly add the constraint here so
+-- upserts in cacheAppCatalog work on legacy databases too.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'catalog_app_cache_owner_slug_unique'
+  ) THEN
+    ALTER TABLE catalog_app_cache
+      ADD CONSTRAINT catalog_app_cache_owner_slug_unique
+      UNIQUE (owner_id, app_slug);
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS catalog_sync_state (
   owner_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
