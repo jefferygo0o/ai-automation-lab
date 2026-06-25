@@ -464,43 +464,52 @@ API.post("/connect/:slug", async (c) => {
       metadata: { appSlug: slug, appName: app.name },
     });
 
-    // For OAuth apps, try to create a Pipedream Connect token
-    // so the frontend can redirect the user through the OAuth flow.
+    // For OAuth apps, require Pipedream Connect config.
+    // If the env vars aren't set, return a clear error instead of
+    // silently falling back to API-key credentials mode.
     if (app.auth_type === "oauth") {
       const connectCfg = getConnectConfig();
-      if (connectCfg) {
-        try {
-          const oauthTokenRes = await PipedreamClient.createOAuthToken(
-            connectCfg.clientId,
-            connectCfg.clientSecret,
-          );
-          const host = c.req.header("host") ?? "";
-          const proto = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
-          const baseUrl = `${proto}://${host}`;
-          const ctRes = await PipedreamClient.createConnectToken(
-            oauthTokenRes.access_token,
-            connectCfg.projectId,
-            `lab_${userId}`,
-            {
-              app: slug,
-              successRedirectUri: `${baseUrl}/integrations?oauth_success=${conn.id}`,
-              webhookUri: `${baseUrl}/api/integrations/oauth-webhook`,
-              environment: connectCfg.environment,
-            },
-          );
-          // Mark the connection as "connecting" until OAuth completes
-          await IntegrationRegistry.updateStatus(conn.id, userId, "connecting");
-          return c.json({
-            connection: sanitizeConn(conn),
-            oauth: {
-              connectLinkUrl: ctRes.connect_link_url + (slug ? `&app=${slug}` : ""),
-              token: ctRes.token,
-            },
-          });
-        } catch (oauthErr: any) {
-          console.warn("[integrations] OAuth connect token failed:", oauthErr?.message ?? String(oauthErr));
-          // Fall through — return the connection without OAuth URL, user can try again
-        }
+      if (!connectCfg) {
+        return c.json({
+          error: "Pipedream Connect (OAuth) is not configured. Set PIPEDREAM_CLIENT_ID, PIPEDREAM_CLIENT_SECRET, and PIPEDREAM_PROJECT_ID environment variables on the server to enable OAuth-based integration connections.",
+          connection: sanitizeConn(conn),
+          oauthNotConfigured: true,
+        }, 400);
+      }
+      try {
+        const oauthTokenRes = await PipedreamClient.createOAuthToken(
+          connectCfg.clientId,
+          connectCfg.clientSecret,
+        );
+        const host = c.req.header("host") ?? "";
+        const proto = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
+        const baseUrl = `${proto}://${host}`;
+        const ctRes = await PipedreamClient.createConnectToken(
+          oauthTokenRes.access_token,
+          connectCfg.projectId,
+          `lab_${userId}`,
+          {
+            app: slug,
+            successRedirectUri: `${baseUrl}/integrations?oauth_success=${conn.id}`,
+            webhookUri: `${baseUrl}/api/integrations/oauth-webhook`,
+            environment: connectCfg.environment,
+          },
+        );
+        // Mark the connection as "connecting" until OAuth completes
+        await IntegrationRegistry.updateStatus(conn.id, userId, "connecting");
+        return c.json({
+          connection: sanitizeConn(conn),
+          oauth: {
+            connectLinkUrl: ctRes.connect_link_url + (slug ? `&app=${slug}` : ""),
+            token: ctRes.token,
+          },
+        });
+      } catch (oauthErr: any) {
+        console.warn("[integrations] OAuth connect token failed:", oauthErr?.message ?? String(oauthErr));
+        return c.json({
+          error: `Failed to initiate OAuth flow: ${oauthErr?.message ?? String(oauthErr)}. Check your Pipedream Connect credentials and try again.`,
+          connection: sanitizeConn(conn),
+        }, 502);
       }
     }
 
