@@ -345,8 +345,10 @@ export const Integrations = {
     api<{ categories: string[]; total: number }>("/api/integrations/categories"),
   connectConfig: () =>
     api<{ configured: boolean; hasProjectId: boolean; hasClientId: boolean; environment: string }>("/api/integrations/connect-config"),
-  verifyOAuth: (id: string) =>
-    api<{ connected: boolean; status: string; connectedAccountId?: string; message?: string; error?: string }>(
-      `/api/integrations/${id}/verify-oauth`, { method: "POST" }
-    ),
+  verifyOAuth: (id: string, token?: string) => {
+    const body = token ? JSON.stringify({ token }) : undefined;
+    return api<{ connected: boolean; status: string; connectedAccountId?: string; message?: string; error?: string }>(
+      `/api/integrations/${id}/verify-oauth`, { method: "POST", body }
+    );
+  },
 };

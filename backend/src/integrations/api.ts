@@ -869,8 +869,12 @@ API.post("/oauth-webhook", async (c) => {
  * After the user returns from the Pipedream OAuth flow, the frontend calls
  * this to check whether the OAuth account was connected. If the webhook
  * already processed it, the connection will have a connectedAccountId and
- * status "connected". If not, this endpoint tries to find the account on
- * Pipedream and save it.
+ * status "connected". If not, this endpoint tries to find the account using
+ * one of these methods (in order):
+ *
+ *   1. Exchange the one-time token from the success_redirect_uri (most direct)
+ *   2. Query Pipedream's listConnectAccounts API (fallback)
+ *   3. Retry with the alternate environment (last resort)
  */
 API.post("/:id/verify-oauth", async (c) => {
   const userId = c.get("userId") as string;
@@ -882,7 +886,6 @@ API.post("/:id/verify-oauth", async (c) => {
     return c.json({ connected: true, status: "connected", connectedAccountId: conn.connectedAccountId });
   }
 
-  // Try to find the account on Pipedream via Connect API
   const connectCfg = getConnectConfig();
   if (!connectCfg) {
     return c.json({ connected: false, status: conn.status, message: "Pipedream Connect not configured" });
@@ -894,7 +897,40 @@ API.post("/:id/verify-oauth", async (c) => {
       connectCfg.clientSecret,
     );
 
-    // Try the configured environment first, then fall back to the other
+    // --- Method 1: Exchange the one-time token (most direct) ---
+    let body: { token?: string } = {};
+    try { body = await c.req.json(); } catch { /* no body */ }
+    const oneTimeToken = body?.token;
+
+    if (oneTimeToken) {
+      try {
+        const exchangeResult = await PipedreamClient.exchangeConnectToken(
+          oauthTokenRes.access_token,
+          connectCfg.projectId,
+          oneTimeToken,
+          connectCfg.environment,
+        );
+        if (exchangeResult?.id) {
+          await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
+            connectedAccountId: exchangeResult.id,
+          });
+          Audit.record({
+            ownerId: userId,
+            actor: "user",
+            action: "integration.oauth_verify",
+            targetId: conn.id,
+            targetType: "integration",
+            metadata: { appSlug: conn.appSlug, connectedAccountId: exchangeResult.id, method: "token_exchange" },
+          });
+          console.log(`[integrations] verify-oauth connected ${conn.id} via token exchange`);
+          return c.json({ connected: true, status: "connected", connectedAccountId: exchangeResult.id });
+        }
+      } catch (exchangeErr: any) {
+        console.warn(`[integrations] token exchange failed, falling back: ${exchangeErr?.message}`);
+      }
+    }
+
+    // --- Method 2: Query Pipedream's connected accounts ---
     const environments = [connectCfg.environment, connectCfg.environment === "production" ? "development" : "production"];
     let matching: any = null;
 
@@ -922,7 +958,7 @@ API.post("/:id/verify-oauth", async (c) => {
         action: "integration.oauth_verify",
         targetId: conn.id,
         targetType: "integration",
-        metadata: { appSlug: conn.appSlug, connectedAccountId: matching.id },
+        metadata: { appSlug: conn.appSlug, connectedAccountId: matching.id, method: "list_accounts" },
       });
       return c.json({ connected: true, status: "connected", connectedAccountId: matching.id });
     }

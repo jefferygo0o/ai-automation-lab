@@ -346,6 +346,38 @@ export const PipedreamClient = {
   },
 
   /**
+   * Exchange a one-time connect token for the connected account details.
+   *
+   * When Pipedream redirects the user back to the successRedirectUri, it
+   * appends ?token=<one-time-token>. This endpoint exchanges that token
+   * for the connected account ID and app slug, which is more reliable than
+   * polling listConnectAccounts.
+   *
+   * https://pipedream.com/docs/connect/api-reference/exchange-connect-token
+   */
+  async exchangeConnectToken(
+    oauthToken: string,
+    projectId: string,
+    token: string,
+    environment = "production",
+  ): Promise<{ id: string; app_slug: string; status: string; external_user_id: string }> {
+    const url = `${PD_API_BASE}/connect/${projectId}/tokens/${token}/exchange`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${oauthToken}`,
+        "Content-Type": "application/json",
+        "x-pd-environment": environment,
+      },
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Pipedream exchangeConnectToken failed (${res.status}): ${body.slice(0, 300)}`);
+    }
+    return await res.json();
+  },
+
+  /**
    * List connected accounts for a user through Pipedream Connect.
    */
   async listConnectAccounts(

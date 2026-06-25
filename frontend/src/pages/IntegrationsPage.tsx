@@ -1150,51 +1150,70 @@ export default function IntegrationsPage() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // Handle oauth_success query param — auto-verify after OAuth redirect
+  // Pipedream appends ?token=<one-time-connect-token> to the successRedirectUri
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const oauthSuccessId = params.get("oauth_success");
     if (!oauthSuccessId) return;
 
-    // Clean the param from the URL so refresh doesn't re-trigger
+    const oneTimeToken = params.get("token") || undefined;
+
+    // Clean params from the URL so refresh doesn't re-trigger
     const cleanUrl = window.location.pathname + window.location.hash;
     window.history.replaceState({}, "", cleanUrl);
 
-    // Find the connection to get the app name
-    const conn = connections.find((c) => c.id === oauthSuccessId);
-    setOauthVerificationState({
-      status: "verifying",
-      connectionId: oauthSuccessId,
-      appName: conn?.app_name,
-    });
+    let cancelled = false;
 
-    Integrations.verifyOAuth(oauthSuccessId)
-      .then((res) => {
-        if (res.connected && res.connectedAccountId) {
-          setOauthVerificationState({
-            status: "success",
-            connectionId: oauthSuccessId,
-            appName: conn?.app_name,
-          });
-          // Refetch connections to show updated status
-          fetchAll();
-        } else {
-          setOauthVerificationState({
-            status: "failed",
-            connectionId: oauthSuccessId,
-            appName: conn?.app_name,
-            error: res.message || "Not connected yet. Try clicking Verify on the connection.",
-          });
+    (async () => {
+      // Find the connection to get the app name (may be empty on first render)
+      const conn = connections.find((c) => c.id === oauthSuccessId);
+
+      setOauthVerificationState({
+        status: "verifying",
+        connectionId: oauthSuccessId,
+        appName: conn?.app_name,
+      });
+
+      // Auto-retry up to 3 times with 3s delay
+      let lastError: string | undefined;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (cancelled) return;
+
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, 3000));
+          if (cancelled) return;
         }
-      })
-      .catch((e: any) => {
+
+        try {
+          const res = await Integrations.verifyOAuth(oauthSuccessId, oneTimeToken);
+          if (res.connected && res.connectedAccountId) {
+            if (cancelled) return;
+            setOauthVerificationState({
+              status: "success",
+              connectionId: oauthSuccessId,
+              appName: conn?.app_name,
+            });
+            fetchAll();
+            return;
+          }
+          lastError = res.message || "Not connected yet. Completing authorization...";
+        } catch (e: any) {
+          lastError = e?.message || "Verification request failed";
+        }
+      }
+
+      if (!cancelled) {
         setOauthVerificationState({
           status: "failed",
           connectionId: oauthSuccessId,
-          appName: conn?.app_name,
-          error: e?.message || "Verification failed. The connection may still be pending.",
+          appName: connections.find((c) => c.id === oauthSuccessId)?.app_name,
+          error: lastError || "Verification timed out. Try clicking 'I've Authorized' on the connection dialog.",
         });
-      });
-  }, []); // Run once on mount
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [fetchAll]);
 
   // Handle connecting an app
   const handleConnect = useCallback((app: PdApp) => {
