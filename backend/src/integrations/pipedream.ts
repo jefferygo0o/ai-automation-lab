@@ -331,8 +331,16 @@ export const PipedreamClient = {
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Pipedream createConnectToken failed (${res.status}): ${body.slice(0, 300)}`);
+      const raw = await res.text().catch(() => "");
+      const detail = raw.length > 0 ? raw.slice(0, 500) : "(empty body)";
+      // Include extra context for 403s — common Pipedream Connect config issues
+      const hint =
+        res.status === 403
+          ? "Check that: (1) PIPEDREAM_PROJECT_ID matches a project under Pipedream → Connect → Projects, (2) PIPEDREAM_ENVIRONMENT (currently '" + env + "') matches the project's environment (development/production), and (3) the OAuth client (PIPEDREAM_CLIENT_ID) is linked to this project in Pipedream's Connect settings."
+          : "";
+      throw new Error(
+        `Pipedream createConnectToken failed (${res.status}): ${detail}. ${hint}`.trim()
+      );
     }
     return await res.json();
   },
