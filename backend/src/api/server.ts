@@ -13,7 +13,7 @@ import { integrationsApi } from "../integrations/api.ts";
 import { rateLimit, incrementHourly } from "../security/ratelimit.ts";
 import { SecretStore } from "../secrets/store.ts";
 import { db } from "../db/index.ts";
-import { AgentStore } from "../agents/registry.ts";
+import { AgentStore, restoreAgentConfigFromDb } from "../agents/registry.ts";
 import { HistoryStore } from "../agents/history.ts";
 import { ChatStore } from "../chats/index.ts";
 import { runAgentTurn, type StreamEvent } from "../agents/runtime.ts";
@@ -22,19 +22,17 @@ import { mcpManager, McpStore } from "../mcp/client.ts";
 import { startMcpOAuthFlow, verifyMcpOAuth, setMcpEnvAndStart } from "../mcp/connect.ts";
 import { MemoryStore } from "../memory/index.ts";
 import { readAgentConfig, AGENTS_DIR } from "../agents/files.ts";
-import { toolRegistry } from "../tools/registry.ts";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { RunStore } from "../runs/index.ts";
 import { sandboxBrowse, sandboxRead, sandboxReadBinary, sandboxWrite, sandboxExec, sandboxDelete } from "../sandbox/api.ts";
 import { resolveSandboxOptions } from "../agents/permissions.ts";
 import { createSandbox } from "../sandbox/index.ts";
-// ---- Web Space (routes management) ----
 import { webSpaceApi } from "../webspace/index.ts";
-// ---- Workspace file browser ----
 import { workspaceApi } from "../workspace/index.ts";
-// ---- Automations ----
 import { automationsApi } from "../automations/index.ts";
-import { join } from "node:path";
-import { readdirSync, readFileSync, existsSync } from "node:fs";
+import { toolRegistry } from "../tools/registry.ts";
+import { readdirSync, readFileSync } from "node:fs";
 import { register } from "../tools/approval_tools.ts";
 import { dashboardApi } from "../dashboard/api.ts";
 import { MCP_MARKETPLACE, findMarketplaceEntry } from "../mcp/marketplace.ts";
@@ -122,6 +120,14 @@ api.get("/api/agents/:id", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
+
+  // If filesystem agent dir is missing but DB has the config,
+  // restore it first so readAgentConfig gets the saved values.
+  // This handles Render deploys where the ephemeral disk is wiped.
+  if (agent.configJson && !existsSync(join(AGENTS_DIR, agent.id))) {
+    restoreAgentConfigFromDb(agent);
+  }
+
   return c.json({ agent, config: readAgentConfig(agent.id) });
 });
 

@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS agents (
   is_public INTEGER NOT NULL DEFAULT 0,
   hash TEXT NOT NULL DEFAULT '',
   runtime TEXT NOT NULL DEFAULT 'bun',
+  config_json TEXT NOT NULL DEFAULT '{}',
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
@@ -52,6 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_agents_owner ON agents(owner_id);
 -- Migration: add hash and runtime columns to agents (PG-only, added post-SQLite)
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS runtime TEXT NOT NULL DEFAULT 'bun';
+
+-- Migration: add config_json column to agents for config persistence across deploys
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS config_json TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS chats (
   id TEXT PRIMARY KEY,

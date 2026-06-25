@@ -606,3 +606,29 @@ Two lab tools are registered for agents:
    labels for `lab_generate_image`, `lab_edit_image`, `lab_generate_video`,
    `lab_transcribe_audio`, `lab_transcribe_video`. New `getToolMedia(result)`
    helper extracts the `media` array from a tool result.
+
+### 2026-06-25: Agent config persistence via Supabase (config_json column)
+
+**Issue:** Agent config (provider, baseUrl, apiKeySecret, model, etc.) was stored exclusively in `config.json` files on the filesystem at `data/agents/<id>/config.json`. On Render, this lives on ephemeral disk that gets wiped on every deploy — so users had to reconfigure their agents after each redeploy.
+
+**Fix:** Added a `config_json TEXT` column to the `agents` table in the Postgres/Supabase schema. Now config is written to both the filesystem AND the DB on every update, and restored from the DB when the filesystem is missing.
+
+**Files changed:**
+- `file backend/src/db/schema.pg.sql` — added `config_json` to CREATE TABLE + migration ALTER TABLE
+- `file backend/src/agents/registry.ts` — all AgentStore methods now persist config_json to DB; new `restoreAgentConfigFromDb()` and `backfillAgentConfigs()` functions
+- `file backend/src/api/server.ts` — GET `/api/agents/:id` restores config from DB before filesystem read when agent directory is missing
+- `file backend/src/server.ts` — calls `backfillAgentConfigs()` at startup (after initSchema)
+- `file backend/src/main.ts` — same backfill call for alternate entry point
+
+**Restoration flow on Render redeploy:**
+1. New container starts, ephemeral disk is empty
+2. `backfillAgentConfigs()` runs at startup — migrates any existing filesystem configs into DB for agents without config_json
+3. When frontend calls `GET /api/agents/:id`, the handler checks if the filesystem agent directory exists
+4. If missing but DB has config_json → restore config.json from DB onto disk using `restoreAgentConfigFromDb()`
+5. `readAgentConfig()` then reads the restored config normally
+
+**What's covered:** provider, baseUrl, apiKeySecret, model, temperature, maxTokens, sandbox, permissions, mcpServers — the full `config.json` content.
+
+**What's NOT covered (same issue may apply, filesystem-only today):**
+- Agent content files (system.md, persona.md, instructions.md, skills.md, user.md, memory.md, tools.md, skills/) — these are still filesystem-only today. The same pattern can be extended if needed.
+- The `backfillAgentConfigs()` startup migration handles existing agents that were created before this change. It's a one-time migration — each agent gets its config_json set once, then subsequent config changes keep it synced.

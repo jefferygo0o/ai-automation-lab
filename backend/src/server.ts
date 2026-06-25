@@ -14,10 +14,15 @@ import { Skills } from "./skills/index.ts";
 import api from "./api/server.ts";
 import { mcpManager } from "./mcp/client.ts";
 import { AutomationScheduler } from "./automations/scheduler.ts";
+import { backfillAgentConfigs } from "./agents/registry.ts";
 
 Skills.init();
 Skills.seedUserSkills();
 await initSchema(); // run PG schema migrations
+
+// Backfill any existing filesystem agent configs into the DB.
+// This runs once and silently skips agents that already have config_json set.
+backfillAgentConfigs().catch((e) => console.error("[lab] config backfill error:", e));
 
 // Boot any saved MCP servers
 mcpManager.startAll().catch((e) => console.warn("[lab] mcp.startAll error:", e));

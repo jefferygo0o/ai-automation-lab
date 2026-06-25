@@ -35,6 +35,7 @@ export interface AgentRecord {
   updatedAt: number;
   hash: string;
   runtime: string;
+  configJson?: string;  // persisted config JSON, restored when filesystem is missing
 }
 
 interface AgentRow {
@@ -46,6 +47,7 @@ interface AgentRow {
   updated_at: number;
   hash: string | null;
   runtime: string | null;
+  config_json: string | null;
 }
 
 function rowToAgent(r: AgentRow): AgentRecord {
@@ -58,6 +60,7 @@ function rowToAgent(r: AgentRow): AgentRecord {
     updatedAt: r.updated_at,
     hash: r.hash ?? "",
     runtime: r.runtime ?? "bun",
+    configJson: r.config_json || undefined,
   };
 }
 
@@ -111,10 +114,11 @@ export const AgentStore = {
     const now = Date.now();
     ensureAgentDir(id);
     const hash = computeAgentHash(id);
+    const configJson = JSON.stringify(readAgentConfig(id));
     await db.prepare(
-      `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, ownerId, name, description, now, now, hash, AGENT_RUNTIME);
-    return { id, ownerId, name, description, createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME };
+      `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime, config_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, ownerId, name, description, now, now, hash, AGENT_RUNTIME, configJson);
+    return { id, ownerId, name, description, createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME, configJson };
   },
 
   async get(id: string, ownerId: string): Promise<AgentRecord | null> {
@@ -150,10 +154,11 @@ export const AgentStore = {
     cloneAgentFs(id, newId);
     const now = Date.now();
     const hash = computeAgentHash(newId);
+    const configJson = JSON.stringify(readAgentConfig(newId));
     await db.prepare(
-      `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(newId, ownerId, newName ?? `${src.name} (copy)`, src.description, now, now, hash, AGENT_RUNTIME);
-    return { id: newId, ownerId, name: newName ?? `${src.name} (copy)`, description: src.description, createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME };
+      `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime, config_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(newId, ownerId, newName ?? `${src.name} (copy)`, src.description, now, now, hash, AGENT_RUNTIME, configJson);
+    return { id: newId, ownerId, name: newName ?? `${src.name} (copy)`, description: src.description, createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME, configJson };
   },
 
   async readFile(id: string, ownerId: string, name: string): Promise<{ name: string; content: string; size: number; mtime: number }> {
@@ -199,7 +204,8 @@ export const AgentStore = {
     const current = readAgentConfig(id);
     const next: AgentConfig = { ...current, ...partial, sandbox: { ...current.sandbox, ...(partial.sandbox ?? {}) } };
     writeAgentConfig(id, next);
-    await db.prepare(`UPDATE agents SET updated_at = ? WHERE id = ?`).run(Date.now(), id);
+    const configJson = JSON.stringify(next);
+    await db.prepare(`UPDATE agents SET config_json = ?, updated_at = ? WHERE id = ?`).run(configJson, Date.now(), id);
     updateHash(id);
     return next;
   },
@@ -236,9 +242,57 @@ export const AgentStore = {
     const id = unpackAgent(pack, newId ? `agent_${newId}` : undefined);
     const now = Date.now();
     const hash = computeAgentHash(id);
+    const configJson = JSON.stringify(readAgentConfig(id));
     await db.prepare(
-      `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, ownerId, pack.manifest?.name ?? "Imported Agent", pack.manifest?.description ?? "", now, now, hash, AGENT_RUNTIME);
-    return { id, ownerId, name: pack.manifest?.name ?? "Imported Agent", description: pack.manifest?.description ?? "", createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME };
+      `INSERT INTO agents (id, owner_id, name, description, created_at, updated_at, hash, runtime, config_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, ownerId, pack.manifest?.name ?? "Imported Agent", pack.manifest?.description ?? "", now, now, hash, AGENT_RUNTIME, configJson);
+    return { id, ownerId, name: pack.manifest?.name ?? "Imported Agent", description: pack.manifest?.description ?? "", createdAt: now, updatedAt: now, hash, runtime: AGENT_RUNTIME, configJson };
   },
 };
+
+/**
+ * Restore an agent's config.json on disk from the DB record.
+ * Called when the filesystem agent directory is missing after a fresh deploy
+ * but the DB record (with config_json) still exists.
+ * Returns true if restored, false if no config_json was available.
+ */
+export function restoreAgentConfigFromDb(agent: AgentRecord): boolean {
+  if (!agent.configJson) return false;
+  try {
+    const parsed = JSON.parse(agent.configJson);
+    ensureAgentDir(agent.id);
+    writeAgentConfig(agent.id, parsed);
+    return true;
+  } catch (e) {
+    console.error(`[agents] failed to restore config for ${agent.id}:`, e);
+    return false;
+  }
+}
+
+/**
+ * Backfill any existing filesystem agent configs into the DB.
+ * Called at server startup for agents that have config_json empty in DB
+ * but have a valid config.json on disk.
+ */
+export async function backfillAgentConfigs(): Promise<number> {
+  let count = 0;
+  try {
+    const rows = await db.prepare(
+      `SELECT id, config_json FROM agents WHERE config_json IS NULL OR config_json = '' OR config_json = '{}'`
+    ).all() as { id: string; config_json: string | null }[];
+    for (const row of rows) {
+      try {
+        const cfg = readAgentConfig(row.id);
+        const json = JSON.stringify(cfg);
+        await db.prepare(`UPDATE agents SET config_json = ?, updated_at = ? WHERE id = ?`)
+          .run(json, Date.now(), row.id);
+        count++;
+      } catch {
+        // agent filesystem dir doesn't exist, skip
+      }
+    }
+  } catch (e) {
+    console.error("[agents] backfillAgentConfigs error:", e);
+  }
+  return count;
+}
