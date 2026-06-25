@@ -104,7 +104,17 @@ api.post("/api/auth/register", async (c) => {
 // ---- Agents ----
 api.get("/api/agents", async (c) => {
   const userId = c.get("userId") as string;
-  return c.json({ agents: await AgentStore.list(userId) });
+  const agents = await AgentStore.list(userId);
+  // After a Render redeploy the ephemeral disk is wiped, so any agent
+  // whose workdir is missing has no on-disk config.json. The DB row
+  // carries the last persisted config_json, so restore it here. Without
+  // this, downstream endpoints (chat, automations) read defaults and 500.
+  for (const a of agents) {
+    if (a.configJson && !existsSync(join(AGENTS_DIR, a.id))) {
+      restoreAgentConfigFromDb(a);
+    }
+  }
+  return c.json({ agents });
 });
 
 api.post("/api/agents", async (c) => {
