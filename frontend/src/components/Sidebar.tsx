@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../state/auth";
+import { Personas as PersonasApi, type Persona } from "../api";
 
 const NAV_SECTIONS = [
   {
@@ -45,6 +46,13 @@ export default function Sidebar({
   const { email, logout } = useAuth();
   const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
+  const [activePersona, setActivePersona] = useState<Persona | null>(null);
+
+  useEffect(() => {
+    PersonasApi.list().then(({ personas }) => {
+      setActivePersona(personas.find((p) => p.isActive) ?? null);
+    }).catch(() => {});
+  }, []);
 
   // Lock body scroll when the mobile drawer is open
   useEffect(() => {
@@ -83,9 +91,23 @@ export default function Sidebar({
             </NavLink>
           ))
         )}
+        {/* Collapsed persona dot */}
+        {activePersona && (
+          <div className="mt-auto w-full flex items-center justify-center h-9"
+            title={`Persona: ${activePersona.name}`}>
+            <span
+              className="w-3 h-3 rounded-full shrink-0"
+              style={{
+                backgroundColor: activePersona.imageHue >= 0
+                  ? `hsl(${activePersona.imageHue}, 65%, 75%)`
+                  : '#a1a1aa',
+              }}
+            />
+          </div>
+        )}
         <button
           onClick={() => setCollapsed(false)}
-          className="mt-auto mb-3 w-full flex items-center justify-center h-9 text-ink-400 hover:text-ink-900"
+          className="mb-3 w-full flex items-center justify-center h-9 text-ink-400 hover:text-ink-900"
           title="Expand sidebar"
         >
           <PanelRightOpen className="w-4 h-4 stroke-[1.5]" />
@@ -185,7 +207,24 @@ export default function Sidebar({
       {/* Footer — user + quick actions */}
       <div className="border-t border-line p-2 space-y-1 shrink-0">
         <div className="px-2.5 py-1.5 flex items-center justify-between gap-2">
-          <span className="text-2xs text-ink-400 font-mono truncate min-w-0 flex-1">{email}</span>
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            {activePersona && (
+              <>
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{
+                    backgroundColor: activePersona.imageHue >= 0
+                      ? `hsl(${activePersona.imageHue}, 65%, 75%)`
+                      : '#a1a1aa',
+                  }}
+                />
+                <span className="text-2xs text-ink-500 font-medium truncate">
+                  {activePersona.name}
+                </span>
+              </>
+            )}
+            <span className="text-2xs text-ink-400 font-mono truncate">{email}</span>
+          </div>
           <button onClick={() => { logout(); onClose?.(); }} className="btn btn-ghost btn-icon shrink-0" title="Sign out">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="stroke-[1.5]">
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />

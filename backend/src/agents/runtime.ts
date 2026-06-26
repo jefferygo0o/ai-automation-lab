@@ -193,8 +193,8 @@ export async function runAgentTurn(
   console.log("[runtime] LLM config baseUrl=%s model=%s hasKey=%s", cfg.baseUrl, cfg.model, apiKey ? "yes (" + apiKey.slice(0, 8) + "..." + apiKey.slice(-4) + ")" : "no");
   
   const llmCfg: LLMConfig = {
-    provider: activePersona?.model ? cfg.provider : "custom",
-    baseUrl: activePersona?.model ? cfg.baseUrl : cfg.baseUrl,
+    provider: cfg.provider,
+    baseUrl: cfg.baseUrl,
     apiKey,
     model: activePersona?.model || cfg.model,
     temperature: cfg.temperature,
