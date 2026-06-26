@@ -101,16 +101,21 @@ function AgentConfigSection() {
   const [showAddModel, setShowAddModel] = useState(false);
   const [modelName, setModelName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
+  const [apiKeySecret, setApiKeySecret] = useState("");
+  const [newSecretName, setNewSecretName] = useState("");
+  const [newSecretValue, setNewSecretValue] = useState("");
   const [modelId, setModelId] = useState("");
   const [imageSupport, setImageSupport] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [secrets, setSecrets] = useState<SecretMeta[]>([]);
 
   async function reload() {
     try {
       const r = await Agents.list();
       setAgents(r.agents ?? []);
+      const s2 = await Secrets.list();
+      setSecrets(s2.secrets ?? []);
     } catch (e: any) {
       setError(e?.message ?? "failed to load agents");
       setAgents([]);
@@ -119,15 +124,21 @@ function AgentConfigSection() {
   useEffect(() => { reload(); }, []);
 
   async function addModel() {
-    if (!modelName.trim() || !baseUrl.trim() || !apiKey.trim() || !modelId.trim()) return;
+    if (!modelName.trim() || !baseUrl.trim() || !modelId.trim()) return;
+    if (!apiKeySecret && !newSecretName.trim()) return;
     setSaving(true);
     setError(null);
     try {
-      const keyName = `${modelName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
-      const trimmedBase = baseUrl.trim();
+      // Resolve which secret name to use
+      let keyName = apiKeySecret;
+      if (!keyName) {
+        keyName = newSecretName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+        if (!newSecretValue.trim()) throw new Error("Secret value is required when creating a new key");
+        await Secrets.save(keyName, newSecretValue.trim());
+      }
       const configJson = {
         provider: "openai",
-        baseUrl: trimmedBase,
+        baseUrl: baseUrl.trim(),
         apiKeySecret: keyName,
         model: modelId.trim(),
         temperature: 0.7,
@@ -154,12 +165,13 @@ function AgentConfigSection() {
         mcpServers: [],
       };
       const { agent } = await Agents.create(modelName.trim());
-      await Secrets.save(keyName, apiKey.trim());
       await Agents.updateConfig(agent.id, configJson as any);
       setShowAddModel(false);
       setModelName("");
       setBaseUrl("");
-      setApiKey("");
+      setApiKeySecret("");
+      setNewSecretName("");
+      setNewSecretValue("");
       setModelId("");
       setImageSupport(false);
       await reload();
@@ -212,7 +224,18 @@ function AgentConfigSection() {
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-ink-700">API Key</label>
-                <input className="input text-sm font-mono" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." />
+                <select className="input text-sm font-mono" value={apiKeySecret} onChange={(e) => setApiKeySecret(e.target.value)}>
+                  <option value="">— Create new secret —</option>
+                  {secrets.map((sec) => (
+                    <option key={sec.id} value={sec.name}>{sec.name}</option>
+                  ))}
+                </select>
+                {!apiKeySecret && (
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <input className="input text-xs font-mono" value={newSecretName} onChange={(e) => setNewSecretName(e.target.value)} placeholder="SECRET_NAME (e.g. OPENAI_API_KEY)" />
+                    <input className="input text-xs font-mono" type="password" value={newSecretValue} onChange={(e) => setNewSecretValue(e.target.value)} placeholder="sk-..." />
+                  </div>
+                )}
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-medium text-ink-700">Model ID</label>
@@ -236,7 +259,7 @@ function AgentConfigSection() {
 
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => { setShowAddModel(false); setError(null); }} className="btn btn-sm">Cancel</button>
-              <button onClick={addModel} disabled={saving || !modelName.trim() || !baseUrl.trim() || !apiKey.trim() || !modelId.trim()} className="btn btn-primary btn-sm">
+              <button onClick={addModel} disabled={saving || !modelName.trim() || !baseUrl.trim() || !modelId.trim() || (!apiKeySecret && (!newSecretName.trim() || !newSecretValue.trim()))} className="btn btn-primary btn-sm">
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 Add
               </button>
