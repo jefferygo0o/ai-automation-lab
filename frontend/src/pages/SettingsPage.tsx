@@ -61,8 +61,9 @@ import {
   Sparkles, Scale, Plus, Trash2, Check, X,
   ToggleLeft, ToggleRight, ArrowUp, ArrowDown,
   Monitor, KeyRound, History, Download, RotateCcw,
-  Loader2, AlertCircle, Cpu, Server,
+  Loader2, AlertCircle, Cpu, Server, Bot, Pencil,
 } from "lucide-react";
+import AgentConfigForm from "../components/AgentConfigForm";
 import {
   Personas, type Persona,
   Rules, type Rule,
@@ -95,88 +96,106 @@ function SettingsAI() {
 
 /** Bring Your Own Key / Agent provider configuration — mirrors Zo's AI → BYOK panel */
 function AgentConfigSection() {
-  const [secrets, setSecrets] = useState<SecretMeta[]>([]);
-  const [showAdd, setShowAdd] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [newValue, setNewValue] = useState("");
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [editing, setEditing] = useState<{ id: string; name: string; config: AgentConfig } | null>(null);
+  const [showNew, setShowNew] = useState(false);
 
   async function reload() {
-    try { const s = await Secrets.list(); setSecrets(s.secrets ?? [] as any); } catch { setSecrets([]); }
+    try { const { agents } = await Agents.list(); setAgents(agents); } catch { setAgents([]); }
   }
   useEffect(() => { reload(); }, []);
 
-  async function addSecret() {
-    if (!newName.trim() || !newValue.trim()) return;
-    await Secrets.save(newName.trim(), newValue.trim());
-    setNewName(""); setNewValue(""); setShowAdd(false);
+  async function startEdit(a: Agent) {
+    try {
+      const { config } = await Agents.get(a.id);
+      setEditing({ id: a.id, name: a.name, config });
+    } catch (e) { console.error(e); }
+  }
+
+  async function deleteAgent(a: Agent) {
+    if (!confirm(`Delete agent "${a.name}"? This removes all its files and history.`)) return;
+    await Agents.delete(a.id);
     await reload();
   }
 
-  async function delSecret(name: string) {
-    if (!confirm(`Delete secret "${name}"?`)) return;
-    await Secrets.remove(name); await reload();
+  async function createAgent() {
+    const name = prompt("Name for the new agent:");
+    if (!name?.trim()) return;
+    const { agent } = await Agents.create(name.trim());
+    await reload();
+    await startEdit(agent);
   }
 
-  // Detect provider keys from secret names
-  const providerKeys = secrets.filter((s) =>
-    /API_KEY|api_key|OPENAI|ANTHROPIC|GEMINI|GROQ|OPENROUTER|AZURE|DEEPSEEK|MISTRAL|TOGETHER/i.test(s.name)
-  );
-  const otherSecrets = secrets.filter((s) => !providerKeys.includes(s));
+  if (editing) {
+    return (
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
+              <Cpu className="w-3.5 h-3.5 stroke-[1.75]" /> Editing: {editing.name}
+            </h2>
+            <p className="text-2xs text-ink-400 mt-0.5">
+              Configure provider, model, and parameters for this agent.
+            </p>
+          </div>
+          <button onClick={() => setEditing(null)} className="btn btn-ghost btn-xs">
+            ← Back to agents
+          </button>
+        </div>
+        <AgentConfigForm
+          agentId={editing.id}
+          initialConfig={editing.config}
+          onSaved={async () => { await reload(); setEditing(null); }}
+        />
+      </section>
+    );
+  }
 
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
-            <Cpu className="w-3.5 h-3.5 stroke-[1.75]" /> Bring Your Own Key
+            <Cpu className="w-3.5 h-3.5 stroke-[1.75]" /> AI Agents &amp; Models
           </h2>
           <p className="text-2xs text-ink-400 mt-0.5">
-            Connect AI model providers by adding API keys. Agents reference these keys by name in their config.
+            Bring your own key — configure provider, model, and parameters per agent.
           </p>
         </div>
-        {!showAdd && (
-          <button onClick={() => setShowAdd(true)} className="btn btn-outline btn-xs">
-            <Plus className="w-3 h-3" /> Add Key
-          </button>
-        )}
+        <button onClick={createAgent} className="btn btn-outline btn-xs">
+          <Plus className="w-3 h-3" /> New Agent
+        </button>
       </div>
 
-      {showAdd && (
-        <div className="border border-line rounded bg-paper p-4 mb-3 space-y-2">
-          <input value={newName} onChange={(e) => setNewName(e.target.value)}
-            placeholder="Key name — e.g. OPENAI_API_KEY" className="input text-xs font-mono" />
-          <input value={newValue} onChange={(e) => setNewValue(e.target.value)} type="password"
-            placeholder="API key value" className="input text-xs font-mono" />
-          <div className="flex justify-end gap-2">
-            <button onClick={() => setShowAdd(false)} className="btn btn-xs">Cancel</button>
-            <button onClick={addSecret} disabled={!newName.trim() || !newValue.trim()} className="btn btn-primary btn-xs">Save</button>
-          </div>
-        </div>
-      )}
-
       <div className="space-y-1">
-        {providerKeys.length > 0 && (
-          <>
-            <div className="text-2xs text-ink-400 uppercase tracking-wider mb-1">Provider Keys</div>
-            {providerKeys.map((s) => (
-              <div key={s.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-2">
-                <Server className="w-3 h-3 stroke-[1.75] text-indigo-500 shrink-0" />
-                <span className="text-xs font-mono text-ink-900 flex-1">{s.name}</span>
-                <span className="text-2xs text-ink-300">●●●●●●</span>
-                <button onClick={() => delSecret(s.name)} className="btn btn-ghost btn-xs text-rose-700"><Trash2 className="w-3 h-3" /></button>
-              </div>
-            ))}
-          </>
-        )}
-        {providerKeys.length === 0 && !showAdd && (
-          <div className="text-xs text-ink-400 italic text-center py-4">
-            No provider keys configured. Add an API key to connect a model provider.
+        {agents.length === 0 && (
+          <div className="text-xs text-ink-400 italic text-center py-6">
+            No agents yet. Create one to configure its provider and model.
           </div>
         )}
+        {agents.map((a) => (
+          <div key={a.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-2">
+            <Bot className="w-3.5 h-3.5 stroke-[1.75] text-ink-500 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-medium text-ink-900 truncate">{a.name}</div>
+              {a.description && <div className="text-[11px] text-ink-400 truncate">{a.description}</div>}
+              <div className="text-2xs text-ink-300 font-mono mt-0.5">{a.id}</div>
+            </div>
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button onClick={() => startEdit(a)} className="btn btn-ghost btn-xs text-ink-500 hover:text-ink-900" title="Edit provider config">
+                <Pencil className="w-3 h-3" /> Edit
+              </button>
+              <button onClick={() => deleteAgent(a)} className="btn btn-ghost btn-xs text-rose-700" title="Delete agent">
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </section>
   );
 }
+
 
 function PersonasSection() {
   const [personas, setPersonas] = useState<Persona[]>([]);

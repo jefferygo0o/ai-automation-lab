@@ -33,6 +33,7 @@ const NAV_SECTIONS = [
     label: "System",
     items: [
       { to: "/settings", label: "Settings", icon: Wrench },
+      { to: "/browser", label: "Browser", icon: Compass },
     ],
   },
 ];
