@@ -378,3 +378,34 @@ export const Personas = {
     api<{ persona: Persona }>(`/api/personas/${id}/active`, { method: "POST" }),
   delete: (id: string) => api<{ ok: boolean }>(`/api/personas/${id}`, { method: "DELETE" }),
 };
+
+export const HistoryStore = {
+  get: (id: string) => api<{ history: { id: string; agentId: string; filename: string; content: string; createdAt: number } }>(`/api/history/${id}`),
+};
+
+// ---- Timeline ----
+export interface TimelineEvent {
+  type: "file_change" | "run" | "snapshot";
+  agentId: string;
+  createdAt: number;
+  // file_change
+  filename?: string;
+  versionId?: string;
+  content?: string;
+  // run
+  runId?: string;
+  status?: string;
+  chatId?: string;
+  totalTokens?: number;
+  // snapshot
+  snapshotId?: string;
+  fileCount?: number;
+  byteSize?: number;
+  trigger?: string;
+}
+
+export const Timeline = {
+  list: (limit = 50) => api<{ timeline: TimelineEvent[]; total: number }>(`/api/timeline?limit=${limit}`),
+  diff: (id1: string, id2: string) =>
+    api<{ a: any; b: any; diff: Array<{ type: string; value: string }> }>(`/api/history/${id1}/diff/${id2}`),
+};

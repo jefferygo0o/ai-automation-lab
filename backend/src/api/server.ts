@@ -326,6 +326,87 @@ api.post("/api/snapshots/restore-all", async (c) => {
   return c.json(result);
 });
 
+// ---- Diff (file version comparison) ----
+api.get("/api/history/:id", async (c) => {
+  const { HistoryStore } = await import("../agents/history.ts");
+  const { computeDiff } = await import("../diff/index.ts");
+  const h1 = await HistoryStore.get(c.req.param("id"));
+  if (!h1) return c.json({ error: "version not found" }, 404);
+  return c.json({ a: h1, diff: null });
+});
+
+api.get("/api/history/:id1/diff/:id2", async (c) => {
+  const { HistoryStore } = await import("../agents/history.ts");
+  const { computeDiff } = await import("../diff/index.ts");
+  const h1 = await HistoryStore.get(c.req.param("id1"));
+  const h2 = await HistoryStore.get(c.req.param("id2"));
+  if (!h1 || !h2) return c.json({ error: "version not found" }, 404);
+  const diff = computeDiff(h1.content, h2.content);
+  return c.json({ a: h1, b: h2, diff });
+});
+
+// ---- Timeline (unified view of runs + snapshots + file changes) ----
+api.get("/api/timeline", async (c) => {
+  const userId = c.get("userId") as string;
+  const limit = Number(c.req.query("limit") ?? 50);
+  const { HistoryStore } = await import("../agents/history.ts");
+  const { RunStore } = await import("../runs/index.ts");
+  const { listSnapshots } = await import("../snapshots/index.ts");
+  const { AgentStore } = await import("../agents/registry.ts");
+
+  const agents = await AgentStore.list(userId);
+  const agentIds = agents.map((a: any) => a.id);
+
+  // File changes across all user agents
+  const fileEvents = [];
+  for (const id of agentIds) {
+    const hist = await HistoryStore.list(id);
+    fileEvents.push(...hist.map((h: any) => ({
+      type: "file_change" as const,
+      agentId: h.agentId,
+      filename: h.filename,
+      versionId: h.id,
+      content: h.content.slice(0, 200),
+      createdAt: h.createdAt,
+    })));
+  }
+
+  // Runs across all user agents
+  const runs = await RunStore.listForUser(userId, limit);
+  const runEvents = runs.map((r: any) => ({
+    type: "run" as const,
+    agentId: r.agentId,
+    runId: r.id,
+    status: r.status,
+    chatId: r.chatId,
+    totalTokens: r.totalTokens,
+    createdAt: r.startedAt,
+    finishedAt: r.finishedAt,
+  }));
+
+  // Snapshots across all user agents
+  const snapEvents: any[] = [];
+  for (const id of agentIds) {
+    const snaps = await listSnapshots(id, 5);
+    snapEvents.push(...snaps.map((s: any) => ({
+      type: "snapshot" as const,
+      agentId: s.agentId,
+      snapshotId: s.id,
+      fileCount: s.fileCount,
+      byteSize: s.byteSize,
+      trigger: s.trigger,
+      createdAt: s.createdAt,
+    })));
+  }
+
+  // Merge and sort by createdAt desc
+  const all = [...fileEvents, ...runEvents, ...snapEvents]
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, limit);
+
+  return c.json({ timeline: all, total: all.length });
+});
+
 // ---- Chats ----
 api.get("/api/chats", async (c) => {
   const userId = c.get("userId") as string;
