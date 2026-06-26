@@ -96,106 +96,170 @@ function SettingsAI() {
 
 /** Bring Your Own Key / Agent provider configuration — mirrors Zo's AI → BYOK panel */
 function AgentConfigSection() {
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [editing, setEditing] = useState<{ id: string; name: string; config: AgentConfig } | null>(null);
-  const [showNew, setShowNew] = useState(false);
+  const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+  const [showAddModel, setShowAddModel] = useState(false);
+  const [modelName, setModelName] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [modelId, setModelId] = useState("");
+  const [imageSupport, setImageSupport] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   async function reload() {
-    try { const { agents } = await Agents.list(); setAgents(agents); } catch { setAgents([]); }
+    try {
+      const s = await Secrets.list();
+      setSecrets(s.secrets ?? []);
+    } catch {
+      setSecrets([]);
+    }
   }
   useEffect(() => { reload(); }, []);
 
-  async function startEdit(a: Agent) {
+  async function addModel() {
+    if (!modelName.trim() || !baseUrl.trim() || !apiKey.trim() || !modelId.trim()) return;
+    setSaving(true);
     try {
-      const { config } = await Agents.get(a.id);
-      setEditing({ id: a.id, name: a.name, config });
-    } catch (e) { console.error(e); }
+      const keyName = `${modelName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
+      const configKey = `${keyName}__CONFIG`;
+      const configPayload = {
+        provider: "custom",
+        baseUrl: baseUrl.trim(),
+        apiKeySecret: keyName,
+        model: modelId.trim(),
+        supports_images: imageSupport,
+      };
+      await Secrets.save(keyName, apiKey.trim());
+      await Secrets.save(configKey, JSON.stringify(configPayload));
+      setShowAddModel(false);
+      setModelName("");
+      setBaseUrl("");
+      setApiKey("");
+      setModelId("");
+      setImageSupport(false);
+      await reload();
+    } finally {
+      setSaving(false);
+    }
   }
 
-  async function deleteAgent(a: Agent) {
-    if (!confirm(`Delete agent "${a.name}"? This removes all its files and history.`)) return;
-    await Agents.delete(a.id);
-    await reload();
-  }
-
-  async function createAgent() {
-    const name = prompt("Name for the new agent:");
-    if (!name?.trim()) return;
-    const { agent } = await Agents.create(name.trim());
-    await reload();
-    await startEdit(agent);
-  }
-
-  if (editing) {
-    return (
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
-              <Cpu className="w-3.5 h-3.5 stroke-[1.75]" /> Editing: {editing.name}
-            </h2>
-            <p className="text-2xs text-ink-400 mt-0.5">
-              Configure provider, model, and parameters for this agent.
-            </p>
-          </div>
-          <button onClick={() => setEditing(null)} className="btn btn-ghost btn-xs">
-            ← Back to agents
-          </button>
-        </div>
-        <AgentConfigForm
-          agentId={editing.id}
-          initialConfig={editing.config}
-          onSaved={async () => { await reload(); setEditing(null); }}
-        />
-      </section>
-    );
-  }
+  const models = secrets
+    .filter((s) => /_API_KEY$/.test(s.name) && !s.name.endsWith("__CONFIG"))
+    .map((s) => {
+      const cfg = secrets.find((x) => x.name === `${s.name}__CONFIG`);
+      let parsed: any = null;
+      try {
+        parsed = cfg ? JSON.parse((cfg as any).value ?? "{}") : null;
+      } catch {
+        parsed = null;
+      }
+      return { secret: s, config: parsed };
+    });
 
   return (
     <section>
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
-            <Cpu className="w-3.5 h-3.5 stroke-[1.75]" /> AI Agents &amp; Models
+            <Cpu className="w-3.5 h-3.5 stroke-[1.75]" /> AI Agents & Models
           </h2>
           <p className="text-2xs text-ink-400 mt-0.5">
-            Bring your own key — configure provider, model, and parameters per agent.
+            Add new model connections with a name, base URL, API key, and model ID.
           </p>
         </div>
-        <button onClick={createAgent} className="btn btn-outline btn-xs">
-          <Plus className="w-3 h-3" /> New Agent
-        </button>
+        {!showAddModel && (
+          <button onClick={() => setShowAddModel(true)} className="btn btn-outline btn-xs">
+            <Plus className="w-3 h-3" /> Add Model
+          </button>
+        )}
       </div>
 
-      <div className="space-y-1">
-        {agents.length === 0 && (
-          <div className="text-xs text-ink-400 italic text-center py-6">
-            No agents yet. Create one to configure its provider and model.
+      {showAddModel && (
+        <div className="fixed inset-0 z-40 bg-ink-900/30 backdrop-blur-[1px] flex items-center justify-center p-4" onClick={() => setShowAddModel(false)}>
+          <div className="w-full max-w-md rounded-lg border border-line bg-paper p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4">
+              <h3 className="text-base font-semibold text-ink-900">Add new model</h3>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-ink-700">Name</label>
+                <input className="input text-sm" value={modelName} onChange={(e) => setModelName(e.target.value)} placeholder="My Model" autoFocus />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-ink-700">Base URL</label>
+                <input className="input text-sm font-mono" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-ink-700">API Key</label>
+                <input className="input text-sm font-mono" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-ink-700">Model ID</label>
+                <input className="input text-sm font-mono" value={modelId} onChange={(e) => setModelId(e.target.value)} placeholder="gpt-4.1" />
+              </div>
+              <div className="flex items-center justify-between rounded border border-line px-3 py-2">
+                <div>
+                  <div className="text-xs font-medium text-ink-700">Image support</div>
+                  <div className="text-2xs text-ink-400">{imageSupport ? "Images enabled." : "Text only."}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImageSupport((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${imageSupport ? 'bg-emerald-500' : 'bg-ink-300'}`}
+                >
+                  <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-paper transition-transform ${imageSupport ? 'translate-x-5' : 'translate-x-1'}`} />
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setShowAddModel(false)} className="btn btn-sm">Cancel</button>
+              <button onClick={addModel} disabled={saving || !modelName.trim() || !baseUrl.trim() || !apiKey.trim() || !modelId.trim()} className="btn btn-primary btn-sm">
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                Add
+              </button>
+            </div>
           </div>
-        )}
-        {agents.map((a) => (
-          <div key={a.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-2">
-            <Bot className="w-3.5 h-3.5 stroke-[1.75] text-ink-500 shrink-0" />
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {models.map(({ secret, config }) => (
+          <div key={secret.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-3">
+            <Bot className="w-3.5 h-3.5 stroke-[1.75] text-indigo-500 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-ink-900 truncate">{a.name}</div>
-              {a.description && <div className="text-[11px] text-ink-400 truncate">{a.description}</div>}
-              <div className="text-2xs text-ink-300 font-mono mt-0.5">{a.id}</div>
+              <div className="text-xs font-medium text-ink-900 truncate">
+                {secret.name.replace(/_API_KEY$/, '').replace(/_/g, ' ')}
+              </div>
+              {config && (
+                <div className="text-2xs text-ink-400 font-mono truncate">
+                  {config.model} · {config.baseUrl}
+                </div>
+              )}
             </div>
-            <div className="flex items-center gap-0.5 shrink-0">
-              <button onClick={() => startEdit(a)} className="btn btn-ghost btn-xs text-ink-500 hover:text-ink-900" title="Edit provider config">
-                <Pencil className="w-3 h-3" /> Edit
-              </button>
-              <button onClick={() => deleteAgent(a)} className="btn btn-ghost btn-xs text-rose-700" title="Delete agent">
-                <Trash2 className="w-3 h-3" />
-              </button>
-            </div>
+            {config?.supports_images && <span className="text-2xs bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">Vision</span>}
+            <button
+              onClick={async () => {
+                if (!confirm(`Delete model "${secret.name}"?`)) return;
+                await Secrets.remove(secret.name);
+                await Secrets.remove(`${secret.name}__CONFIG`).catch(() => {});
+                await reload();
+              }}
+              className="btn btn-ghost btn-xs text-rose-700"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
           </div>
         ))}
+        {models.length === 0 && !showAddModel && (
+          <div className="text-xs text-ink-400 italic text-center py-6">
+            No models configured. Click <span className="font-medium text-ink-500">Add Model</span> to connect one.
+          </div>
+        )}
       </div>
     </section>
   );
 }
-
 
 function PersonasSection() {
   const [personas, setPersonas] = useState<Persona[]>([]);
