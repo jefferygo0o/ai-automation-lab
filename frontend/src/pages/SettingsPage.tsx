@@ -1,0 +1,577 @@
+import { useLocation, useNavigate } from "react-router-dom";
+import {
+  Brain, Wrench, Settings, ChevronRight,
+} from "lucide-react";
+
+const TABS = [
+  { id: "ai", label: "AI", icon: Brain, sub: "Personas, rules & AI provider keys" },
+  { id: "tools", label: "Tools", icon: Wrench, sub: "External services & connections" },
+  { id: "advanced", label: "Advanced", icon: Settings, sub: "Snapshots, system stats & reset" },
+];
+
+export default function SettingsPage() {
+  const loc = useLocation();
+  const navigate = useNavigate();
+  const hash = loc.hash.replace("#", "") || "ai";
+  const activeTab = TABS.find((t) => t.id === hash) ?? TABS[0];
+
+  return (
+    <div className="p-3 sm:p-6 lg:p-8 max-w-4xl mx-auto">
+      <div className="mb-6">
+        <div className="eyebrow">System</div>
+        <h1 className="serif text-3xl text-ink-900">Settings</h1>
+        <p className="text-sm text-ink-400 mt-1">
+          Configure agent providers, personas, rules, secrets, and system settings.
+        </p>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-line mb-6">
+        {TABS.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab.id === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => navigate(`/settings#${tab.id}`)}
+              className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                isActive
+                  ? "border-ink-900 text-ink-900"
+                  : "border-transparent text-ink-400 hover:text-ink-700"
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5 stroke-[1.75]" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab content */}
+      <div>
+        {activeTab.id === "ai" && <SettingsAI />}
+        {activeTab.id === "advanced" && <SettingsAdvanced />}
+      </div>
+    </div>
+  );
+}
+
+import { useEffect, useState } from "react";
+import {
+  Sparkles, Scale, Plus, Trash2, Check, X,
+  ToggleLeft, ToggleRight, ArrowUp, ArrowDown,
+  Monitor, KeyRound, History, Download, RotateCcw,
+  Loader2, AlertCircle, Cpu, Server,
+} from "lucide-react";
+import {
+  Personas, type Persona,
+  Rules, type Rule,
+  Secrets, type SecretMeta,
+  type DashboardStats,
+  Dashboard,
+} from "../api";
+
+const PASTEL_HUES = [
+  { hue: 0, name: "Rose" }, { hue: 30, name: "Coral" },
+  { hue: 60, name: "Gold" }, { hue: 120, name: "Mint" },
+  { hue: 180, name: "Teal" }, { hue: 210, name: "Sky" },
+  { hue: 260, name: "Lavender" }, { hue: 300, name: "Mauve" },
+  { hue: 330, name: "Blush" },
+];
+
+const RULE_CATEGORIES = ["communication", "safety", "coding", "style", "general"];
+
+// ─── AI Tab: Agent Config + Personas + Rules ────────────────────────
+
+function SettingsAI() {
+  return (
+    <div className="space-y-8">
+      <AgentConfigSection />
+      <PersonasSection />
+      <RulesSection />
+    </div>
+  );
+}
+
+/** Bring Your Own Key / Agent provider configuration — mirrors Zo's AI → BYOK panel */
+function AgentConfigSection() {
+  const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newValue, setNewValue] = useState("");
+
+  async function reload() {
+    try { const s = await Secrets.list(); setSecrets(s.secrets ?? [] as any); } catch { setSecrets([]); }
+  }
+  useEffect(() => { reload(); }, []);
+
+  async function addSecret() {
+    if (!newName.trim() || !newValue.trim()) return;
+    await Secrets.save(newName.trim(), newValue.trim());
+    setNewName(""); setNewValue(""); setShowAdd(false);
+    await reload();
+  }
+
+  async function delSecret(name: string) {
+    if (!confirm(`Delete secret "${name}"?`)) return;
+    await Secrets.remove(name); await reload();
+  }
+
+  // Detect provider keys from secret names
+  const providerKeys = secrets.filter((s) =>
+    /API_KEY|api_key|OPENAI|ANTHROPIC|GEMINI|GROQ|OPENROUTER|AZURE|DEEPSEEK|MISTRAL|TOGETHER/i.test(s.name)
+  );
+  const otherSecrets = secrets.filter((s) => !providerKeys.includes(s));
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
+            <Cpu className="w-3.5 h-3.5 stroke-[1.75]" /> Bring Your Own Key
+          </h2>
+          <p className="text-2xs text-ink-400 mt-0.5">
+            Connect AI model providers by adding API keys. Agents reference these keys by name in their config.
+          </p>
+        </div>
+        {!showAdd && (
+          <button onClick={() => setShowAdd(true)} className="btn btn-outline btn-xs">
+            <Plus className="w-3 h-3" /> Add Key
+          </button>
+        )}
+      </div>
+
+      {showAdd && (
+        <div className="border border-line rounded bg-paper p-4 mb-3 space-y-2">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)}
+            placeholder="Key name — e.g. OPENAI_API_KEY" className="input text-xs font-mono" />
+          <input value={newValue} onChange={(e) => setNewValue(e.target.value)} type="password"
+            placeholder="API key value" className="input text-xs font-mono" />
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowAdd(false)} className="btn btn-xs">Cancel</button>
+            <button onClick={addSecret} disabled={!newName.trim() || !newValue.trim()} className="btn btn-primary btn-xs">Save</button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1">
+        {providerKeys.length > 0 && (
+          <>
+            <div className="text-2xs text-ink-400 uppercase tracking-wider mb-1">Provider Keys</div>
+            {providerKeys.map((s) => (
+              <div key={s.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-2">
+                <Server className="w-3 h-3 stroke-[1.75] text-indigo-500 shrink-0" />
+                <span className="text-xs font-mono text-ink-900 flex-1">{s.name}</span>
+                <span className="text-2xs text-ink-300">●●●●●●</span>
+                <button onClick={() => delSecret(s.name)} className="btn btn-ghost btn-xs text-rose-700"><Trash2 className="w-3 h-3" /></button>
+              </div>
+            ))}
+          </>
+        )}
+        {providerKeys.length === 0 && !showAdd && (
+          <div className="text-xs text-ink-400 italic text-center py-4">
+            No provider keys configured. Add an API key to connect a model provider.
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function PersonasSection() {
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [name, setName] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [model, setModel] = useState("");
+  const [imageHue, setImageHue] = useState(-1);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editPrompt, setEditPrompt] = useState("");
+  const [editName, setEditName] = useState("");
+
+  async function reload() {
+    try {
+      const { personas: p } = await Personas.list();
+      setPersonas(p);
+    } catch { setPersonas([]); }
+  }
+  useEffect(() => { reload(); }, []);
+
+  async function create() {
+    if (!name.trim() || !prompt.trim()) return;
+    await Personas.create(name.trim(), prompt.trim(), {
+      imageHue: imageHue >= 0 ? imageHue : undefined,
+      model: model.trim() || undefined,
+    });
+    setName(""); setPrompt(""); setModel(""); setImageHue(-1); setShowCreate(false);
+    await reload();
+  }
+
+  async function setActive(id: string) { await Personas.setActive(id); await reload(); }
+
+  async function updateName(id: string) {
+    if (!editName.trim()) return;
+    await Personas.update(id, { name: editName.trim() });
+    setEditingId(null); await reload();
+  }
+
+  async function updatePrompt(id: string) {
+    if (!editPrompt.trim()) return;
+    await Personas.update(id, { prompt: editPrompt.trim() });
+    setEditingId(null); await reload();
+  }
+
+  async function del(id: string) {
+    const p = personas.find((x) => x.id === id);
+    if (!p) return;
+    if (!confirm(`Delete persona "${p.name}"?`)) return;
+    await Personas.delete(id); await reload();
+  }
+
+  const activePersona = personas.find((p) => p.isActive);
+
+  function hueDot(hue: number) {
+    return <span className="inline-block w-3 h-3 rounded-full shrink-0"
+      style={{ backgroundColor: `hsl(${hue}, 70%, 75%)` }} />;
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 stroke-[1.75]" /> Personas
+          </h2>
+          <p className="text-2xs text-ink-400 mt-0.5">
+            Personas shape how your agents respond. Switch between them to change tone, style, or expertise.
+          </p>
+        </div>
+        {!showCreate && (
+          <button onClick={() => setShowCreate(true)} className="btn btn-outline btn-xs">
+            <Plus className="w-3 h-3" /> New
+          </button>
+        )}
+      </div>
+
+      {activePersona && (
+        <div className="border border-clay-300 bg-clay-50 rounded px-3 py-2 mb-3 flex items-center gap-2 text-xs">
+          {activePersona.imageHue >= 0 ? hueDot(activePersona.imageHue) : <Sparkles className="w-3 h-3 stroke-[1.75] text-clay-700" />}
+          <span className="text-clay-600">Active:</span>
+          <span className="font-medium text-clay-900">{activePersona.name}</span>
+        </div>
+      )}
+
+      {showCreate && (
+        <div className="border border-line rounded bg-paper p-4 mb-3 space-y-2">
+          <input value={name} onChange={(e) => setName(e.target.value)}
+            placeholder="Name" className="input text-sm" />
+          <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Prompt — describes how this persona behaves"
+            className="input min-h-[80px] resize-y font-mono text-xs" />
+          <div className="grid grid-cols-2 gap-2">
+            <input value={model} onChange={(e) => setModel(e.target.value)}
+              placeholder="Model override (optional)" className="input font-mono text-xs" />
+            <div className="flex gap-1 flex-wrap">
+              <button onClick={() => setImageHue(-1)}
+                className={`w-6 h-6 rounded-full border flex items-center justify-center text-[9px] ${imageHue < 0 ? "border-ink-900 ring-1 ring-ink-300" : "border-line"}`}>
+                <Monitor className="w-2.5 h-2.5 stroke-[1.75]" />
+              </button>
+              {PASTEL_HUES.map((h) => (
+                <button key={h.hue} onClick={() => setImageHue(h.hue)}
+                  className={`w-6 h-6 rounded-full border ${imageHue === h.hue ? "border-ink-900 ring-1 ring-ink-300" : "border-line"}`}
+                  style={{ backgroundColor: `hsl(${h.hue}, 70%, 75%)` }} title={h.name} />
+              ))}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowCreate(false)} className="btn btn-xs">Cancel</button>
+            <button onClick={create} disabled={!name.trim() || !prompt.trim()} className="btn btn-primary btn-xs">Create</button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {personas.map((p) => (
+          <div key={p.id} className={`border rounded bg-paper px-3 py-2 flex items-center gap-2 ${p.isActive ? "border-clay-500 ring-1 ring-clay-300" : "border-line"}`}>
+            {p.imageHue >= 0 ? (
+              <span className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center"
+                style={{ backgroundColor: `hsl(${p.imageHue}, 65%, 75%)` }}>
+                <span className="text-[10px] font-bold" style={{ color: `hsl(${p.imageHue}, 40%, 25%)` }}>{p.name.charAt(0).toUpperCase()}</span>
+              </span>
+            ) : (
+              <span className="w-6 h-6 rounded-full shrink-0 bg-paper-300 flex items-center justify-center">
+                <Sparkles className="w-3 h-3 stroke-[1.75] text-ink-500" />
+              </span>
+            )}
+            {editingId === p.id ? (
+              <div className="flex-1 space-y-1">
+                <input value={editName} onChange={(e) => setEditName(e.target.value)} className="input text-xs" autoFocus />
+                <textarea value={editPrompt} onChange={(e) => setEditPrompt(e.target.value)} className="input text-[11px] min-h-[40px] resize-y font-mono" />
+                <div className="flex gap-1">
+                  <button onClick={() => { updateName(p.id); updatePrompt(p.id); }} className="btn btn-primary btn-xs"><Check className="w-2.5 h-2.5" /> Save</button>
+                  <button onClick={() => setEditingId(null)} className="btn btn-xs"><X className="w-2.5 h-2.5" /> Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-medium text-ink-900">{p.name}</span>
+                    {p.isActive && <span className="text-2xs bg-clay-100 text-clay-800 px-1 py-0.5 rounded-full">Active</span>}
+                  </div>
+                  {p.model && <div className="text-2xs text-ink-400 font-mono">{p.model}</div>}
+                  <div className="text-[11px] text-ink-500 line-clamp-1">{p.prompt}</div>
+                </div>
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <button onClick={() => { setEditingId(p.id); setEditName(p.name); setEditPrompt(p.prompt); }}
+                    className="btn btn-ghost btn-xs text-ink-400 hover:text-ink-700">Edit</button>
+                  {!p.isActive && (
+                    <button onClick={() => setActive(p.id)} className="btn btn-ghost btn-xs text-amber-700" title="Activate">
+                      <ToggleRight className="w-3 h-3" />
+                    </button>
+                  )}
+                  <button onClick={() => del(p.id)} className="btn btn-ghost btn-xs text-rose-700"><Trash2 className="w-3 h-3" /></button>
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+        {personas.length === 0 && !showCreate && (
+          <div className="text-xs text-ink-400 italic text-center py-6">No personas yet. Create one to define how your AI responds.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RulesSection() {
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const [condition, setCondition] = useState("");
+  const [category, setCategory] = useState("general");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editInstruction, setEditInstruction] = useState("");
+  const [editCondition, setEditCondition] = useState("");
+
+  async function reload() {
+    try { const r = await Rules.list(); setRules(r.rules ?? r as any ?? []); } catch { setRules([]); }
+  }
+  useEffect(() => { reload(); }, []);
+
+  async function create() {
+    if (!instruction.trim()) return;
+    await Rules.create(instruction.trim(), condition.trim() || undefined, category);
+    setInstruction(""); setCondition(""); setCategory("general"); setShowCreate(false);
+    await reload();
+  }
+
+  async function toggle(id: string, enabled: boolean) { await Rules.update(id, { enabled: !enabled }); await reload(); }
+
+  async function del(id: string) {
+    if (!confirm("Delete this rule?")) return;
+    await Rules.delete(id); await reload();
+  }
+
+  async function moveUp(id: string) { await Rules.reorder(id, "up"); await reload(); }
+  async function moveDown(id: string) { await Rules.reorder(id, "down"); await reload(); }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
+            <Scale className="w-3.5 h-3.5 stroke-[1.75]" /> Rules
+          </h2>
+          <p className="text-2xs text-ink-400 mt-0.5">
+            Rules are always-applied behavioural constraints injected into every agent's system prompt.
+          </p>
+        </div>
+        {!showCreate && (
+          <button onClick={() => setShowCreate(true)} className="btn btn-outline btn-xs">
+            <Plus className="w-3 h-3" /> New
+          </button>
+        )}
+      </div>
+
+      {showCreate && (
+        <div className="border border-line rounded bg-paper p-4 mb-3 space-y-2">
+          <textarea value={instruction} onChange={(e) => setInstruction(e.target.value)}
+            placeholder="Rule instruction — e.g. 'Always use British English spelling'"
+            className="input min-h-[60px] resize-y font-mono text-xs" />
+          <input value={condition} onChange={(e) => setCondition(e.target.value)}
+            placeholder="Condition (optional) — e.g. 'when chatting about code'"
+            className="input text-xs" />
+          <div className="flex items-center gap-2">
+            <label className="text-2xs text-ink-500">Category:</label>
+            <select value={category} onChange={(e) => setCategory(e.target.value)}
+              className="input text-xs py-1">
+              {RULE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowCreate(false)} className="btn btn-xs">Cancel</button>
+            <button onClick={create} disabled={!instruction.trim()} className="btn btn-primary btn-xs">Create</button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1.5">
+        {rules.map((r, i) => (
+          <div key={r.id} className={`border rounded bg-paper px-3 py-2 flex items-center gap-2 ${!r.enabled ? "opacity-50" : "border-line"}`}>
+            <div className="flex flex-col gap-0.5 shrink-0">
+              <button onClick={() => moveUp(r.id)} disabled={i === 0} className="btn btn-ghost btn-xs p-0"><ArrowUp className="w-2.5 h-2.5" /></button>
+              <button onClick={() => moveDown(r.id)} disabled={i === rules.length - 1} className="btn btn-ghost btn-xs p-0"><ArrowDown className="w-2.5 h-2.5" /></button>
+            </div>
+            <div className="flex-1 min-w-0">
+              {editingId === r.id ? (
+                <div className="space-y-1">
+                  <textarea value={editInstruction} onChange={(e) => setEditInstruction(e.target.value)} className="input text-xs font-mono min-h-[40px] resize-y" />
+                  <input value={editCondition} onChange={(e) => setEditCondition(e.target.value)} placeholder="Condition" className="input text-[11px]" />
+                  <div className="flex gap-1">
+                    <button onClick={async () => {
+                      await Rules.update(r.id, { instruction: editInstruction, condition: editCondition });
+                      setEditingId(null); await reload();
+                    }} className="btn btn-primary btn-xs"><Check className="w-2.5 h-2.5" /> Save</button>
+                    <button onClick={() => setEditingId(null)} className="btn btn-xs"><X className="w-2.5 h-2.5" /></button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="text-xs font-medium text-ink-900">{r.instruction}</div>
+                  {r.condition && <div className="text-[11px] text-ink-400 italic">when: {r.condition}</div>}
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-2xs px-1 py-0.5 rounded bg-paper-200 text-ink-500">{r.category}</span>
+                    <span className="text-2xs text-ink-300">#{r.priority}</span>
+                  </div>
+                </>
+              )}
+            </div>
+            {editingId !== r.id && (
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button onClick={() => toggle(r.id, r.enabled)} className="btn btn-ghost btn-xs" title={r.enabled ? "Disable" : "Enable"}>
+                  {r.enabled ? <ToggleRight className="w-3.5 h-3.5 text-emerald-600" /> : <ToggleLeft className="w-3.5 h-3.5 text-ink-400" />}
+                </button>
+                <button onClick={() => { setEditingId(r.id); setEditInstruction(r.instruction); setEditCondition(r.condition ?? ""); }}
+                  className="btn btn-ghost btn-xs text-ink-400 hover:text-ink-700">Edit</button>
+                <button onClick={() => del(r.id)} className="btn btn-ghost btn-xs text-rose-700"><Trash2 className="w-3 h-3" /></button>
+              </div>
+            )}
+          </div>
+        ))}
+        {rules.length === 0 && !showCreate && (
+          <div className="text-xs text-ink-400 italic text-center py-6">No rules yet. Rules are injected into every agent's system prompt.</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ─── Advanced Tab: Secrets + Snapshots ──────────────────────────────
+
+function SettingsAdvanced() {
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Dashboard.stats()
+      .then((d) => { setStats(d.stats ?? d as any); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="space-y-8">
+      <SecretsSection />
+      <section>
+        <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5 mb-3">
+          <History className="w-3.5 h-3.5 stroke-[1.75]" /> System Stats
+        </h2>
+        {loading ? (
+          <Loader2 className="w-4 h-4 animate-spin text-ink-400" />
+        ) : stats ? (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {Object.entries(stats.counts).map(([k, v]) => (
+              <div key={k} className="border border-line rounded bg-paper px-3 py-2">
+                <div className="text-2xs text-ink-400 uppercase">{k}</div>
+                <div className="text-lg font-semibold text-ink-900">{(v as number).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-ink-400">Could not load stats.</div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SecretsSection() {
+  const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newValue, setNewValue] = useState("");
+
+  async function reload() {
+    try { const s = await Secrets.list(); setSecrets(s.secrets ?? [] as any); } catch { setSecrets([]); }
+  }
+  useEffect(() => { reload(); }, []);
+
+  async function addSecret() {
+    if (!newName.trim() || !newValue.trim()) return;
+    await Secrets.save(newName.trim(), newValue.trim());
+    setNewName(""); setNewValue(""); setShowAdd(false);
+    await reload();
+  }
+
+  async function delSecret(name: string) {
+    if (!confirm(`Delete secret "${name}"?`)) return;
+    await Secrets.remove(name); await reload();
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-ink-900 flex items-center gap-1.5">
+            <KeyRound className="w-3.5 h-3.5 stroke-[1.75]" /> Secrets
+          </h2>
+          <p className="text-2xs text-ink-400 mt-0.5">
+            Encrypted credentials (AES-256-GCM). API keys, tokens, and passwords used by agents and tools.
+          </p>
+        </div>
+        {!showAdd && (
+          <button onClick={() => setShowAdd(true)} className="btn btn-outline btn-xs">
+            <Plus className="w-3 h-3" /> Add
+          </button>
+        )}
+      </div>
+
+      {showAdd && (
+        <div className="border border-line rounded bg-paper p-4 mb-3 space-y-2">
+          <input value={newName} onChange={(e) => setNewName(e.target.value)}
+            placeholder="Secret name — e.g. STRIPE_SECRET_KEY" className="input text-xs font-mono" />
+          <input value={newValue} onChange={(e) => setNewValue(e.target.value)} type="password"
+            placeholder="Value" className="input text-xs font-mono" />
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setShowAdd(false)} className="btn btn-xs">Cancel</button>
+            <button onClick={addSecret} disabled={!newName.trim() || !newValue.trim()} className="btn btn-primary btn-xs">Save</button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-1">
+        {secrets.map((s) => (
+          <div key={s.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-2">
+            <KeyRound className="w-3 h-3 stroke-[1.75] text-ink-400 shrink-0" />
+            <span className="text-xs font-mono text-ink-900 flex-1">{s.name}</span>
+            <span className="text-2xs text-ink-300">●●●●●●</span>
+            <button onClick={() => delSecret(s.name)} className="btn btn-ghost btn-xs text-rose-700"><Trash2 className="w-3 h-3" /></button>
+          </div>
+        ))}
+        {secrets.length === 0 && !showAdd && (
+          <div className="text-xs text-ink-400 italic text-center py-6">No secrets stored yet.</div>
+        )}
+      </div>
+    </section>
+  );
+}

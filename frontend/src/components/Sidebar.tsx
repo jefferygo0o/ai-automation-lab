@@ -32,8 +32,6 @@ const NAV_SECTIONS = [
   {
     label: "System",
     items: [
-      { to: "/rules", label: "Rules", icon: Scale },
-      { to: "/personas", label: "Personas", icon: Sparkles },
       { to: "/timeline", label: "Timeline", icon: Clock },
       { to: "/secrets", label: "Secrets", icon: KeyRound },
       { to: "/runs", label: "Runs", icon: History },

@@ -19,10 +19,8 @@ import FilesPage from "./pages/FilesPage";
 import AutomationsPage from "./pages/AutomationsPage";
 import BrowserPage from "./pages/BrowserPage";
 import IntegrationsPage from "./pages/IntegrationsPage";
-import PersonasPage from "./pages/PersonasPage";
-import TimelinePage from "./pages/TimelinePage";
 import DashboardPage from "./pages/DashboardPage";
-import RulesPage from "./pages/RulesPage";
+import SettingsPage from "./pages/SettingsPage";
 
 const HIDE_TOPBAR = ["/browser"];
 
@@ -177,13 +175,10 @@ export default function App() {
           <RequireAuth>
             <ShellWithProvider>
               <Routes>
+                <Route path="/dashboard" element={<DashboardPage />} />
                 <Route
-                  path="/dashboard"
-                  element={<DashboardPage />}
-                />
-                <Route
-                  path="/rules"
-                  element={<RulesPage />}
+                  path="/settings/*"
+                  element={<SettingsPage />}
                 />
                 <Route
                   path="/"
@@ -236,14 +231,6 @@ export default function App() {
                 <Route
                   path="/integrations"
                   element={<IntegrationsPage />}
-                />
-                <Route
-                  path="/personas"
-                  element={<PersonasPage />}
-                />
-                <Route
-                  path="/timeline"
-                  element={<TimelinePage />}
                 />
                 <Route
                   path="*"
