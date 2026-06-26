@@ -387,16 +387,20 @@ api.get("/api/timeline", async (c) => {
   // Snapshots across all user agents
   const snapEvents: any[] = [];
   for (const id of agentIds) {
-    const snaps = await listSnapshots(id, 5);
-    snapEvents.push(...snaps.map((s: any) => ({
-      type: "snapshot" as const,
-      agentId: s.agentId,
-      snapshotId: s.id,
-      fileCount: s.fileCount,
-      byteSize: s.byteSize,
-      trigger: s.trigger,
-      createdAt: s.createdAt,
-    })));
+    try {
+      const snaps = await listSnapshots(id, 5);
+      snapEvents.push(...snaps.map((s: any) => ({
+        type: "snapshot" as const,
+        agentId: s.agentId,
+        snapshotId: s.id,
+        fileCount: s.fileCount,
+        byteSize: s.byteSize,
+        trigger: s.trigger,
+        createdAt: s.createdAt,
+      })));
+    } catch {
+      // table may not exist — skip snapshots gracefully
+    }
   }
 
   // Merge and sort by createdAt desc

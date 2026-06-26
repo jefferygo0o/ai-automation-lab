@@ -335,3 +335,20 @@ CREATE TABLE IF NOT EXISTS personas (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_personas_owner ON personas(owner_id);
+
+-- Agent workspace snapshots
+CREATE TABLE IF NOT EXISTS agent_snapshots (
+  id TEXT PRIMARY KEY,
+  agent_id TEXT NOT NULL,
+  run_id TEXT,
+  trigger TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  byte_size INTEGER NOT NULL DEFAULT 0,
+  file_count INTEGER NOT NULL DEFAULT 0,
+  content_hash TEXT NOT NULL DEFAULT '',
+  storage_path TEXT NOT NULL DEFAULT '',
+  error_message TEXT,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_snapshots_agent ON agent_snapshots(agent_id, created_at DESC);
