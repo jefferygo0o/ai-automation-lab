@@ -19,6 +19,7 @@ import FilesPage from "./pages/FilesPage";
 import AutomationsPage from "./pages/AutomationsPage";
 import BrowserPage from "./pages/BrowserPage";
 import IntegrationsPage from "./pages/IntegrationsPage";
+import PersonasPage from "./pages/PersonasPage";
 
 const HIDE_TOPBAR = ["/browser"];
 
@@ -224,6 +225,10 @@ export default function App() {
                 <Route
                   path="/integrations"
                   element={<IntegrationsPage />}
+                />
+                <Route
+                  path="/personas"
+                  element={<PersonasPage />}
                 />
                 <Route
                   path="*"

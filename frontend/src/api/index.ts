@@ -352,3 +352,29 @@ export const Integrations = {
     );
   },
 };
+
+// ---- Personas ----
+export interface Persona {
+  id: string;
+  ownerId: string;
+  name: string;
+  prompt: string;
+  imageUrl: string;
+  imageHue: number;
+  model: string;
+  isActive: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const Personas = {
+  list: () => api<{ personas: Persona[] }>("/api/personas"),
+  get: (id: string) => api<{ persona: Persona }>(`/api/personas/${id}`),
+  create: (name: string, prompt: string, opts: { imageUrl?: string; imageHue?: number; model?: string } = {}) =>
+    api<{ persona: Persona }>("/api/personas", { method: "POST", body: JSON.stringify({ name, prompt, ...opts }) }),
+  update: (id: string, fields: Partial<{ name: string; prompt: string; imageUrl: string; imageHue: number; model: string }>) =>
+    api<{ persona: Persona }>(`/api/personas/${id}`, { method: "PUT", body: JSON.stringify(fields) }),
+  setActive: (id: string) =>
+    api<{ persona: Persona }>(`/api/personas/${id}/active`, { method: "POST" }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/personas/${id}`, { method: "DELETE" }),
+};

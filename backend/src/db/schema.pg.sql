@@ -444,3 +444,22 @@ ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS is_enabled INTEGER NOT NU
 -- writes `agent_snapshots`, so both definitions are intentionally
 -- dropped here. If a future feature needs agent workspace
 -- snapshots, recreate the table in a dedicated migration.
+
+-- ============================================================
+-- PERSONAS
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS personas (
+  id TEXT PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL DEFAULT '',
+  image_url TEXT NOT NULL DEFAULT '',
+  image_hue INTEGER NOT NULL DEFAULT -1,
+  model TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_personas_owner ON personas(owner_id);
+CREATE INDEX IF NOT EXISTS idx_personas_active ON personas(owner_id, is_active) WHERE is_active = 1;

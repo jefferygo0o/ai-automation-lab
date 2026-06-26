@@ -320,3 +320,18 @@ CREATE TABLE IF NOT EXISTS observability_metrics (
   UNIQUE(owner_id, metric, bucket)
 );
 CREATE INDEX IF NOT EXISTS idx_metrics_owner ON observability_metrics(owner_id, metric, updated_at DESC);
+
+-- Personas: named AI identities per user
+CREATE TABLE IF NOT EXISTS personas (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  prompt TEXT NOT NULL DEFAULT '',
+  image_url TEXT NOT NULL DEFAULT '',
+  image_hue INTEGER NOT NULL DEFAULT -1,
+  model TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_personas_owner ON personas(owner_id);

@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   Bot, MessagesSquare, Globe, FolderTree, Timer,
   Wand2, Wrench, KeyRound, History, Compass, Puzzle,
-  PanelRightOpen, Plus, X,
+  PanelRightOpen, Plus, X, Sparkles,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../state/auth";
@@ -29,6 +29,7 @@ const NAV_SECTIONS = [
   {
     label: "System",
     items: [
+      { to: "/personas", label: "Personas", icon: Sparkles },
       { to: "/secrets", label: "Secrets", icon: KeyRound },
       { to: "/runs", label: "Runs", icon: History },
       { to: "/browser", label: "Browser", icon: Compass },

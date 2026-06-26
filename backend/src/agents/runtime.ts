@@ -25,6 +25,7 @@ import { createSandbox } from "../sandbox/index.ts";
 import { mcpManager, McpStore } from "../mcp/client.ts";
 import { Skills, type Skill } from "../skills/index.ts";
 import { MemoryStore } from "../memory/index.ts";
+import { PersonaStore } from "../personas/store.ts";
 import { recordHistory } from "./history.ts";
 import { RunStore } from "../runs/index.ts";
 
@@ -123,6 +124,12 @@ export async function runAgentTurn(
   const toolsMd = readAgentFile(agent.id, "tools.md") ?? "";
   const memoryMd = readAgentFile(agent.id, "memory.md") ?? "";
 
+  // Load user's active persona (Zo-style: a named identity overlay)
+  const activePersona = await PersonaStore.getActive(ownerId);
+  const personaOverlay = activePersona?.prompt?.trim()
+    ? `\n\n# Active Persona: ${activePersona.name}\n${activePersona.prompt.trim()}\n`
+    : "";
+
   let skillsBlock = skillsMd;
   // Inject bodies of any skills referenced in skills.md. Use owner-aware
   // lookup so user-owned skills (data/skills/users/{ownerId}/) are visible
@@ -156,6 +163,7 @@ export async function runAgentTurn(
   const systemPrompt = [
     systemMd.trim(),
     personaMd.trim() ? `\n\n# Persona\n${personaMd.trim()}\n` : "",
+    personaOverlay,
     skillsBlock.trim() ? `\n\n# Skills\n${skillsBlock.trim()}\n` : "",
     toolsMd.trim() ? `\n\n# Tool notes\n${toolsMd.trim()}\n` : "",
     memoryMd.trim() ? `\n\n# Notes (memory.md)\n${memoryMd.trim()}\n` : "",
@@ -185,10 +193,10 @@ export async function runAgentTurn(
   console.log("[runtime] LLM config baseUrl=%s model=%s hasKey=%s", cfg.baseUrl, cfg.model, apiKey ? "yes (" + apiKey.slice(0, 8) + "..." + apiKey.slice(-4) + ")" : "no");
   
   const llmCfg: LLMConfig = {
-    provider: cfg.provider,
-    baseUrl: cfg.baseUrl,
+    provider: activePersona?.model ? cfg.provider : "custom",
+    baseUrl: activePersona?.model ? cfg.baseUrl : cfg.baseUrl,
     apiKey,
-    model: cfg.model,
+    model: activePersona?.model || cfg.model,
     temperature: cfg.temperature,
     maxTokens: cfg.maxTokens,
   };
