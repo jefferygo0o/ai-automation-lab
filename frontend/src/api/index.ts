@@ -424,8 +424,12 @@ export const Dashboard = {
 // ---- Rules ----
 export interface Rule {
   id: string;
+  ownerId: string;
   name: string;
   description: string;
+  instruction: string;
+  category: string;
+  priority: number;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
@@ -434,9 +438,11 @@ export interface Rule {
 export const Rules = {
   list: () => api<{ rules: Rule[] }>("/api/rules"),
   get: (id: string) => api<{ rule: Rule }>(`/api/rules/${id}`),
-  create: (name: string, description: string, enabled: boolean) =>
-    api<{ rule: Rule }>("/api/rules", { method: "POST", body: JSON.stringify({ name, description, enabled }) }),
-  update: (id: string, data: Partial<{ name: string; description: string; enabled: boolean }>) =>
+  create: (name: string, instruction: string, opts?: { description?: string; category?: string }) =>
+    api<{ rule: Rule }>("/api/rules", { method: "POST", body: JSON.stringify({ name, instruction, ...opts }) }),
+  update: (id: string, data: Partial<{ name: string; instruction: string; description: string; category: string; enabled: boolean }>) =>
     api<{ rule: Rule }>(`/api/rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) => api<{ ok: boolean }>(`/api/rules/${id}`, { method: "DELETE" }),
+  reorder: (id: string, direction: "up" | "down") =>
+    api<{ ok: boolean }>(`/api/rules/${id}/reorder`, { method: "POST", body: JSON.stringify({ direction }) }),
 };

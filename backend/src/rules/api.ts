@@ -81,6 +81,38 @@ rulesApi.post("/:id/toggle", async (c) => {
   return c.json({ rule });
 });
 
+// Reorder a rule (swap priority with adjacent rule)
+rulesApi.post("/:id/reorder", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = await c.req.json().catch(() => ({})) as { direction?: string };
+  const direction = body.direction === "down" ? "down" : "up";
+
+  const rule = await RuleStore.get(c.req.param("id"), userId);
+  if (!rule) return c.json({ error: "not found" }, 404);
+
+  // Find the adjacent rule in priority order
+  const allRules = await RuleStore.list(userId);
+  const idx = allRules.findIndex((r) => r.id === rule.id);
+  if (idx < 0) return c.json({ error: "not found" }, 404);
+
+  const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+  if (swapIdx < 0 || swapIdx >= allRules.length) {
+    return c.json({ error: "already at the edge" }, 400);
+  }
+
+  const swapRule = allRules[swapIdx];
+  // Swap priorities
+  await RuleStore.update(rule.id, userId, { priority: swapRule.priority });
+  await RuleStore.update(swapRule.id, userId, { priority: rule.priority });
+
+  Audit.record({
+    ownerId: userId, actor: "user", action: "rule.reorder",
+    targetId: rule.id, targetType: "rule", metadata: { direction, swappedWith: swapRule.id },
+  });
+
+  return c.json({ ok: true });
+});
+
 // Delete a rule
 rulesApi.delete("/:id", async (c) => {
   const userId = c.get("userId") as string;

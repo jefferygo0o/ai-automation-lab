@@ -96,6 +96,23 @@ personasApi.post("/:id/activate", async (c) => {
   return c.json({ persona });
 });
 
+// Alias: /active → same as /activate
+personasApi.post("/:id/active", async (c) => {
+  const userId = c.get("userId") as string;
+  const persona = await PersonaStore.setActive(c.req.param("id"), userId);
+  if (!persona) return c.json({ error: "not found" }, 404);
+
+  Audit.record({
+    ownerId: userId,
+    actor: "user",
+    action: "persona.activate",
+    targetId: persona.id,
+    targetType: "persona",
+  });
+
+  return c.json({ persona });
+});
+
 // Delete a persona
 personasApi.delete("/:id", async (c) => {
   const userId = c.get("userId") as string;

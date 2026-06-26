@@ -38,6 +38,35 @@ dashboardApi.get("/", async (c) => {
   });
 });
 
+dashboardApi.get("/stats", async (c) => {
+  const userId = c.get("userId") as string;
+  const agents = await (await db.query("SELECT COUNT(*) AS n FROM agents WHERE owner_id = ?").get(userId) as { n: number }).n;
+  const chats = await (await db.query("SELECT COUNT(*) AS n FROM chats WHERE owner_id = ?").get(userId) as { n: number }).n;
+  const messages = await (await db.query(
+    `SELECT COUNT(*) AS n FROM messages m
+     INNER JOIN chats c ON c.id = m.chat_id
+     WHERE c.owner_id = ?`
+  ).get(userId) as { n: number }).n;
+  const runs = await (await db.query("SELECT COUNT(*) AS n FROM runs WHERE user_id = ?").get(userId) as { n: number }).n;
+  const totalTokens = await (await db.query("SELECT COALESCE(SUM(total_tokens), 0) AS t FROM runs WHERE user_id = ?").get(userId) as { t: number }).t;
+  const pendingApprovals = await (await db.query(
+    "SELECT COUNT(*) AS n FROM approval_requests WHERE owner_id = ? AND status = 'pending'"
+  ).get(userId) as { n: number }).n;
+  const skills = await (await db.query("SELECT COUNT(*) AS n FROM skills WHERE owner_id = ? OR owner_id IS NULL").get(userId) as { n: number }).n;
+  const mcpServers = await (await db.query("SELECT COUNT(*) AS n FROM mcp_servers").get() as { n: number }).n;
+  const automations = await (await db.query("SELECT COUNT(*) AS n FROM automations WHERE owner_id = ?").get(userId) as { n: number }).n;
+  const webhooks = await (await db.query("SELECT COUNT(*) AS n FROM webhook_endpoints WHERE owner_id = ?").get(userId) as { n: number }).n;
+  const last24h = Date.now() - MS_PER_DAY;
+  const recentRuns = await (await db.query("SELECT COUNT(*) AS n FROM runs WHERE user_id = ? AND started_at >= ?").get(userId, last24h) as { n: number }).n;
+  const failedLast24h = await (await db.query(
+    "SELECT COUNT(*) AS n FROM runs WHERE user_id = ? AND started_at >= ? AND status = 'failed'"
+  ).get(userId, last24h) as { n: number }).n;
+  return c.json({
+    counts: { agents, chats, messages, runs, skills, mcpServers, automations, webhooks, pendingApprovals },
+    usage: { totalTokens, recentRuns, failedLast24h },
+  });
+});
+
 dashboardApi.get("/timeseries", async (c) => {
   const userId = c.get("userId") as string;
   const days = Math.min(90, Math.max(1, Number(c.req.query("days") ?? 7)));

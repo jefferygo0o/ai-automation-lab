@@ -632,3 +632,29 @@ Two lab tools are registered for agents:
 **What's NOT covered (same issue may apply, filesystem-only today):**
 - Agent content files (system.md, persona.md, instructions.md, skills.md, user.md, memory.md, tools.md, skills/) — these are still filesystem-only today. The same pattern can be extended if needed.
 - The `backfillAgentConfigs()` startup migration handles existing agents that were created before this change. It's a one-time migration — each agent gets its config_json set once, then subsequent config changes keep it synced.
+
+### 2026-06-27: Fixed dashboard + personas 404s, rules API mismatch, browser automation dual-engine
+
+**Issues fixed:**
+
+1. **Dashboard stats 404** — Frontend `Dashboard.stats()` called `GET /api/dashboard/stats` but the dashboard API only had a root `GET /` handler mounted at `/api/dashboard`, making the effective path `GET /api/dashboard/`. Fixed by adding `GET /stats` to the dashboard API.
+
+2. **Personas set-active 404** — Frontend `Personas.setActive()` called `POST /api/personas/:id/active` but the backend had `POST /:id/activate`. Fixed by adding `/active` as an alias route.
+
+3. **Rules API payload mismatch** — Frontend `Rules.create()` sent `{name, description, enabled}` but the backend expects `{name, instruction, description, category}`. Fixed both the frontend API's signature and the SettingsPage caller to match the backend schema. Also fixed the Rule interface (was missing `instruction`, `category`, `priority`, `ownerId`). Added `Rules.reorder()` frontend method and a backend `POST /:id/reorder` endpoint that swaps priorities between adjacent rules.
+
+4. **Browser automation now dual-engine (agent-browser CLI + Playwright)** — All browser tools now try the faster agent-browser CLI first, falling back to Playwright:
+   - `browser_screenshot` — agent-browser CLI first, Playwright fallback
+   - `browser_navigate` — added `useBrowser` flag for JS rendering via agent-browser
+   - `lab_read_webpage` — agent-browser first when `use_browser='true'`, Playwright fallback
+   - `lab_check_dependencies` — now reports agent-browser availability
+   - `lab_install_dependency` — added `agent-browser` as an installable dependency
+
+**Files changed:**
+- `file backend/src/dashboard/api.ts` — added `GET /stats` route
+- `file backend/src/personas/api.ts` — added `POST /:id/active` alias
+- `file backend/src/rules/api.ts` — added `POST /:id/reorder` endpoint
+- `file backend/src/tools/lab_tools.ts` — added `agentBrowserScreenshot()`, `agentBrowserRead()`, updated `browser_navigate` and `browser_screenshot` tools
+- `file backend/src/tools/lab_tools_extra.ts` — added `agentBrowserAvailable()`, `agentBrowserRead()`, `agentBrowserScreenshot()`, updated `lab_read_webpage` tool, `checkDeps()`, and `lab_install_dependency`
+- `file frontend/src/api/index.ts` — fixed `Rule` interface, `Rules.create`/`update`/`reorder` signatures
+- `file frontend/src/pages/SettingsPage.tsx` — fixed `Rules.create` and `Rules.update` calls

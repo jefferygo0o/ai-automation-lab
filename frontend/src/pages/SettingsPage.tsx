@@ -478,7 +478,7 @@ function RulesSection() {
 
   async function create() {
     if (!instruction.trim()) return;
-    await Rules.create(instruction.trim(), condition.trim() || undefined, category);
+    await Rules.create(instruction.trim(), instruction.trim(), { description: condition.trim() || undefined, category });
     setInstruction(""); setCondition(""); setCategory("general"); setShowCreate(false);
     await reload();
   }
@@ -547,7 +547,7 @@ function RulesSection() {
                   <input value={editCondition} onChange={(e) => setEditCondition(e.target.value)} placeholder="Condition" className="input text-[11px]" />
                   <div className="flex gap-1">
                     <button onClick={async () => {
-                      await Rules.update(r.id, { instruction: editInstruction, condition: editCondition });
+                      await Rules.update(r.id, { instruction: editInstruction, description: editCondition });
                       setEditingId(null); await reload();
                     }} className="btn btn-primary btn-xs"><Check className="w-2.5 h-2.5" /> Save</button>
                     <button onClick={() => setEditingId(null)} className="btn btn-xs"><X className="w-2.5 h-2.5" /></button>

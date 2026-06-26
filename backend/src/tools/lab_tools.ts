@@ -14,7 +14,7 @@ import { toolRegistry, type ToolContext } from "./registry.ts";
 import { Skills } from "../skills/index.ts";
 import { db } from "../db/index.ts";
 import { McpStore, mcpManager } from "../mcp/client.ts";
-import { writeFileSync, unlinkSync } from "node:fs";
+import { writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
 
@@ -106,6 +106,54 @@ process.stdout.write(buf.toString("base64"));
     return `data:image/png;base64,${stdout.trim()}`;
   } finally {
     try { unlinkSync(script); } catch {}
+  }
+}
+
+/** agent-browser CLI screenshot capture. Returns a base64 PNG data URI. */
+async function agentBrowserScreenshot(url: string, fullPage = true): Promise<string> {
+  const tmpFile = `/tmp/screenshot_${nanoid(8)}.png`;
+  try {
+    const fp = fullPage ? " --full-page" : "";
+    const proc = Bun.spawn(["bash", "-c", `agent-browser open ${JSON.stringify(url)} && sleep 2 && agent-browser screenshot ${tmpFile}${fp}`], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const stderr = await Bun.readableStreamToText(proc.stderr);
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) throw new Error(`agent-browser failed (${exitCode}): ${stderr.slice(0, 500)}`);
+    const buf = readFileSync(tmpFile);
+    const b64 = buf.toString("base64");
+    try { (await import("node:fs")).unlinkSync(tmpFile); } catch {}
+    return `data:image/png;base64,${b64}`;
+  } catch (e: any) {
+    try { (await import("node:fs")).unlinkSync(tmpFile); } catch {}
+    throw e;
+  }
+}
+
+/** agent-browser CLI — open URL and extract text content. */
+async function agentBrowserRead(url: string, timeoutMs = 20_000): Promise<string> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const proc = Bun.spawn(["bash", "-c", `agent-browser open ${JSON.stringify(url)} && sleep 2 && agent-browser get text body`], {
+      stdout: "pipe",
+      stderr: "pipe",
+      signal: controller.signal,
+    });
+    const stdout = await Bun.readableStreamToText(proc.stdout);
+    const stderr = await Bun.readableStreamToText(proc.stderr);
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) throw new Error(`agent-browser read failed (${exitCode}): ${stderr.slice(0, 500)}`);
+    const cleaned = stdout
+      .replace(/\s+/g, " ")
+      .trim();
+    const maxLen = 32_000;
+    return cleaned.length > maxLen
+      ? cleaned.slice(0, maxLen) + `\n\n... (truncated, ${cleaned.length} total chars)`
+      : cleaned;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -411,16 +459,22 @@ toolRegistry.register({
   description:
     "Navigate to a URL and read the page content as plain text. " +
     "Use this to read articles, documentation, or any public web page. " +
-    "JavaScript-heavy sites may render poorly — use browser_screenshot for those.",
+    "Set useBrowser=true to render JavaScript-heavy pages through agent-browser (slower but renders JS). " +
+    "Default (useBrowser=false) uses direct fetch which is faster for static pages.",
   parameters: {
     url: {
       type: "string",
       description: "the full URL to visit (e.g. https://example.com/page)",
       required: true,
     },
+    useBrowser: {
+      type: "boolean",
+      description: "use agent-browser for JS rendering (default false)",
+      required: false,
+    },
     timeoutMs: {
       type: "number",
-      description: "timeout in ms (default 15000)",
+      description: "timeout in ms (default 15000, or 20000 with useBrowser=true)",
       required: false,
     },
   },
@@ -429,7 +483,12 @@ toolRegistry.register({
     if (!args.url || typeof args.url !== "string") return err("url is required");
     try {
       ctx.onLog({ tool: "browser_navigate", args, result: `navigating to ${args.url}`, ok: true, durationMs: 0, at: Date.now() });
-      const content = await readWebpage(args.url, args.timeoutMs ?? 15_000);
+      let content: string;
+      if (args.useBrowser) {
+        content = await agentBrowserRead(args.url, args.timeoutMs ?? 20_000);
+      } else {
+        content = await readWebpage(args.url, args.timeoutMs ?? 15_000);
+      }
       return text(`# ${args.url}\n\n${content}`);
     } catch (e: any) {
       return err(`browser_navigate failed: ${e?.message ?? String(e)}`);
@@ -442,7 +501,8 @@ toolRegistry.register({
   description:
     "Open a URL in a headless browser and return a screenshot as a base64 data URI. " +
     "Use this for JavaScript-heavy pages, visual verification, or when browser_navigate can't render the content. " +
-    "The screenshot is a PNG image — you can describe what you see.",
+    "The screenshot is a PNG image — you can describe what you see. " +
+    "Uses agent-browser CLI by default (faster), falls back to Playwright if agent-browser fails.",
   parameters: {
     url: {
       type: "string",
@@ -460,7 +520,13 @@ toolRegistry.register({
     if (!args.url || typeof args.url !== "string") return err("url is required");
     try {
       ctx.onLog({ tool: "browser_screenshot", args, result: `screenshotting ${args.url}`, ok: true, durationMs: 0, at: Date.now() });
-      const dataUri = await playwrightScreenshot(args.url, args.fullPage !== false);
+      let dataUri: string;
+      try {
+        dataUri = await agentBrowserScreenshot(args.url, args.fullPage !== false);
+      } catch {
+        // Fallback to Playwright
+        dataUri = await playwrightScreenshot(args.url, args.fullPage !== false);
+      }
       return text(`Screenshot of ${args.url}\n\n![page screenshot](${dataUri})\n\n---\nFull-page: ${args.fullPage !== false}`);
     } catch (e: any) {
       return err(`browser_screenshot failed: ${e?.message ?? String(e)}`);

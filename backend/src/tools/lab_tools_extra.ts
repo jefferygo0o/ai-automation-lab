@@ -5,7 +5,7 @@
  * Zo Computer, Anthropic, OpenAI, or any other third-party API. The tools
  * that need search/transcription/etc. use:
  *   - bun's built-in `fetch` for HTTP
- *   - Playwright (already in node_modules) for browser automation
+ *   - Playwright (already in node_modules) + agent-browser CLI for browser automation
  *   - ffmpeg / d2 for media
  *   - HTML scraping for search results (no API key needed)
  *   - Cloudflare Workers AI for image generation, image editing, and
@@ -242,6 +242,22 @@ function d2Available(): boolean {
   }
 }
 
+/** Check if the agent-browser CLI is installed. */
+let _agentBrowserChecked = false;
+let _agentBrowserAvailable = false;
+function agentBrowserAvailable(): boolean {
+  if (!_agentBrowserChecked) {
+    try {
+      _agentBrowserChecked = true;
+      const r = spawnSync("agent-browser", ["--version"], { stdio: "ignore" });
+      return r.status === 0;
+    } catch {
+      return false;
+    }
+  }
+  return _agentBrowserAvailable;
+}
+
 /** Check if apt-get is available (whether we're root and can install packages). */
 function aptAvailable(): boolean {
   try {
@@ -275,6 +291,13 @@ function checkDeps(): { name: string; available: boolean; hint: string }[] {
       hint: d2Available()
         ? ""
         : "curl -fsSL https://d2lang.com/install.sh | sh -s --\n   Enables lab_generate_d2_diagram.",
+    },
+    {
+      name: "agent-browser",
+      available: agentBrowserAvailable(),
+      hint: agentBrowserAvailable()
+        ? ""
+        : "apt-get install -y agent-browser\n   (requires root, typical in Docker containers)",
     },
     {
       name: "apt-get",
@@ -779,8 +802,17 @@ toolRegistry.register({
     if (!args.url) return err("url is required");
     try {
       if (args.use_browser === "true") {
-        // Re-use the browser pipeline — open the page, dump its text content
-        const text = await openAndExtractText(args.url, 20_000);
+        // Try agent-browser first (faster, no deps needed), then fall back to Playwright
+        let text: string;
+        if (agentBrowserAvailable()) {
+          try {
+            text = await agentBrowserRead(args.url, 20_000);
+          } catch {
+            text = await openAndExtractText(args.url, 20_000);
+          }
+        } else {
+          text = await openAndExtractText(args.url, 20_000);
+        }
         return ok(`# ${args.url}\n\n${text}`);
       }
       const r = await fetchText(args.url, { timeoutMs: 20_000 });
@@ -1082,6 +1114,67 @@ await browser.close();
       proc.exited,
     ]);
     if (exitCode !== 0) throw new Error(`browser failed (${exitCode}): ${stderr.slice(0, 500)}`);
+    return stdout;
+  } finally {
+    try { unlinkSync(script); } catch {}
+  }
+}
+
+/**
+ * Use agent-browser CLI to open a URL and extract page text.
+ * Faster than Playwright for JS rendering since it's already installed.
+ */
+async function agentBrowserRead(url: string, timeoutMs: number = 20_000): Promise<string> {
+  if (!agentBrowserAvailable()) {
+    throw new Error(
+      "agent-browser CLI is not installed. " +
+      "Run `lab_install_dependency` with name='agent-browser' to install it."
+    );
+  }
+  const script = join(tmpdir(), `lab_agent_browser_${randomBytes(6).toString("hex")}.sh`);
+  const code = `
+#!/usr/bin/env bash
+agent-browser open "${url}" && sleep 2 && agent-browser get text && agent-browser close
+`;
+  writeFileSync(script, code, "utf8");
+  try {
+    const proc = Bun.spawn(["bun", "run", script], { stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      Bun.readableStreamToText(proc.stdout),
+      Bun.readableStreamToText(proc.stderr),
+      proc.exited,
+    ]);
+    if (exitCode !== 0) throw new Error(`agent-browser failed (${exitCode}): ${stderr.slice(0, 500)}`);
+    return stdout;
+  } finally {
+    try { unlinkSync(script); } catch {}
+  }
+}
+
+/**
+ * Use agent-browser CLI to take a screenshot of a URL.
+ */
+async function agentBrowserScreenshot(url: string, fullPage: boolean = true): Promise<string> {
+  if (!agentBrowserAvailable()) {
+    throw new Error(
+      "agent-browser CLI is not installed. " +
+      "Run `lab_install_dependency` with name='agent-browser' to install it."
+    );
+  }
+  const script = join(tmpdir(), `lab_agent_browser_${randomBytes(6).toString("hex")}.sh`);
+  const code = `
+#!/usr/bin/env bash
+agent-browser open "${url}" && sleep 2 && agent-browser screenshot /tmp/ab_screenshot_${randomBytes(6).toString("hex")}.png && agent-browser close
+`;
+  writeFileSync(script, code, "utf8");
+  try {
+    const proc = Bun.spawn(["bun", "run", script], { stdout: "pipe", stderr: "pipe" });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      Bun.readableStreamToText(proc.stdout),
+      Bun.readableStreamToText(proc.stderr),
+      proc.exited,
+    ]);
+    if (exitCode !== 0) throw new Error(`agent-browser failed (${exitCode}): ${stderr.slice(0, 500)}`);
     return stdout;
   } finally {
     try { unlinkSync(script); } catch {}
@@ -1897,6 +1990,21 @@ toolRegistry.register({
       }
     }
 
+    if (name === "agent-browser" || name === "agentbrowser") {
+      try {
+        const r = await runCommand("bash", ["-c",
+          "curl -fsSL https://media.zocomputer.com/install/agentbrowser2.sh | bash"
+        ], { timeoutMs: timeout });
+        if (r.ok) {
+          if (agentBrowserAvailable()) return ok(`✅ agent-browser installed.\n\n${r.stdout.slice(0, 2000)}`);
+          return err("agent-browser install script ran but CLI not found on PATH.");
+        }
+        return err(`agent-browser install failed:\n${r.stderr.slice(0, 1000)}`);
+      } catch (e: any) {
+        return err(`agent-browser install exception: ${e?.message ?? String(e)}`);
+      }
+    }
+
     if (name === "whisper" || name === "whisper.cpp") {
       return err(
         "whisper.cpp installation is complex and requires compilation.\n\n" +
@@ -1931,6 +2039,6 @@ toolRegistry.register({
       }
     }
 
-    return err(`Unknown dependency: '${name}'. Supported: ffmpeg, playwright-chromium, d2, whisper, or any apt package name.`);
+    return err(`Unknown dependency: '${name}'. Supported: ffmpeg, playwright-chromium, agent-browser, d2, whisper, or any apt package name.`);
   },
 });
