@@ -5,6 +5,7 @@ import { useChatPanel } from "../contexts/ChatPanelContext";
 
 const TITLES: Record<string, { eyebrow: string; title: string }> = {
   "/dashboard":  { eyebrow: "Workspace", title: "Dashboard" },
+  "/rules":      { eyebrow: "Workspace", title: "Rules" },
   "/chats":       { eyebrow: "Workspace", title: "Chat" },
   "/agents":      { eyebrow: "Workspace", title: "Agents" },
   "/web-space":   { eyebrow: "Workspace", title: "Web Space" },

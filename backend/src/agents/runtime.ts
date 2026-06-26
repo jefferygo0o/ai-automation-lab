@@ -26,6 +26,7 @@ import { mcpManager, McpStore } from "../mcp/client.ts";
 import { Skills, type Skill } from "../skills/index.ts";
 import { MemoryStore } from "../memory/index.ts";
 import { PersonaStore } from "../personas/store.ts";
+import { RuleStore } from "../rules/store.ts";
 import { recordHistory } from "./history.ts";
 import { RunStore } from "../runs/index.ts";
 
@@ -130,6 +131,8 @@ export async function runAgentTurn(
     ? `\n\n# Active Persona: ${activePersona.name}\n${activePersona.prompt.trim()}\n`
     : "";
 
+  // Load user's active rules (Zo-style: persistent behavioural constraints)
+
   let skillsBlock = skillsMd;
   // Inject bodies of any skills referenced in skills.md. Use owner-aware
   // lookup so user-owned skills (data/skills/users/{ownerId}/) are visible
@@ -164,6 +167,7 @@ export async function runAgentTurn(
     systemMd.trim(),
     personaMd.trim() ? `\n\n# Persona\n${personaMd.trim()}\n` : "",
     personaOverlay,
+    rulesBlock,
     skillsBlock.trim() ? `\n\n# Skills\n${skillsBlock.trim()}\n` : "",
     toolsMd.trim() ? `\n\n# Tool notes\n${toolsMd.trim()}\n` : "",
     memoryMd.trim() ? `\n\n# Notes (memory.md)\n${memoryMd.trim()}\n` : "",

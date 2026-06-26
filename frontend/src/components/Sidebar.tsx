@@ -3,7 +3,7 @@ import {
   Bot, MessagesSquare, Globe, FolderTree, Timer,
   Wand2, Wrench, KeyRound, History, Compass, Puzzle,
   Panel, PanelRightOpen, Plus, X, Sparkles, Clock,
-  LayoutDashboard,
+  LayoutDashboard, Scale,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../state/auth";
@@ -32,6 +32,7 @@ const NAV_SECTIONS = [
   {
     label: "System",
     items: [
+      { to: "/rules", label: "Rules", icon: Scale },
       { to: "/personas", label: "Personas", icon: Sparkles },
       { to: "/timeline", label: "Timeline", icon: Clock },
       { to: "/secrets", label: "Secrets", icon: KeyRound },

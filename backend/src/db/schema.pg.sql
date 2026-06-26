@@ -474,3 +474,18 @@ CREATE TABLE IF NOT EXISTS personas (
 );
 CREATE INDEX IF NOT EXISTS idx_personas_owner ON personas(owner_id);
 CREATE INDEX IF NOT EXISTS idx_personas_active ON personas(owner_id, is_active) WHERE is_active = 1;
+
+-- Rules: persistent behavioural constraints applied to all agents
+CREATE TABLE IF NOT EXISTS rules (
+  id TEXT PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  instruction TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'general',
+  priority INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rules_owner ON rules(owner_id);

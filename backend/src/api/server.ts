@@ -37,6 +37,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { register } from "../tools/approval_tools.ts";
 import { dashboardApi } from "../dashboard/api.ts";
 import { personasApi } from "../personas/api.ts";
+import { rulesApi } from "../rules/api.ts";
 import { MCP_MARKETPLACE, findMarketplaceEntry } from "../mcp/marketplace.ts";
 
 const api = new Hono<{ Variables: { userId: string } }>();
@@ -1138,5 +1139,6 @@ api.delete("/api/secrets/:name", async (c) => {
 // ---- Dashboard (observability) ----
 api.route("/api/dashboard", dashboardApi);
 api.route("/api/personas", personasApi);
+api.route("/api/rules", rulesApi);
 
 export default api;

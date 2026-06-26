@@ -412,10 +412,31 @@ export const Timeline = {
 
 // ---- Dashboard ----
 export interface DashboardStats {
-  total: number;
-  byStatus: Record<string, number>;
+  counts: {
+    [key: string]: number;
+  };
 }
 
 export const Dashboard = {
   stats: () => api<{ stats: DashboardStats }>(`/api/dashboard/stats`),
+};
+
+// ---- Rules ----
+export interface Rule {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const Rules = {
+  list: () => api<{ rules: Rule[] }>("/api/rules"),
+  get: (id: string) => api<{ rule: Rule }>(`/api/rules/${id}`),
+  create: (name: string, description: string, enabled: boolean) =>
+    api<{ rule: Rule }>("/api/rules", { method: "POST", body: JSON.stringify({ name, description, enabled }) }),
+  update: (id: string, data: Partial<{ name: string; description: string; enabled: boolean }>) =>
+    api<{ rule: Rule }>(`/api/rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/rules/${id}`, { method: "DELETE" }),
 };

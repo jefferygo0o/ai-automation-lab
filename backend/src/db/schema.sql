@@ -352,3 +352,18 @@ CREATE TABLE IF NOT EXISTS agent_snapshots (
   expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_snapshots_agent ON agent_snapshots(agent_id, created_at DESC);
+
+-- Rules: persistent behavioural constraints applied to all agents
+CREATE TABLE IF NOT EXISTS rules (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  instruction TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'general',
+  priority INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rules_owner ON rules(owner_id);
