@@ -24,8 +24,8 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    DashboardApi.get()
-      .then((data) => { setStats(data); setLoading(false); })
+    DashboardApi.stats()
+      .then(({ stats }) => { setStats(stats); setLoading(false); })
       .catch((e) => { setError(e?.message ?? "failed to load dashboard"); setLoading(false); });
   }, []);
 
