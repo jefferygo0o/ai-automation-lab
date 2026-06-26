@@ -21,6 +21,7 @@ import BrowserPage from "./pages/BrowserPage";
 import IntegrationsPage from "./pages/IntegrationsPage";
 import PersonasPage from "./pages/PersonasPage";
 import TimelinePage from "./pages/TimelinePage";
+import DashboardPage from "./pages/DashboardPage";
 
 const HIDE_TOPBAR = ["/browser"];
 
@@ -175,6 +176,10 @@ export default function App() {
           <RequireAuth>
             <ShellWithProvider>
               <Routes>
+                <Route
+                  path="/dashboard"
+                  element={<DashboardPage />}
+                />
                 <Route
                   path="/"
                   element={<Navigate to="/chats" replace />}

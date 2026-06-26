@@ -2,7 +2,8 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   Bot, MessagesSquare, Globe, FolderTree, Timer,
   Wand2, Wrench, KeyRound, History, Compass, Puzzle,
-  PanelRightOpen, Plus, X, Sparkles, Clock,
+  Panel, PanelRightOpen, Plus, X, Sparkles, Clock,
+  LayoutDashboard,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../state/auth";
@@ -12,6 +13,7 @@ const NAV_SECTIONS = [
   {
     label: "Workspace",
     items: [
+      { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { to: "/chats", label: "Chat", icon: MessagesSquare },
       { to: "/agents", label: "Agents", icon: Bot },
       { to: "/web-space", label: "Web Space", icon: Globe },

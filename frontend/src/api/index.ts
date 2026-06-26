@@ -409,3 +409,13 @@ export const Timeline = {
   diff: (id1: string, id2: string) =>
     api<{ a: any; b: any; diff: Array<{ type: string; value: string }> }>(`/api/history/${id1}/diff/${id2}`),
 };
+
+// ---- Dashboard ----
+export interface DashboardStats {
+  total: number;
+  byStatus: Record<string, number>;
+}
+
+export const Dashboard = {
+  stats: () => api<{ stats: DashboardStats }>(`/api/dashboard/stats`),
+};
