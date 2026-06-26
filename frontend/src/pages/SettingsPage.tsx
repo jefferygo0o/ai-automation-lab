@@ -70,6 +70,7 @@ import {
   Secrets, type SecretMeta,
   type DashboardStats,
   Dashboard,
+  Agents, type Agent, type AgentConfig,
 } from "../api";
 
 const PASTEL_HUES = [
@@ -96,7 +97,7 @@ function SettingsAI() {
 
 /** Bring Your Own Key / Agent provider configuration — mirrors Zo's AI → BYOK panel */
 function AgentConfigSection() {
-  const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [showAddModel, setShowAddModel] = useState(false);
   const [modelName, setModelName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -104,13 +105,15 @@ function AgentConfigSection() {
   const [modelId, setModelId] = useState("");
   const [imageSupport, setImageSupport] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function reload() {
     try {
-      const s = await Secrets.list();
-      setSecrets(s.secrets ?? []);
-    } catch {
-      setSecrets([]);
+      const r = await Agents.list();
+      setAgents(r.agents ?? []);
+    } catch (e: any) {
+      setError(e?.message ?? "failed to load agents");
+      setAgents([]);
     }
   }
   useEffect(() => { reload(); }, []);
@@ -118,18 +121,41 @@ function AgentConfigSection() {
   async function addModel() {
     if (!modelName.trim() || !baseUrl.trim() || !apiKey.trim() || !modelId.trim()) return;
     setSaving(true);
+    setError(null);
     try {
       const keyName = `${modelName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`;
-      const configKey = `${keyName}__CONFIG`;
-      const configPayload = {
-        provider: "custom",
-        baseUrl: baseUrl.trim(),
+      const trimmedBase = baseUrl.trim();
+      const configJson = {
+        provider: "openai",
+        baseUrl: trimmedBase,
         apiKeySecret: keyName,
         model: modelId.trim(),
-        supports_images: imageSupport,
+        temperature: 0.7,
+        maxTokens: 32768,
+        sandbox: {
+          backend: "local",
+          workdir: "workdir",
+          timeoutMs: 120000,
+          memoryMb: 512,
+          cpus: 1,
+          network: "egress",
+          allowHosts: [],
+        },
+        permissions: {
+          read_file: "always",
+          list_files: "always",
+          write_file: "ask",
+          execute_command: "ask",
+          http_request: "ask",
+          list_mcp_tools: "always",
+          call_mcp_tool: "ask",
+          update_memory: "always",
+        },
+        mcpServers: [],
       };
+      const { agent } = await Agents.create(modelName.trim());
       await Secrets.save(keyName, apiKey.trim());
-      await Secrets.save(configKey, JSON.stringify(configPayload));
+      await Agents.updateConfig(agent.id, configJson as any);
       setShowAddModel(false);
       setModelName("");
       setBaseUrl("");
@@ -137,23 +163,18 @@ function AgentConfigSection() {
       setModelId("");
       setImageSupport(false);
       await reload();
+    } catch (e: any) {
+      setError(e?.message ?? "failed to add model");
     } finally {
       setSaving(false);
     }
   }
 
-  const models = secrets
-    .filter((s) => /_API_KEY$/.test(s.name) && !s.name.endsWith("__CONFIG"))
-    .map((s) => {
-      const cfg = secrets.find((x) => x.name === `${s.name}__CONFIG`);
-      let parsed: any = null;
-      try {
-        parsed = cfg ? JSON.parse((cfg as any).value ?? "{}") : null;
-      } catch {
-        parsed = null;
-      }
-      return { secret: s, config: parsed };
-    });
+  async function deleteAgent(id: string, name: string) {
+    if (!confirm(`Delete agent "${name}"? This cannot be undone.`)) return;
+    await Agents.remove(id);
+    await reload();
+  }
 
   return (
     <section>
@@ -163,7 +184,7 @@ function AgentConfigSection() {
             <Cpu className="w-3.5 h-3.5 stroke-[1.75]" /> AI Agents & Models
           </h2>
           <p className="text-2xs text-ink-400 mt-0.5">
-            Add new model connections with a name, base URL, API key, and model ID.
+            Add new model connections — each one creates an agent row with provider config and API key secret.
           </p>
         </div>
         {!showAddModel && (
@@ -210,10 +231,11 @@ function AgentConfigSection() {
                   <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-paper transition-transform ${imageSupport ? 'translate-x-5' : 'translate-x-1'}`} />
                 </button>
               </div>
+              {error && <div className="text-2xs text-rose-700">{error}</div>}
             </div>
 
             <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setShowAddModel(false)} className="btn btn-sm">Cancel</button>
+              <button onClick={() => { setShowAddModel(false); setError(null); }} className="btn btn-sm">Cancel</button>
               <button onClick={addModel} disabled={saving || !modelName.trim() || !baseUrl.trim() || !apiKey.trim() || !modelId.trim()} className="btn btn-primary btn-sm">
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
                 Add
@@ -224,34 +246,23 @@ function AgentConfigSection() {
       )}
 
       <div className="space-y-1.5">
-        {models.map(({ secret, config }) => (
-          <div key={secret.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-3">
+        {agents.map((a) => (
+          <div key={a.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-3">
             <Bot className="w-3.5 h-3.5 stroke-[1.75] text-indigo-500 shrink-0" />
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium text-ink-900 truncate">
-                {secret.name.replace(/_API_KEY$/, '').replace(/_/g, ' ')}
-              </div>
-              {config && (
-                <div className="text-2xs text-ink-400 font-mono truncate">
-                  {config.model} · {config.baseUrl}
-                </div>
-              )}
+              <div className="text-xs font-medium text-ink-900 truncate">{a.name}</div>
+              <div className="text-2xs text-ink-400 font-mono truncate">{a.id}</div>
             </div>
-            {config?.supports_images && <span className="text-2xs bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">Vision</span>}
             <button
-              onClick={async () => {
-                if (!confirm(`Delete model "${secret.name}"?`)) return;
-                await Secrets.remove(secret.name);
-                await Secrets.remove(`${secret.name}__CONFIG`).catch(() => {});
-                await reload();
-              }}
+              onClick={() => deleteAgent(a.id, a.name)}
               className="btn btn-ghost btn-xs text-rose-700"
+              title="Delete agent"
             >
               <Trash2 className="w-3 h-3" />
             </button>
           </div>
         ))}
-        {models.length === 0 && !showAddModel && (
+        {agents.length === 0 && !showAddModel && (
           <div className="text-xs text-ink-400 italic text-center py-6">
             No models configured. Click <span className="font-medium text-ink-500">Add Model</span> to connect one.
           </div>
