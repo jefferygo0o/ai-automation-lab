@@ -39,6 +39,8 @@ import { dashboardApi } from "../dashboard/api.ts";
 import { personasApi } from "../personas/api.ts";
 import { rulesApi } from "../rules/api.ts";
 import { MCP_MARKETPLACE, findMarketplaceEntry } from "../mcp/marketplace.ts";
+import { sitesApi } from "../sites/api.ts";
+import { servicesApi } from "../services/api.ts";
 
 const api = new Hono<{ Variables: { userId: string } }>();
 
@@ -1140,5 +1142,9 @@ api.delete("/api/secrets/:name", async (c) => {
 api.route("/api/dashboard", dashboardApi);
 api.route("/api/personas", personasApi);
 api.route("/api/rules", rulesApi);
+
+// ---- Sites & Services ----
+api.route("/api/sites", sitesApi);
+api.route("/api/services", servicesApi);
 
 export default api;

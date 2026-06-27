@@ -658,3 +658,50 @@ Two lab tools are registered for agents:
 - `file backend/src/tools/lab_tools_extra.ts` — added `agentBrowserAvailable()`, `agentBrowserRead()`, `agentBrowserScreenshot()`, updated `lab_read_webpage` tool, `checkDeps()`, and `lab_install_dependency`
 - `file frontend/src/api/index.ts` — fixed `Rule` interface, `Rules.create`/`update`/`reorder` signatures
 - `file frontend/src/pages/SettingsPage.tsx` — fixed `Rules.create` and `Rules.update` calls
+### 2026-06-27: Sites & Services system (Zo hosting clone)
+
+**Issue:** The lab had no way for agents or users to create, manage, or host full websites and long-running services. The `webspace` system handled single-route pages but there was no project scaffolding, no build toolchain, no process supervision, and no custom domain support.
+
+**Fix:** Built a complete Sites & Services subsystem mirroring Zo Computer's hosting primitives:
+
+1. **Sites** — Full project websites with:
+   - `zosite.json` manifest in each site directory under `Sites/<slug>/`
+   - Templates for 6 variants: blank, blog, marketing, event, slides, data
+   - Auto-scaffolding: package.json, tsconfig.json, vite.config.ts, Tailwind, PostCSS, src/{main,App,index}.tsx/css
+   - CRUD via DB-backed SiteStore (`sites` table in Postgres)
+   - Dev server lifecycle tracking (status: idle→starting→running→error)
+   - Publish flow that builds the site and serves it from the lab's own HTTP server at `/_sites/<slug>/`
+
+2. **Services** — Supervised long-running processes:
+   - `user_services` table: mode (http/tcp/process), entrypoint, workdir, PORT, status, PID, env vars
+   - Supervisor: auto-start on boot, restart-on-crash (3s delay), log to `/dev/shm/lab-svc-<id>.log`
+   - HTTP mode receives `PORT` env var, builds public URL (private = `http://localhost:<port>`, public = nip.io domain)
+   - Custom domains via `custom_domains` table (stored for now; nip.io wildcard DNS support in proxy)
+
+3. **nip.io Reverse Proxy** — `backend/src/sites/proxy.ts`:
+   - Separate Hono server on port 8888 (optional, not auto-started)
+   - Matches incoming `Host` header against `custom_domains` table
+   - Proxies request to `http://127.0.0.1:<service_port>` with same method, headers, and body
+
+4. **Frontend** — `SitesPage.tsx` at `/sites`:
+   - Two tabs: Sites (create/manage projects) and Services (manage running processes)
+   - Create site form: name + variant picker → scaffold + DB entry
+   - Action buttons: start/stop/restart services, view logs, delete sites/services
+   - Sidebar nav link under Workspace section
+
+**Files added:**
+- `backend/src/sites/store.ts` — Site CRUD + scaffold logic
+- `backend/src/sites/supervisor.ts` — Process lifecycle (spawn, monitor, restart, stop)
+- `backend/src/sites/proxy.ts` — nip.io reverse proxy server
+- `backend/src/sites/api.ts` — REST routes for sites (CRUD, scaffold, dev-start, publish)
+- `backend/src/services/store.ts` — Service CRUD + custom domain management
+- `backend/src/services/api.ts` — REST routes for services (CRUD, start/stop/restart, logs, domains)
+- `frontend/src/pages/SitesPage.tsx` — Combined hosting management UI
+
+**Files changed:**
+- `backend/src/db/schema.pg.sql` — Added `sites`, `user_services`, `custom_domains` tables
+- `backend/src/api/server.ts` — Mounted sites API at `/api/sites` and services API at `/api/services`
+- `backend/src/server.ts` — Starts nip.io proxy on port 8888 (if available)
+- `frontend/src/api/index.ts` — Added `Sites` and `Services` API client interfaces + methods
+- `frontend/src/App.tsx` — Added `/sites` route
+- `frontend/src/components/Sidebar.tsx` — Added Sites nav link in Workspace section

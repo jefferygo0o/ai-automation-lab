@@ -21,6 +21,7 @@ import BrowserPage from "./pages/BrowserPage";
 import IntegrationsPage from "./pages/IntegrationsPage";
 import DashboardPage from "./pages/DashboardPage";
 import SettingsPage from "./pages/SettingsPage";
+import SitesPage from "./pages/SitesPage";
 
 const HIDE_TOPBAR = ["/browser"];
 
@@ -176,6 +177,10 @@ export default function App() {
             <ShellWithProvider>
               <Routes>
                 <Route path="/dashboard" element={<DashboardPage />} />
+                <Route
+                  path="/sites"
+                  element={<SitesPage />}
+                />
                 <Route
                   path="/settings/*"
                   element={<SettingsPage />}

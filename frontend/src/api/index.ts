@@ -446,3 +446,78 @@ export const Rules = {
   reorder: (id: string, direction: "up" | "down") =>
     api<{ ok: boolean }>(`/api/rules/${id}/reorder`, { method: "POST", body: JSON.stringify({ direction }) }),
 };
+
+// ---- Sites (managed websites) ----
+export interface Site {
+  id: string;
+  ownerId: string;
+  name: string;
+  slug: string;
+  description: string;
+  variant: string;
+  rootDir: string;
+  devPort: number | null;
+  devStatus: string;
+  publishedServiceId: string | null;
+  isPublic: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const Sites = {
+  list: () => api<{ sites: Site[] }>("/api/sites"),
+  get: (id: string) => api<{ site: Site }>(`/api/sites/${id}`),
+  create: (name: string, variant?: string) =>
+    api<{ site: Site }>("/api/sites", { method: "POST", body: JSON.stringify({ name, variant }) }),
+  update: (id: string, data: Partial<{ name: string; description: string; isPublic: boolean }>) =>
+    api<{ site: Site }>(`/api/sites/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/sites/${id}`, { method: "DELETE" }),
+  startDev: (id: string) => api<{ ok: boolean; port?: number; url?: string }>(`/api/sites/${id}/dev`, { method: "POST" }),
+  stopDev: (id: string) => api<{ ok: boolean }>(`/api/sites/${id}/dev`, { method: "DELETE" }),
+  publish: (id: string, isPublic?: boolean) =>
+    api<{ ok: boolean; url?: string }>(`/api/sites/${id}/publish`, { method: "POST", body: JSON.stringify({ public: isPublic }) }),
+  unpublish: (id: string) => api<{ ok: boolean }>(`/api/sites/${id}/unpublish`, { method: "POST" }),
+  logs: (id: string, tail?: number) =>
+    api<{ stdout: string; stderr: string }>(`/api/sites/${id}/logs?tail=${tail ?? 200}`),
+};
+
+// ---- Services (managed processes) ----
+export interface UserService {
+  id: string;
+  ownerId: string;
+  siteId: string | null;
+  label: string;
+  mode: string;
+  entrypoint: string;
+  workdir: string;
+  localPort: number;
+  isPublic: boolean;
+  status: string;
+  pid: number | null;
+  httpUrl: string;
+  tcpAddr: string;
+  envVars: Record<string, string>;
+  customDomains: string[];
+  restartCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export const Services = {
+  list: () => api<{ services: UserService[] }>("/api/services"),
+  get: (id: string) => api<{ service: UserService }>(`/api/services/${id}`),
+  create: (opts: { label: string; mode: string; entrypoint: string; workdir?: string; localPort?: number; isPublic?: boolean; envVars?: Record<string, string> }) =>
+    api<{ service: UserService }>("/api/services", { method: "POST", body: JSON.stringify(opts) }),
+  update: (id: string, data: Partial<{ label: string; entrypoint: string; workdir: string; isPublic: boolean; envVars: Record<string, string> }>) =>
+    api<{ service: UserService }>(`/api/services/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/services/${id}`, { method: "DELETE" }),
+  start: (id: string) => api<{ ok: boolean }>(`/api/services/${id}/start`, { method: "POST" }),
+  stop: (id: string) => api<{ ok: boolean }>(`/api/services/${id}/stop`, { method: "POST" }),
+  restart: (id: string) => api<{ ok: boolean }>(`/api/services/${id}/restart`, { method: "POST" }),
+  logs: (id: string, tail?: number) =>
+    api<{ logs: { stdout: string; stderr: string } }>(`/api/services/${id}/logs?tail=${tail ?? 200}`),
+  addDomain: (id: string, domain: string) =>
+    api<{ ok: boolean }>(`/api/services/${id}/domains`, { method: "POST", body: JSON.stringify({ domain }) }),
+  removeDomain: (id: string, domain: string) =>
+    api<{ ok: boolean }>(`/api/services/${id}/domains/${encodeURIComponent(domain)}`, { method: "DELETE" }),
+};

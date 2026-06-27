@@ -3,7 +3,7 @@ import {
   Bot, MessagesSquare, Globe, FolderTree, Timer,
   Wand2, Wrench, KeyRound, History, Compass, Puzzle,
   Panel, PanelRightOpen, Plus, X, Sparkles, Clock,
-  LayoutDashboard, Scale,
+  LayoutDashboard, Scale, Server,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../state/auth";
@@ -17,6 +17,7 @@ const NAV_SECTIONS = [
       { to: "/chats", label: "Chat", icon: MessagesSquare },
       { to: "/agents", label: "Agents", icon: Bot },
       { to: "/web-space", label: "Web Space", icon: Globe },
+      { to: "/sites", label: "Sites", icon: Globe },
       { to: "/files", label: "Files", icon: FolderTree },
       { to: "/automations", label: "Automations", icon: Timer },
     ],

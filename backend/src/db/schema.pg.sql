@@ -489,3 +489,62 @@ CREATE TABLE IF NOT EXISTS rules (
   updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rules_owner ON rules(owner_id);
+
+-- ============================================================
+-- SITES (Zo-like managed websites)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS sites (
+  id TEXT PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  variant TEXT NOT NULL DEFAULT 'blank',
+  root_dir TEXT NOT NULL,
+  dev_port INTEGER,
+  dev_status TEXT NOT NULL DEFAULT 'idle',
+  published_service_id TEXT,
+  is_public INTEGER NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_sites_owner ON sites(owner_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sites_slug ON sites(slug);
+
+-- ============================================================
+-- USER SERVICES (supervised long-running processes)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS user_services (
+  id TEXT PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site_id TEXT REFERENCES sites(id) ON DELETE SET NULL,
+  label TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'http',
+  entrypoint TEXT NOT NULL,
+  workdir TEXT NOT NULL DEFAULT '',
+  local_port INTEGER NOT NULL DEFAULT 0,
+  is_public INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'idle',
+  pid INTEGER,
+  http_url TEXT NOT NULL DEFAULT '',
+  tcp_addr TEXT NOT NULL DEFAULT '',
+  env_vars TEXT NOT NULL DEFAULT '{}',
+  custom_domains TEXT NOT NULL DEFAULT '[]',
+  restart_count INTEGER NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_user_services_owner ON user_services(owner_id);
+CREATE INDEX IF NOT EXISTS idx_user_services_site ON user_services(site_id);
+
+-- ============================================================
+-- CUSTOM DOMAINS (via nip.io wildcard DNS)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS custom_domains (
+  id TEXT PRIMARY KEY,
+  service_id TEXT NOT NULL REFERENCES user_services(id) ON DELETE CASCADE,
+  domain TEXT NOT NULL,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_custom_domains_service ON custom_domains(service_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_custom_domains_domain ON custom_domains(domain);
