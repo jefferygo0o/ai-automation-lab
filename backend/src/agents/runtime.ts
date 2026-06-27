@@ -378,7 +378,7 @@ export async function runAgentTurn(
         const tool = toolRegistry.get(tc.name);
         if (!tool) {
           const result = { error: `unknown tool: ${tc.name}` };
-          emit({ type: "tool_result", name: tc.name, result, ok: false, durationMs: 0, error: String(result.error) });
+          await emit({ type: "tool_result", name: tc.name, result, ok: false, durationMs: 0, error: String(result.error) });
           pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
           continue;
         }
@@ -407,10 +407,11 @@ export async function runAgentTurn(
         }
         const resultStr = normalizeToolResult(result, ok);
         const toolDuration = Date.now() - toolStart;
-        emit({ type: "tool_result", name: tc.name, result, ok, durationMs: toolDuration, error: ok ? undefined : String(result?.error ?? "failed") });
+        await emit({ type: "tool_result", name: tc.name, result, ok, durationMs: toolDuration, error: ok ? undefined : String(result?.error ?? "failed") });
         pushToolMessage(messages, chatId, tc, resultStr, run.id);
         onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: toolDuration, at: toolStart });
         recordHistory(agent.id, tc.name, resultStr);
+        yield;
       }
 
       // No tool calls = the LLM produced a text-only final response.

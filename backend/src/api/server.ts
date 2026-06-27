@@ -500,13 +500,14 @@ api.post("/api/chats/:id/messages", async (c) => {
     }
   }
   if (!content) content = "(user sent files)";
-  const { readable, writable } = new TransformStream();
-  const writer = writable.getWriter();
+  c.header("Content-Type", "text/event-stream");
+  c.header("Cache-Control", "no-cache");
+  c.header("Connection", "keep-alive");
   const encoder = new TextEncoder();
   let isDone = false;
   const send = async (e: StreamEvent) => {
     try {
-      await writer.write(
+      await c.res.write(
         encoder.encode(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`)
       );
       if (e.type === "done" || e.type === "error") isDone = true;
@@ -515,7 +516,7 @@ api.post("/api/chats/:id/messages", async (c) => {
   const heartbeat = setInterval(async () => {
     if (isDone) return;
     try {
-      await writer.write(
+      await c.res.write(
         encoder.encode(`event: keepalive\ndata: {}\n\n`)
       );
     } catch { clearInterval(heartbeat); }
@@ -523,15 +524,8 @@ api.post("/api/chats/:id/messages", async (c) => {
   const clearHb = async () => { clearInterval(heartbeat); };
   runAgentTurn(userId, c.req.param("id"), content, send)
     .catch((e: any) => send({ type: "error", message: e?.message ?? String(e) }))
-    .finally(() => { clearHb(); writer.close().catch(() => {}); });
-  return new Response(readable, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+    .finally(() => { clearHb(); c.res.close().catch(() => {}); });
+  return c.res;
 });
 // ---- Chat feedback (thumbs up/down on assistant messages) ----
 api.post("/api/chats/:id/feedback", async (c) => {
