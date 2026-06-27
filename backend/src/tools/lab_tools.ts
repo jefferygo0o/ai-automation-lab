@@ -17,6 +17,7 @@ import { McpStore, mcpManager } from "../mcp/client.ts";
 import { writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
+import { SiteStore, ServiceStore, supervisor } from "../supervisor/index.ts";
 
 // ---------------------------------------------------------------------------
 // helpers
