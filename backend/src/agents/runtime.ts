@@ -411,7 +411,7 @@ export async function runAgentTurn(
         pushToolMessage(messages, chatId, tc, resultStr, run.id);
         onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: toolDuration, at: toolStart });
         recordHistory(agent.id, tc.name, resultStr);
-        yield;
+        await new Promise(r => setTimeout(r, 0));
       }
 
       // No tool calls = the LLM produced a text-only final response.
