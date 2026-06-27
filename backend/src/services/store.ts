@@ -85,6 +85,13 @@ export const ServiceStore = {
     return row ? rowToService(row) : null;
   },
 
+  async getUnchecked(id: string): Promise<UserService | null> {
+    const row = await db
+      .prepare("SELECT * FROM user_services WHERE id = ?")
+      .get(id) as ServiceRow | undefined;
+    return row ? rowToService(row) : null;
+  },
+
   async create(
     ownerId: string,
     opts: {

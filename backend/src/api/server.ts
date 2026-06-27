@@ -41,6 +41,7 @@ import { rulesApi } from "../rules/api.ts";
 import { MCP_MARKETPLACE, findMarketplaceEntry } from "../mcp/marketplace.ts";
 import { sitesApi } from "../sites/api.ts";
 import { servicesApi } from "../services/api.ts";
+import { publicProxy } from "../services/proxy.ts";
 
 const api = new Hono<{ Variables: { userId: string } }>();
 
@@ -67,15 +68,23 @@ api.use(
 );
 
 // ---- Auth + rate limit middleware (applies to all /api/* except public) ----
+api.route("/_proxy", publicProxy);
+
 api.use("/api/*", async (c, next) => {
   const path = c.req.path;
   const PUBLIC =
     path === "/api/auth/login" ||
     path === "/api/auth/register" ||
     path === "/api/health" ||
-    path === "/api/integrations/oauth-webhook";
+    path === "/api/integrations/oauth-webhook" ||
+    path.startsWith("/api/services/") && path.includes("/proxy");
   if (!PUBLIC) {
-    const auth = await authenticateBearer(c.req.raw.headers.get("authorization") ?? undefined);
+    let auth = await authenticateBearer(c.req.raw.headers.get("authorization") ?? undefined);
+    // Fallback: accept token via query param (for browser navigation to proxy URLs)
+    if (!auth) {
+      const qp = new URL(c.req.url).searchParams.get("token");
+      if (qp) auth = await authenticateBearer(`Bearer ${qp}`);
+    }
     if (!auth) return c.json({ error: "unauthorized" }, 401);
     const rl = rateLimit(`u:${auth.userId}`, { perMinute: 240, perHour: 10_000 });
     if (!rl.allowed) {
