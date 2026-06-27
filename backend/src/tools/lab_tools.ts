@@ -691,7 +691,7 @@ toolRegistry.register({
           const services = await ServiceStore.list(userId);
           if (!services.length) return text("(no services)");
           const lines = services.map((s) =>
-            `- ${s.id}: ${s.label} [${s.status}] (${s.mode}) port=${s.localPort} url=${s.httpUrl || s.tcpAddr || "—"}`
+            `- ${s.id}: ${s.label} [${s.status}] (${s.mode}) port=${s.localPort} url=${s.httpUrl ? `/api/services/${s.id}/proxy/` : s.tcpAddr || "—"}`
           );
           return text(lines.join("\n"));
         }
@@ -703,7 +703,7 @@ toolRegistry.register({
             `id: ${svc.id}\nlabel: ${svc.label}\nmode: ${svc.mode}\nstatus: ${svc.status}\n` +
             `entrypoint: ${svc.entrypoint}\nworkdir: ${svc.workdir}\n` +
             `localPort: ${svc.localPort}\nisPublic: ${svc.isPublic}\n` +
-            `httpUrl: ${svc.httpUrl}\ntcpAddr: ${svc.tcpAddr}\n` +
+            `httpUrl: ${svc.httpUrl}\nproxyUrl: ${svc.httpUrl ? `/api/services/${svc.id}/proxy/` : "—"}\ntcpAddr: ${svc.tcpAddr}\n` +
             `customDomains: ${svc.customDomains.join(", ") || "none"}\n` +
             `restartCount: ${svc.restartCount}`
           );

@@ -226,7 +226,19 @@ function ServicesPanel({ services, onReload }: { services: UserService[]; onRelo
                 <span className={s.status === "running" ? "text-emerald-600" : s.status === "error" ? "text-rose-600" : "text-ink-300"}>
                   {s.status}
                 </span>
-                {s.httpUrl && <span className="text-blue-600">{s.httpUrl}</span>}
+                {s.httpUrl && (
+  <span className="flex items-center gap-1">
+    <a
+      href={`/api/services/${s.id}/proxy/`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-blue-600 hover:text-blue-800 underline text-[11px]"
+    >
+      Open ↗
+    </a>
+    <span className="text-ink-300 text-[10px]">{s.httpUrl}</span>
+  </span>
+)}
               </div>
             </div>
             <div className="flex items-center gap-0.5">
