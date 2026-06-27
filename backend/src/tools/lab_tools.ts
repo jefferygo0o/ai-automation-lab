@@ -17,7 +17,10 @@ import { McpStore, mcpManager } from "../mcp/client.ts";
 import { writeFileSync, unlinkSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { nanoid } from "nanoid";
-import { SiteStore, ServiceStore, supervisor } from "../supervisor/index.ts";
+import { SiteStore } from "../sites/store.ts";
+import { ServiceStore } from "../services/store.ts";
+import { startService, stopService, restartService, getServiceLogs } from "../sites/supervisor.ts";
+import { chromium } from "playwright";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -563,6 +566,214 @@ toolRegistry.register({
       return text(`## Web search: "${args.query}"\n\n${content}`);
     } catch (e: any) {
       return err(`web_search failed: ${e?.message ?? String(e)}`);
+    }
+  },
+});
+// ---------------------------------------------------------------------------
+// 7. SITES MANAGEMENT
+// ---------------------------------------------------------------------------
+
+toolRegistry.register({
+  name: "manage_sites",
+  description:
+    "Create, list, get, and delete websites. Sites are standalone React/Vite projects with their own directory and zosite.json. " +
+    "Use action='create' to scaffold a new site, 'list' to see all your sites, 'get' to view details, 'delete' to remove.",
+
+  parameters: {
+    action: {
+      type: "string",
+      description: "operation to perform",
+      required: true,
+      enum: ["list", "get", "create", "delete"],
+    },
+    name: {
+      type: "string",
+      description: "site name — required for create",
+      required: false,
+    },
+    variant: {
+      type: "string",
+      description: "template variant: blank, blog, marketing, event, slides, data (default blank)",
+      required: false,
+    },
+    id: {
+      type: "string",
+      description: "site id — required for get, delete",
+      required: false,
+    },
+  },
+  defaultPermission: "ask",
+  async execute(args, ctx) {
+    const userId = ctx.ownerId;
+    try {
+      switch (args.action) {
+        case "list": {
+          const sites = await SiteStore.list(userId);
+          if (!sites.length) return text("(no sites)");
+          const lines = sites.map((s) =>
+            `- ${s.id}: ${s.name} (${s.variant}) [${s.devStatus}] slug=${s.slug}`
+          );
+          return text(lines.join("\n"));
+        }
+        case "get": {
+          if (!args.id) return err("id required for get");
+          const site = await SiteStore.get(args.id, userId);
+          if (!site) return err("site not found");
+          return text(
+            `id: ${site.id}\nname: ${site.name}\nslug: ${site.slug}\nvariant: ${site.variant}\n` +
+            `status: ${site.devStatus}\npublic: ${site.isPublic}\nrootDir: ${site.rootDir}\n` +
+            `publishedServiceId: ${site.publishedServiceId ?? "(not published)"}`
+          );
+        }
+        case "create": {
+          if (!args.name) return err("name required for create");
+          const site = await SiteStore.create(userId, args.name, args.variant || "blank");
+          return text(
+            `Created site: ${site.id} ("${site.name}")\nslug: ${site.slug}\nvariant: ${site.variant}\n` +
+            `rootDir: ${site.rootDir}\n\n` +
+            `The site directory has been scaffolded with:\n` +
+            `- index.html, package.json, vite.config.ts, tsconfig.json\n` +
+            `- src/main.tsx, src/App.tsx, src/index.css\n` +
+            `- tailwind.config.js, postcss.config.js\n\n` +
+            `Run \`manage_services action=create label="${site.name}" mode=http entrypoint="bun run dev" workdir=${site.rootDir}\` to start a dev server.`
+          );
+        }
+        case "delete": {
+          if (!args.id) return err("id required for delete");
+          const ok = await SiteStore.delete(args.id, userId);
+          if (!ok) return err("site not found");
+          return text(`Deleted site: ${args.id}`);
+        }
+        default:
+          return err(`unknown action: ${args.action}`);
+      }
+    } catch (e: any) {
+      return err(`manage_sites failed: ${e?.message ?? String(e)}`);
+    }
+  },
+});
+
+// ---------------------------------------------------------------------------
+// 8. SERVICES MANAGEMENT
+// ---------------------------------------------------------------------------
+
+toolRegistry.register({
+  name: "manage_services",
+  description:
+    "Create, list, start, stop, restart, and delete supervised services. " +
+    "Services are long-running processes managed by the lab supervisor. " +
+    "Modes: http (web service on $PORT), tcp (raw TCP), process (background, no port). " +
+    "Use action='list' to see all services, 'create' to add, 'start'/'stop'/'restart' to control, " +
+    "'get' for details, 'logs' to see output, 'delete' to remove.",
+
+  parameters: {
+    action: {
+      type: "string",
+      description: "operation to perform",
+      required: true,
+      enum: ["list", "get", "create", "delete", "start", "stop", "restart", "logs"],
+    },
+    id: { type: "string", description: "service id — required for get, start, stop, restart, delete, logs", required: false },
+    label: { type: "string", description: "display label — required for create", required: false },
+    mode: { type: "string", description: "http (web), tcp (raw), or process (background)", required: false },
+    entrypoint: { type: "string", description: "command to run — required for create, e.g. 'bun run dev'", required: false },
+    workdir: { type: "string", description: "working directory for the process", required: false },
+    isPublic: { type: "string", enum: ["true", "false"], description: "whether http service is publicly accessible", required: false },
+    envVars: { type: "string", description: "JSON object of environment variables e.g. '{\"PORT\":\"3000\"}'", required: false },
+    tail: { type: "number", description: "number of log lines to return (default 100, for logs action)", required: false },
+  },
+  defaultPermission: "ask",
+  async execute(args, ctx) {
+    const userId = ctx.ownerId;
+    try {
+      switch (args.action) {
+        case "list": {
+          const services = await ServiceStore.list(userId);
+          if (!services.length) return text("(no services)");
+          const lines = services.map((s) =>
+            `- ${s.id}: ${s.label} [${s.status}] (${s.mode}) port=${s.localPort} url=${s.httpUrl || s.tcpAddr || "—"}`
+          );
+          return text(lines.join("\n"));
+        }
+        case "get": {
+          if (!args.id) return err("id required for get");
+          const svc = await ServiceStore.get(args.id, userId);
+          if (!svc) return err("service not found");
+          return text(
+            `id: ${svc.id}\nlabel: ${svc.label}\nmode: ${svc.mode}\nstatus: ${svc.status}\n` +
+            `entrypoint: ${svc.entrypoint}\nworkdir: ${svc.workdir}\n` +
+            `localPort: ${svc.localPort}\nisPublic: ${svc.isPublic}\n` +
+            `httpUrl: ${svc.httpUrl}\ntcpAddr: ${svc.tcpAddr}\n` +
+            `customDomains: ${svc.customDomains.join(", ") || "none"}\n` +
+            `restartCount: ${svc.restartCount}`
+          );
+        }
+        case "create": {
+          if (!args.label) return err("label required for create");
+          if (!args.entrypoint) return err("entrypoint required for create");
+          let envVars: Record<string, string> = {};
+          if (args.envVars) {
+            try { envVars = JSON.parse(args.envVars); } catch { return err("envVars must be valid JSON"); }
+          }
+          const svc = await ServiceStore.create(userId, {
+            label: args.label,
+            mode: args.mode || "http",
+            entrypoint: args.entrypoint,
+            workdir: args.workdir || "",
+            isPublic: args.isPublic === "true",
+            envVars,
+          });
+          return text(
+            `Created service: ${svc.id} ("${svc.label}")\nmode: ${svc.mode}\nentrypoint: ${svc.entrypoint}\n\n` +
+            `Run \`manage_services action=start id=${svc.id}\` to start it.`
+          );
+        }
+        case "start": {
+          if (!args.id) return err("id required for start");
+          const svc = await ServiceStore.get(args.id, userId);
+          if (!svc) return err("service not found");
+          const result = await startService(args.id);
+          if (!result.ok) return err(result.error || "start failed");
+          const updated = await ServiceStore.get(args.id, userId);
+          return text(`Started service: ${args.id} — url=${updated?.httpUrl || updated?.tcpAddr || "localhost"}`);
+        }
+        case "stop": {
+          if (!args.id) return err("id required for stop");
+          const svc = await ServiceStore.get(args.id, userId);
+          if (!svc) return err("service not found");
+          await stopService(args.id);
+          return text(`Stopped service: ${args.id}`);
+        }
+        case "restart": {
+          if (!args.id) return err("id required for restart");
+          const svc = await ServiceStore.get(args.id, userId);
+          if (!svc) return err("service not found");
+          const result = await restartService(args.id);
+          if (!result.ok) return err(result.error || "restart failed");
+          return text(`Restarted service: ${args.id}`);
+        }
+        case "logs": {
+          if (!args.id) return err("id required for logs");
+          const svc = await ServiceStore.get(args.id, userId);
+          if (!svc) return err("service not found");
+          const tail = typeof args.tail === "number" ? args.tail : 100;
+          const logs = getServiceLogs(args.id, tail);
+          let out = `=== stdout (last ${tail} lines) ===\n${logs.stdout || "(empty)"}\n\n=== stderr (last ${tail} lines) ===\n${logs.stderr || "(empty)"}`;
+          return text(out);
+        }
+        case "delete": {
+          if (!args.id) return err("id required for delete");
+          const svc = await ServiceStore.get(args.id, userId);
+          if (!svc) return err("service not found");
+          await stopService(args.id);
+          await ServiceStore.delete(args.id, userId);
+          return text(`Deleted service: ${args.id}`);
+        }
+        default:
+          return err(`unknown action: ${args.action}`);
+      }
+    } catch (e: any) {
+      return err(`manage_services failed: ${e?.message ?? String(e)}`);
     }
   },
 });
