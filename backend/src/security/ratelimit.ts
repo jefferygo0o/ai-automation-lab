@@ -52,11 +52,11 @@ export async function incrementHourly(userId: string): Promise<number> {
   const day = new Date().toISOString().slice(0, 10);
   const hour = new Date().getUTCHours();
   await db.prepare(
-    `INSERT INTO rate_counters (user_id, day, hour, count) VALUES (?, ?, ?, 1)
-     ON CONFLICT(user_id, day, hour) DO UPDATE SET count = count + 1`
+    `INSERT INTO rate_counters (user_id, day, hour, "count") VALUES (?, ?, ?, 1)
+     ON CONFLICT(user_id, day, hour) DO UPDATE SET "count" = "count" + 1`
   ).run(userId, day, hour);
   const r = await db.prepare(
-    `SELECT count FROM rate_counters WHERE user_id = ? AND day = ? AND hour = ?`
+    `SELECT "count" FROM rate_counters WHERE user_id = ? AND day = ? AND hour = ?`
   ).get(userId, day, hour) as { count: number } | undefined;
   return r?.count ?? 0;
 }
