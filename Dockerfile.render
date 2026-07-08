@@ -6,41 +6,61 @@
 FROM oven/bun:1.3.11 AS base
 WORKDIR /app
 ENV NODE_ENV=production
+
 # --- Install stage: install all deps for both packages in a fresh layer ---
 FROM base AS install
 WORKDIR /app
 # Install build tools needed by native modules (better-sqlite, sharp, etc.)
+# plus all the lab's optional native dependencies.
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     python3 build-essential ca-certificates \
+    ffmpeg imagemagick fonts-liberation libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+    libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
+    libgbm1 libpango-1.0-0 libcairo2 libasound2 libcups2 libxss1 libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
 COPY backend/package.json backend/bun.lock ./backend/
 COPY frontend/package.json frontend/bun.lock ./frontend/
 RUN cd backend && bun install --frozen-lockfile
 RUN cd frontend && bun install --frozen-lockfile
 
-# --- Build stage: compile the frontend SPA ---
+# --- Build stage: compile the frontend SPA + install Playwright chromium ---
 FROM install AS build
 WORKDIR /app
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 RUN cd frontend && bun run build
 RUN mkdir -p backend/dist-spa && cp -r frontend/dist/* backend/dist-spa/
+# Install Playwright's Chromium browser (browsers need /root/.cache persistence
+# which Render gives us via persistent disk on paid plans, or we re-download
+# on cold start).
+RUN cd backend && bunx playwright install chromium --with-deps 2>&1 | tail -5 || true
 
 # --- Runtime stage: minimal image with only what's needed to run ---
 FROM base AS runtime
 WORKDIR /app
-# Install Node.js (npm/npx) and Python uv (uvx) for MCP server spawning
+# Runtime: install browsers' shared libs + ffmpeg + imagemagick + node + uv
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
-    curl ca-certificates nodejs npm python3 python3-pip \
+    curl ca-certificates \
+    ffmpeg imagemagick fonts-liberation \
+    libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
+    libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+    libpango-1.0-0 libcairo2 libasound2 libcups2 libxss1 libgtk-3-0 \
+    nodejs npm python3 python3-pip \
     && rm -rf /var/lib/apt/lists/* && \
     curl -fsSL https://astral.sh/uv/install.sh | sh \
-    && rm -rf /root/.cargo  # uv installs to /root/.local/bin
+    && rm -rf /root/.cargo
 ENV PATH="/root/.local/bin:${PATH}"
+# Install agent-browser CLI (the fast browser automation Zo Computer provides)
+RUN curl -fsSL https://media.zocomputer.com/install/agentbrowser2.sh | bash
 # Copy the source tree (includes node_modules from install stage via COPY)
 COPY --from=install /app/backend/node_modules ./backend/node_modules
 COPY --from=install /app/frontend/node_modules ./frontend/node_modules
 COPY --from=build /app/backend ./backend
-# Keep frontend/ around because backend/dist-spa is a sub-path
+# Re-install Chromium into the runtime layer's cache (much smaller than
+# baking the browser into the image, and avoids most multi-arch pitfalls).
+RUN cd backend && bunx playwright install chromium 2>&1 | tail -5 || true
+# Install d2 (diagramming) — the d2lang install script drops it into /usr/local/bin
+RUN curl -fsSL https://d2lang.com/install.sh | sh -s -- 2>&1 | tail -3 || true
 
 ENV PORT=10000
 ENV LAB_PROJECT_ROOT=/app
@@ -49,4 +69,3 @@ ENV LAB_DATA_DIR=/var/data/lab
 EXPOSE 10000
 WORKDIR /app/backend
 CMD ["bun", "run", "src/server.ts"]
-# Fix the working directory and add healthcheck

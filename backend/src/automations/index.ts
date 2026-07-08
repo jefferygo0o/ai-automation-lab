@@ -90,20 +90,22 @@ automationsApi.post("/", async (c) => {
     rrule?: string;
     instruction?: string;
     active?: boolean;
+    description?: string;
   };
-  if (!body.name || !body.agent_id) {
+  if (!body.name) {
     return c.json({ error: "name and agent_id required" }, 400);
   }
   const id = `auto_${nanoid()}`;
   const now = Date.now();
   await db.query(
-    `INSERT INTO automations (id, owner_id, name, agent_id, rrule, prompt, active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO automations (id, owner_id, name, description, agent_id, rrule, prompt, active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     userId,
     body.name,
-    body.agent_id,
+    body.description ?? "",
+    body.agent_id || null,
     body.rrule ?? "FREQ=MINUTELY;INTERVAL=15",
     body.instruction ?? "",
     body.active !== false ? 1 : 0,
@@ -132,6 +134,7 @@ automationsApi.put("/:id", async (c) => {
     rrule?: string;
     instruction?: string;
     active?: boolean;
+    description?: string;
   };
   const sets: string[] = [];
   const vals: any[] = [];
