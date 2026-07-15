@@ -808,6 +808,9 @@ API.get("/stats", async (c) => {
 API.get("/connect-config", async (c) => {
   const userId = c.get("userId") as string;
   const key = await getPdApiKey(userId);
+  if (!key) {
+    return c.json({ error: "Foundry Connect is not configured" }, 502);
+  }
   return c.json({
     configured: !!key,
     hasProjectId: false,

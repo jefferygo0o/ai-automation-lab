@@ -592,7 +592,7 @@ function SettingsAdvanced() {
 
   useEffect(() => {
     Dashboard.stats()
-      .then((d) => { setStats(d.stats ?? d as any); setLoading(false); })
+      .then((d) => { setStats(d); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
 

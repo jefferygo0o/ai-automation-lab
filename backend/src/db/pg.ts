@@ -112,11 +112,11 @@ function splitSqlStatements(sql: string): string[] {
         current += char;
       }
     } else if (inDollarQuote) {
-      if (char === "$" && sql[i + 1] === "$" && dollarQuoteMarker === "$$") {
+      if (char === "$" && sql.slice(i, i + dollarQuoteMarker.length) === dollarQuoteMarker) {
         inDollarQuote = false;
+        current += dollarQuoteMarker;
+        i += dollarQuoteMarker.length;
         dollarQuoteMarker = "";
-        current += "$$";
-        i += 2;
         continue;
       } else {
         current += char;
@@ -129,11 +129,12 @@ function splitSqlStatements(sql: string): string[] {
         inDoubleQuote = true;
         current += '"';
       } else if (char === "$") {
-        if (sql[i + 1] === "$") {
-          dollarQuoteMarker = "$$";
+        const marker = sql.slice(i).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/)?.[0];
+        if (marker) {
+          dollarQuoteMarker = marker;
           inDollarQuote = true;
-          current += "$$";
-          i += 2;
+          current += marker;
+          i += marker.length;
           continue;
         } else {
           current += char;

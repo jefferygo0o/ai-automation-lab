@@ -25,7 +25,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     DashboardApi.stats()
-      .then(({ stats }) => { setStats(stats); setLoading(false); })
+      .then((data) => { setStats(data); setLoading(false); })
       .catch((e) => { setError(e?.message ?? "failed to load dashboard"); setLoading(false); });
   }, []);
 

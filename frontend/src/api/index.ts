@@ -423,7 +423,7 @@ export interface DashboardStats {
 }
 
 export const Dashboard = {
-  stats: () => api<{ stats: DashboardStats }>(`/api/dashboard/stats`),
+  stats: () => api<DashboardStats>(`/api/dashboard/stats`),
 };
 
 // ---- Rules ----
