@@ -45,6 +45,9 @@ import { publicProxy } from "../services/proxy.ts";
 import { ApiKeys, ACCESS_SCOPES, scopeForMethod } from "../security/api_keys.ts";
 import { getUserTimezone, setUserTimezone } from "../settings/user.ts";
 import { ProviderRegistry, type ProviderRecord } from "../providers/registry.ts";
+import { browserApi } from "../browser/api.ts";
+import { channelsApi } from "../channels/index.ts";
+import { Catalogue } from "../catalog/index.ts";
 
 const api = new Hono<{ Variables: { userId: string; apiKeyId?: string; scopes?: string[]; timezone?: string } }>();
 
@@ -1229,5 +1232,13 @@ api.post("/api/access-tokens", async (c) => {
 api.delete("/api/access-tokens/:id", async (c) => {
   return c.json({ ok: await ApiKeys.revoke(c.req.param("id"), c.get("userId")) });
 });
+
+api.route("/api/browser", browserApi);
+api.route("/api/channels", channelsApi);
+
+api.get("/api/catalog", async (c) => c.json(await Catalogue.list(c.get("userId"))));
+api.get("/api/catalog/usage", async (c) => c.json(await Catalogue.usage(c.get("userId"), Number(c.req.query("days") ?? 30))));
+
+api.get("/api/openapi.json", (c) => c.json({ openapi: "3.0.3", info: { title: "AI Automation Lab API", version: "1.0.0" }, paths: { "/api/health": { get: { responses: { "200": { description: "Healthy" } } } }, "/api/workspace/search": { get: { responses: { "200": { description: "Search results" } } } }, "/api/approvals": { get: { responses: { "200": { description: "Approval requests" } } } }, "/api/catalog": { get: { responses: { "200": { description: "Unified catalogue" } } } } } }));
 
 export default api;

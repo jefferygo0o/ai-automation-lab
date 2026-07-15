@@ -20,6 +20,7 @@ export interface UserService {
   restartCount: number;
   createdAt: number;
   updatedAt: number;
+  secretRefs: Record<string, string>;
 }
 
 interface ServiceRow {
@@ -48,6 +49,8 @@ function rowToService(r: ServiceRow): UserService {
   try { envVars = JSON.parse(r.env_vars || "{}"); } catch {}
   let customDomains: string[] = [];
   try { customDomains = JSON.parse(r.custom_domains || "[]"); } catch {}
+  let secretRefs: Record<string, string> = {};
+  try { secretRefs = JSON.parse((r as any).secret_refs || "{}"); } catch {}
   return {
     id: r.id,
     ownerId: r.owner_id,
@@ -64,6 +67,7 @@ function rowToService(r: ServiceRow): UserService {
     tcpAddr: r.tcp_addr,
     envVars,
     customDomains,
+    secretRefs,
     restartCount: r.restart_count,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -103,6 +107,7 @@ export const ServiceStore = {
       isPublic?: boolean;
       envVars?: Record<string, string>;
       siteId?: string;
+      secretRefs?: Record<string, string>;
     },
   ): Promise<UserService> {
     const id = `svc_${nanoid(10)}`;
@@ -134,6 +139,7 @@ export const ServiceStore = {
     pid: number | null;
     envVars: Record<string, string>;
     customDomains: string[];
+    secretRefs: Record<string, string>;
   }>): Promise<UserService | null> {
     const existing = await ServiceStore.get(id, ownerId);
     if (!existing) return null;
@@ -149,6 +155,7 @@ export const ServiceStore = {
     if (fields.pid !== undefined) { sets.push("pid = ?"); vals.push(fields.pid); }
     if (fields.envVars !== undefined) { sets.push("env_vars = ?"); vals.push(JSON.stringify(fields.envVars)); }
     if (fields.customDomains !== undefined) { sets.push("custom_domains = ?"); vals.push(JSON.stringify(fields.customDomains)); }
+    if (fields.secretRefs !== undefined) { sets.push("secret_refs = ?"); vals.push(JSON.stringify(fields.secretRefs)); }
     if (sets.length === 0) return existing;
     sets.push("updated_at = ?");
     vals.push(Date.now(), id, ownerId);

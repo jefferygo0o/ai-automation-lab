@@ -383,3 +383,94 @@ CREATE TABLE IF NOT EXISTS provider_registry (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_provider_registry_owner ON provider_registry(owner_id, kind);
+
+CREATE TABLE IF NOT EXISTS browser_sessions (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT 'Browser session',
+  status TEXT NOT NULL DEFAULT 'stopped',
+  current_url TEXT NOT NULL DEFAULT '',
+  storage_state_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_started_at INTEGER,
+  last_stopped_at INTEGER,
+  UNIQUE(owner_id, agent_id, name)
+);
+CREATE INDEX IF NOT EXISTS idx_browser_sessions_owner ON browser_sessions(owner_id);
+
+CREATE TABLE IF NOT EXISTS browser_downloads (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL REFERENCES browser_sessions(id) ON DELETE CASCADE,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  filename TEXT NOT NULL,
+  path TEXT NOT NULL,
+  url TEXT NOT NULL DEFAULT '',
+  mime_type TEXT NOT NULL DEFAULT '',
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_browser_downloads_owner ON browser_downloads(owner_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS service_deployments (
+  id TEXT PRIMARY KEY,
+  service_id TEXT NOT NULL,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  version INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'created',
+  config_json TEXT NOT NULL DEFAULT '{}',
+  build_output TEXT NOT NULL DEFAULT '',
+  health_url TEXT NOT NULL DEFAULT '',
+  health_status TEXT NOT NULL DEFAULT 'unknown',
+  created_at INTEGER NOT NULL,
+  deployed_at INTEGER,
+  rolled_back_at INTEGER,
+  UNIQUE(service_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_service_deployments_owner ON service_deployments(owner_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS user_services (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site_id TEXT,
+  label TEXT NOT NULL,
+  mode TEXT NOT NULL DEFAULT "http",
+  entrypoint TEXT NOT NULL,
+  workdir TEXT NOT NULL DEFAULT "",
+  local_port INTEGER NOT NULL DEFAULT 0,
+  is_public INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT "idle",
+  pid INTEGER,
+  http_url TEXT NOT NULL DEFAULT "",
+  tcp_addr TEXT NOT NULL DEFAULT "",
+  env_vars TEXT NOT NULL DEFAULT "{}",
+  secret_refs TEXT NOT NULL DEFAULT "{}"
+);
+
+CREATE TABLE IF NOT EXISTS usage_events (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  run_id TEXT,
+  provider TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  kind TEXT NOT NULL DEFAULT 'llm',
+  prompt_tokens INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  total_tokens INTEGER NOT NULL DEFAULT 0,
+  cost_cents REAL NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_events_owner ON usage_events(owner_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS channel_adapters (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  name TEXT NOT NULL,
+  config_json TEXT NOT NULL DEFAULT '{}',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_channel_adapters_owner ON channel_adapters(owner_id);
