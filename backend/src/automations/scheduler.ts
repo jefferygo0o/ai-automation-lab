@@ -17,6 +17,7 @@
  */
 import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
+import { getUserTimezone } from "../settings/user.ts";
 
 interface AutomationRow {
   id: string;

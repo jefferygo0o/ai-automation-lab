@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   email TEXT UNIQUE NOT NULL,
   role TEXT NOT NULL DEFAULT 'user',
+  timezone TEXT NOT NULL DEFAULT 'UTC',
   created_at BIGINT NOT NULL
 );
 
@@ -435,6 +436,21 @@ CREATE INDEX IF NOT EXISTS idx_api_keys_owner ON api_keys(owner_id);
 
 -- Migration: add is_enabled column to webhook_endpoints
 ALTER TABLE webhook_endpoints ADD COLUMN IF NOT EXISTS is_enabled INTEGER NOT NULL DEFAULT 1;
+
+CREATE TABLE IF NOT EXISTS provider_registry (
+  id TEXT PRIMARY KEY,
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  base_url TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  secret_name TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_registry_owner ON provider_registry(owner_id, kind);
 
 -- ============================================================
 -- AGENT WORKSPACE SNAPSHOTS (persistent agent files in Supabase)

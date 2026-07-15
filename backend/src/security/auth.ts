@@ -1,6 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { db } from "../db/index.ts";
 import { supabaseAdmin } from "./supabase.ts";
+import { ApiKeys, scopeForMethod } from "./api_keys.ts";
 
 export interface Session {
   token: string;
@@ -52,12 +53,14 @@ export async function login(email: string, password: string): Promise<Session | 
   };
 }
 
-export async function authenticateBearer(authHeader: string | undefined): Promise<{ userId: string } | null> {
+export async function authenticateBearer(authHeader: string | undefined): Promise<{ userId: string; apiKeyId?: string; scopes?: string[] } | null> {
   if (!authHeader || !supabaseAdmin) return null;
   const m = authHeader.match(/^Bearer\s+(.+)$/i);
   if (!m || !m[1]) return null;
   const { data, error } = await supabaseAdmin.auth.getUser(m[1]);
   if (error || !data.user) return null;
+  const apiKeyAuth = await ApiKeys.authenticate(m[1], scopeForMethod("GET"));
+  if (apiKeyAuth) return { userId: apiKeyAuth.ownerId, apiKeyId: apiKeyAuth.keyId, scopes: apiKeyAuth.scopes };
   return { userId: data.user.id };
 }
 

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT "user",
+  timezone TEXT NOT NULL DEFAULT "UTC",
   created_at INTEGER NOT NULL
 );
 
@@ -367,3 +368,18 @@ CREATE TABLE IF NOT EXISTS rules (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rules_owner ON rules(owner_id);
+
+CREATE TABLE IF NOT EXISTS provider_registry (
+  id TEXT PRIMARY KEY,
+  owner_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  base_url TEXT NOT NULL DEFAULT '',
+  model TEXT NOT NULL DEFAULT '',
+  secret_name TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_provider_registry_owner ON provider_registry(owner_id, kind);

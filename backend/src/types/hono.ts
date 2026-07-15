@@ -5,5 +5,8 @@
 export type HonoEnv = {
   Variables: {
     userId: string;
+    apiKeyId?: string;
+    scopes?: string[];
+    timezone?: string;
   };
 };

@@ -42,8 +42,11 @@ import { MCP_MARKETPLACE, findMarketplaceEntry } from "../mcp/marketplace.ts";
 import { sitesApi } from "../sites/api.ts";
 import { servicesApi } from "../services/api.ts";
 import { publicProxy } from "../services/proxy.ts";
+import { ApiKeys, ACCESS_SCOPES, scopeForMethod } from "../security/api_keys.ts";
+import { getUserTimezone, setUserTimezone } from "../settings/user.ts";
+import { ProviderRegistry, type ProviderRecord } from "../providers/registry.ts";
 
-const api = new Hono<{ Variables: { userId: string } }>();
+const api = new Hono<{ Variables: { userId: string; apiKeyId?: string; scopes?: string[]; timezone?: string } }>();
 
 // ---- CORS (must run before auth so OPTIONS preflight works) ----
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? "")
@@ -86,12 +89,18 @@ api.use("/api/*", async (c, next) => {
       if (qp) auth = await authenticateBearer(`Bearer ${qp}`);
     }
     if (!auth) return c.json({ error: "unauthorized" }, 401);
+    if (auth.scopes && !auth.scopes.includes(scopeForMethod(c.req.method))) {
+      return c.json({ error: "insufficient_scope", required: scopeForMethod(c.req.method) }, 403);
+    }
     const rl = rateLimit(`u:${auth.userId}`, { perMinute: 240, perHour: 10_000 });
     if (!rl.allowed) {
       c.header("Retry-After", String(Math.ceil(rl.retryAfterMs / 1000)));
       return c.json({ error: "rate_limited", reason: rl.reason }, 429);
     }
     c.set("userId", auth.userId);
+    c.set("apiKeyId", auth.apiKeyId);
+    c.set("scopes", auth.scopes);
+    c.set("timezone", c.req.raw.headers.get("x-timezone") ?? "UTC");
   }
   await next();
 });
@@ -1160,5 +1169,63 @@ api.route("/api/rules", rulesApi);
 // ---- Sites & Services ----
 api.route("/api/sites", sitesApi);
 api.route("/api/services", servicesApi);
+
+api.get("/api/settings/timezone", async (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ timezone: await getUserTimezone(userId) });
+});
+
+api.put("/api/settings/timezone", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = await c.req.json().catch(() => ({})) as { timezone?: string };
+  if (!body.timezone) return c.json({ error: "timezone required" }, 400);
+  try {
+    const timezone = await setUserTimezone(userId, body.timezone);
+    return c.json({ timezone });
+  } catch (e: any) {
+    return c.json({ error: e?.message ?? String(e) }, 400);
+  }
+});
+
+api.get("/api/providers", async (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ providers: await ProviderRegistry.list(userId) });
+});
+
+api.post("/api/providers", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = await c.req.json().catch(() => ({})) as Partial<ProviderRecord>;
+  if (!body.name || !body.kind) return c.json({ error: "name and kind required" }, 400);
+  return c.json({ provider: await ProviderRegistry.create(userId, body) }, 201);
+});
+
+api.put("/api/providers/:id", async (c) => {
+  const userId = c.get("userId") as string;
+  const body = await c.req.json().catch(() => ({})) as Partial<ProviderRecord>;
+  const provider = await ProviderRegistry.update(c.req.param("id"), userId, body);
+  return provider ? c.json({ provider }) : c.json({ error: "not found" }, 404);
+});
+
+api.delete("/api/providers/:id", async (c) => {
+  const userId = c.get("userId") as string;
+  return c.json({ ok: await ProviderRegistry.remove(c.req.param("id"), userId) });
+});
+
+api.get("/api/access-tokens", async (c) => {
+  return c.json({ tokens: await ApiKeys.list(c.get("userId")) });
+});
+
+api.post("/api/access-tokens", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { name?: string; scopes?: string[]; expiresAt?: number };
+  const scopes = (body.scopes ?? ["read"]).filter((scope): scope is "read" | "write" | "admin" => scope === "read" || scope === "write" || scope === "admin");
+  const name = body.name?.trim();
+  if (!name) return c.json({ error: "name required" }, 400);
+  const created = await ApiKeys.create(c.get("userId"), name, scopes.length ? scopes : ["read"], body.expiresAt);
+  return c.json({ token: created }, 201);
+});
+
+api.delete("/api/access-tokens/:id", async (c) => {
+  return c.json({ ok: await ApiKeys.revoke(c.req.param("id"), c.get("userId")) });
+});
 
 export default api;

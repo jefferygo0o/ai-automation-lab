@@ -121,6 +121,52 @@ export const WorkspaceService = {
     const value = relative(this.root(), absPath);
     return value || ".";
   },
+  listTrash() {
+    const root = this.trashRoot();
+    return readdirSync(root, { withFileTypes: true }).map((entry) => {
+      const absPath = join(root, entry.name);
+      return entryFor(absPath, entry.name);
+    }).sort((a, b) => b.mtime - a.mtime);
+  },
+  restoreTrash(name: string): string {
+    const trashPath = this.resolve(join("Trash", name));
+    if (!trashPath || !existsSync(trashPath)) throw new Error("trash item not found");
+    const originalName = name.replace(/^\\d+-/, "");
+    const destination = this.resolve(originalName);
+    if (!destination) throw new Error("invalid restore destination");
+    if (existsSync(destination)) throw new Error("restore destination already exists");
+    mkdirSync(dirname(destination), { recursive: true });
+    renameSync(trashPath, destination);
+    return this.relative(destination);
+  },
+  createSnapshot(label = "manual") {
+    const id = `${Date.now()}-${label.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+    const destination = join(this.snapshotsRoot(), id);
+    mkdirSync(destination, { recursive: true });
+    for (const entry of readdirSync(this.root(), { withFileTypes: true })) {
+      if (entry.name === "Trash" || entry.name === ".zo" || EXCLUDED_DIRS.has(entry.name)) continue;
+      cpSync(join(this.root(), entry.name), join(destination, entry.name), { recursive: true });
+    }
+    writeFileSync(join(destination, "snapshot.json"), JSON.stringify({ id, label, createdAt: Date.now() }, null, 2));
+    return { id, label, createdAt: Date.now(), path: this.relative(destination) };
+  },
+  listSnapshots() {
+    const root = this.snapshotsRoot();
+    return readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => {
+      const metadataPath = join(root, entry.name, "snapshot.json");
+      try { return JSON.parse(readFileSync(metadataPath, "utf8")); } catch { return { id: entry.name, label: "unknown" }; }
+    }).sort((a, b) => Number(b.createdAt ?? 0) - Number(a.createdAt ?? 0));
+  },
+  restoreSnapshot(id: string) {
+    const snapshot = this.resolve(join(".zo", "snapshots", id));
+    if (!snapshot || !existsSync(snapshot)) throw new Error("snapshot not found");
+    for (const entry of readdirSync(snapshot, { withFileTypes: true })) {
+      if (entry.name === "snapshot.json") continue;
+      const destination = join(this.root(), entry.name);
+      cpSync(join(snapshot, entry.name), destination, { recursive: true, force: true });
+    }
+    return { ok: true, id };
+  },
 };
 
 export const AGENTS_DIR = WorkspaceService.agentsRoot();
@@ -213,4 +259,44 @@ workspaceApi.get("/info", (c) => {
   if (!absPath || !existsSync(absPath)) return c.json({ error: "not found" }, 404);
   const stat = statSync(absPath);
   return c.json({ path: WorkspaceService.relative(absPath), type: stat.isDirectory() ? "dir" : "file", size: stat.size, mtime: stat.mtimeMs });
+});
+
+workspaceApi.get("/search", (c) => {
+  const query = (c.req.query("q") ?? "").trim().toLowerCase();
+  if (!query) return c.json({ error: "q required" }, 400);
+  const start = WorkspaceService.resolve(c.req.query("path") ?? ".");
+  if (!start || !existsSync(start) || !lstatSync(start).isDirectory()) return c.json({ error: "directory not found" }, 404);
+  const results: Array<FileEntry & { matches?: number }> = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (EXCLUDED_DIRS.has(entry.name)) continue;
+      const absPath = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(absPath); continue; }
+      const searchableName = entry.name.toLowerCase();
+      let matches = searchableName.includes(query) ? 1 : 0;
+      if (matches === 0 && statSync(absPath).size <= 512 * 1024 && isTextFile(entry.name)) {
+        try { matches = readFileSync(absPath, "utf8").toLowerCase().split(query).length - 1; } catch {}
+      }
+      if (matches > 0) results.push({ ...entryFor(absPath, entry.name), matches });
+    }
+  };
+  walk(start);
+  return c.json({ query, results: results.slice(0, 500) });
+});
+
+workspaceApi.get("/trash", (c) => c.json({ items: WorkspaceService.listTrash() }));
+workspaceApi.post("/trash/:name/restore", (c) => {
+  try { return c.json({ ok: true, path: WorkspaceService.restoreTrash(c.req.param("name")) }); }
+  catch (error: any) { return c.json({ error: error?.message ?? String(error) }, 400); }
+});
+
+workspaceApi.get("/snapshots", (c) => c.json({ snapshots: WorkspaceService.listSnapshots() }));
+workspaceApi.post("/snapshots", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { label?: string };
+  return c.json({ snapshot: WorkspaceService.createSnapshot(body.label ?? "manual") }, 201);
+});
+
+workspaceApi.post("/snapshots/:id/restore", (c) => {
+  try { return c.json(WorkspaceService.restoreSnapshot(c.req.param("id"))); }
+  catch (error: any) { return c.json({ error: error?.message ?? String(error) }, 400); }
 });
