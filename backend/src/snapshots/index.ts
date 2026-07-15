@@ -22,10 +22,10 @@ import { nanoid } from "nanoid";
 import { db } from "../db/index.ts";
 import { supabaseAdmin } from "../security/supabase.ts";
 import { AGENTS_DIR, ensureAgentDir } from "../agents/files.ts";
+import { WorkspaceService } from "../workspace/index.ts";
 
 function resolveAgentDir(agentId: string): string {
-  if (!/^[A-Za-z0-9_-]{1,64}$/.test(agentId)) throw new Error(`invalid agentId: ${agentId}`);
-  return join(AGENTS_DIR, agentId);
+  return WorkspaceService.agentRoot(agentId);
 }
 
 const BUCKET = process.env.SUPABASE_SNAPSHOT_BUCKET || "agent-snapshots";

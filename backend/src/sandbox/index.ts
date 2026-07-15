@@ -28,6 +28,7 @@ import {
 } from "node:fs";
 import { join, resolve, sep, isAbsolute } from "node:path";
 import { randomBytes } from "node:crypto";
+import { WorkspaceService } from "../workspace/index.ts";
 
 export type SandboxBackend = "local" | "docker";
 
@@ -80,9 +81,7 @@ export interface Sandbox {
   cleanup(): void;
 }
 
-const SBOX_ROOT = process.env.LAB_SANDBOX_ROOT
-  ? resolve(process.env.LAB_SANDBOX_ROOT)
-  : resolve(import.meta.dir, "..", "..", "data", "sandboxes");
+const SBOX_ROOT = WorkspaceService.sandboxesRoot();
 
 function sandboxRootDir() {
   if (!existsSync(SBOX_ROOT)) mkdirSync(SBOX_ROOT, { recursive: true });

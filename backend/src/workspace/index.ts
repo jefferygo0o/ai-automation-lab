@@ -1,11 +1,12 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Hono } from "hono";
 import type { HonoEnv } from "../types/hono.ts";
 
-const WORKSPACE_ROOT = resolve(process.env.LAB_WORKSPACE_ROOT ?? process.env.LAB_PROJECT_ROOT ?? "/home/workspace/Projects/ai-automation-lab");
+const BASE_ROOT = resolve(process.env.LAB_WORKSPACE_ROOT ?? (process.env.LAB_DATA_DIR ? join(process.env.LAB_DATA_DIR, "workspace") : "/home/workspace"));
 const EXCLUDED_DIRS = new Set(["node_modules", ".git", "__pycache__", ".cache", ".next", "dist", ".venv", "venv", ".bun", "build", ".turbo"]);
 const MAX_READ_BYTES = 2 * 1024 * 1024;
+const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 export interface FileEntry {
   name: string;
@@ -15,44 +16,121 @@ export interface FileEntry {
   mtime: number;
 }
 
-function rootRealpath(): string {
-  if (!existsSync(WORKSPACE_ROOT)) mkdirSync(WORKSPACE_ROOT, { recursive: true });
-  return realpathSync(WORKSPACE_ROOT);
+function safeId(value: string): string {
+  if (!SAFE_ID.test(value)) throw new Error("invalid workspace identifier");
+  return value;
 }
 
-function resolveSafe(rawPath: string): string | null {
-  const root = rootRealpath();
-  const candidate = resolve(root, rawPath || ".");
-  let resolved = candidate;
-  try {
-    resolved = realpathSync(candidate);
-  } catch {
-    const parent = dirname(candidate);
+function ensureDirectory(path: string): string {
+  mkdirSync(path, { recursive: true });
+  return path;
+}
+
+function migrateDirectory(source: string | undefined, target: string): void {
+  if (!source) return;
+  const sourceAbs = resolve(source);
+  const targetAbs = resolve(target);
+  if (sourceAbs === targetAbs || !existsSync(sourceAbs)) return;
+  if (existsSync(targetAbs)) {
+    const sourceEntries = readdirSync(sourceAbs);
+    for (const entry of sourceEntries) {
+      const sourceEntry = join(sourceAbs, entry);
+      const targetEntry = join(targetAbs, entry);
+      if (!existsSync(targetEntry)) renameSync(sourceEntry, targetEntry);
+    }
+    try { rmSync(sourceAbs, { recursive: true, force: true }); } catch {}
+    return;
+  }
+  mkdirSync(targetAbs, { recursive: true });
+  for (const entry of readdirSync(sourceAbs)) {
+    const from = join(sourceAbs, entry);
+    const to = join(targetAbs, entry);
+    if (existsSync(to)) continue;
     try {
-      const parentReal = realpathSync(parent);
-      resolved = join(parentReal, basename(candidate));
+      renameSync(from, to);
     } catch {
-      return null;
+      cpSync(from, to, { recursive: true });
     }
   }
-  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
-  return resolved;
 }
 
-function relativePath(absPath: string): string {
-  const value = relative(rootRealpath(), absPath);
-  return value || ".";
+function ensureLayout(): void {
+  ensureDirectory(BASE_ROOT);
+  for (const path of [
+    join(BASE_ROOT, "Documents"),
+    join(BASE_ROOT, "Projects"),
+    join(BASE_ROOT, "Downloads"),
+    join(BASE_ROOT, "Images"),
+    join(BASE_ROOT, "Sites"),
+    join(BASE_ROOT, "Skills"),
+    join(BASE_ROOT, "Trash"),
+    join(BASE_ROOT, ".zo", "agents"),
+    join(BASE_ROOT, ".zo", "sandboxes"),
+    join(BASE_ROOT, ".zo", "snapshots"),
+    join(BASE_ROOT, ".zo", "metadata"),
+    join(BASE_ROOT, ".zo", "indexes"),
+  ]) ensureDirectory(path);
+
+  migrateDirectory(process.env.LAB_AGENTS_DIR, join(BASE_ROOT, ".zo", "agents"));
+  migrateDirectory(process.env.LAB_SANDBOX_ROOT, join(BASE_ROOT, ".zo", "sandboxes"));
+  migrateDirectory(process.env.LAB_SKILLS_DIR, join(BASE_ROOT, "Skills"));
+  migrateDirectory(join(import.meta.dir, "..", "..", "data", "agents"), join(BASE_ROOT, ".zo", "agents"));
+  migrateDirectory(join(import.meta.dir, "..", "..", "data", "sandboxes"), join(BASE_ROOT, ".zo", "sandboxes"));
+  migrateDirectory(join(import.meta.dir, "..", "..", "data", "skills"), join(BASE_ROOT, "Skills"));
 }
+
+ensureLayout();
+
+export const WorkspaceService = {
+  root(): string {
+    return realpathSync(BASE_ROOT);
+  },
+  documentsRoot(): string { return join(this.root(), "Documents"); },
+  projectsRoot(): string { return join(this.root(), "Projects"); },
+  downloadsRoot(): string { return join(this.root(), "Downloads"); },
+  imagesRoot(): string { return join(this.root(), "Images"); },
+  sitesRoot(): string { return join(this.root(), "Sites"); },
+  skillsRoot(): string { return join(this.root(), "Skills"); },
+  trashRoot(): string { return join(this.root(), "Trash"); },
+  zoRoot(): string { return join(this.root(), ".zo"); },
+  agentsRoot(): string { return join(this.zoRoot(), "agents"); },
+  agentRoot(agentId: string): string { return join(this.agentsRoot(), safeId(agentId)); },
+  agentSkillsRoot(agentId: string): string { return join(this.agentRoot(agentId), "skills"); },
+  sandboxesRoot(): string { return join(this.zoRoot(), "sandboxes"); },
+  sandboxRoot(agentId: string): string { return join(this.sandboxesRoot(), safeId(agentId)); },
+  snapshotsRoot(): string { return join(this.zoRoot(), "snapshots"); },
+  metadataRoot(): string { return join(this.zoRoot(), "metadata"); },
+  indexesRoot(): string { return join(this.zoRoot(), "indexes"); },
+  resolve(rawPath: string): string | null {
+    const root = this.root();
+    const candidate = resolve(root, rawPath || ".");
+    let resolved = candidate;
+    try {
+      resolved = realpathSync(candidate);
+    } catch {
+      try {
+        resolved = join(realpathSync(dirname(candidate)), basename(candidate));
+      } catch {
+        return null;
+      }
+    }
+    if (resolved !== root && !resolved.startsWith(root + sep)) return null;
+    return resolved;
+  },
+  relative(absPath: string): string {
+    const value = relative(this.root(), absPath);
+    return value || ".";
+  },
+};
+
+export const AGENTS_DIR = WorkspaceService.agentsRoot();
+export const SITES_DIR = WorkspaceService.sitesRoot();
+export const SKILLS_DIR = WorkspaceService.skillsRoot();
+export const SANDBOXES_DIR = WorkspaceService.sandboxesRoot();
 
 function entryFor(absPath: string, name: string): FileEntry {
   const stat = statSync(absPath);
-  return {
-    name,
-    path: relativePath(absPath),
-    type: stat.isDirectory() ? "dir" : "file",
-    size: stat.isFile() ? stat.size : 0,
-    mtime: stat.mtimeMs,
-  };
+  return { name, path: WorkspaceService.relative(absPath), type: stat.isDirectory() ? "dir" : "file", size: stat.isFile() ? stat.size : 0, mtime: stat.mtimeMs };
 }
 
 function listDirectory(absDir: string): FileEntry[] {
@@ -65,29 +143,25 @@ function listDirectory(absDir: string): FileEntry[] {
 function isTextFile(name: string): boolean {
   const lower = name.toLowerCase();
   const ext = lower.includes(".") ? lower.slice(lower.lastIndexOf(".")) : lower;
-  return new Set([
-    ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".scss", ".less", ".html", ".htm", ".svg", ".sh", ".bash", ".py", ".rb", ".rs", ".go", ".java", ".kt", ".swift", ".c", ".cpp", ".h", ".hpp", ".sql", ".graphql", ".proto", ".env", ".conf", ".cfg", ".ini", ".properties", ".vue", ".svelte", ".astro", ".lock", ".mod", ".sum", "dockerfile", ".gitignore",
-  ]).has(ext);
+  return new Set([".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".scss", ".less", ".html", ".htm", ".svg", ".sh", ".bash", ".py", ".rb", ".rs", ".go", ".java", ".kt", ".swift", ".c", ".cpp", ".h", ".hpp", ".sql", ".graphql", ".proto", ".env", ".conf", ".cfg", ".ini", ".properties", ".vue", ".svelte", ".astro", ".lock", ".mod", ".sum", "dockerfile", ".gitignore"]).has(ext);
 }
 
 function readWorkspaceFile(rawPath: string): { content: string; encoding: "utf-8" | "base64"; size: number } | null {
-  const absPath = resolveSafe(rawPath);
+  const absPath = WorkspaceService.resolve(rawPath);
   if (!absPath || !existsSync(absPath) || lstatSync(absPath).isDirectory()) return null;
   const stat = statSync(absPath);
   if (stat.size > MAX_READ_BYTES) throw new Error(`file exceeds ${MAX_READ_BYTES} byte read limit`);
   const buffer = readFileSync(absPath);
-  if (isTextFile(basename(absPath))) return { content: buffer.toString("utf8"), encoding: "utf-8", size: stat.size };
-  return { content: buffer.toString("base64"), encoding: "base64", size: stat.size };
+  return { content: isTextFile(basename(absPath)) ? buffer.toString("utf8") : buffer.toString("base64"), encoding: isTextFile(basename(absPath)) ? "utf-8" : "base64", size: stat.size };
 }
 
 export const workspaceApi = new Hono<HonoEnv>();
 
 workspaceApi.get("/tree", (c) => {
-  const rawPath = c.req.query("path") ?? ".";
-  const absDir = resolveSafe(rawPath);
+  const absDir = WorkspaceService.resolve(c.req.query("path") ?? ".");
   if (!absDir) return c.json({ error: "invalid path" }, 400);
   if (!existsSync(absDir) || !lstatSync(absDir).isDirectory()) return c.json({ error: "directory not found" }, 404);
-  return c.json({ path: relativePath(absDir), entries: listDirectory(absDir) });
+  return c.json({ path: WorkspaceService.relative(absDir), entries: listDirectory(absDir) });
 });
 
 workspaceApi.get("/read", (c) => {
@@ -96,7 +170,7 @@ workspaceApi.get("/read", (c) => {
   try {
     const result = readWorkspaceFile(rawPath);
     if (!result) return c.json({ error: "file not found" }, 404);
-    return c.json({ path: relativePath(resolveSafe(rawPath)!), ...result });
+    return c.json({ path: WorkspaceService.relative(WorkspaceService.resolve(rawPath)!), ...result });
   } catch (error: any) {
     return c.json({ error: error?.message ?? String(error) }, 413);
   }
@@ -105,20 +179,20 @@ workspaceApi.get("/read", (c) => {
 workspaceApi.put("/write", async (c) => {
   const body = await c.req.json().catch(() => ({})) as { path?: string; content?: string };
   if (!body.path || typeof body.content !== "string") return c.json({ error: "path and string content required" }, 400);
-  const absPath = resolveSafe(body.path);
+  const absPath = WorkspaceService.resolve(body.path);
   if (!absPath) return c.json({ error: "invalid path" }, 400);
   mkdirSync(dirname(absPath), { recursive: true });
   writeFileSync(absPath, body.content, "utf8");
-  return c.json({ ok: true, path: relativePath(absPath) });
+  return c.json({ ok: true, path: WorkspaceService.relative(absPath) });
 });
 
 workspaceApi.post("/mkdir", async (c) => {
   const body = await c.req.json().catch(() => ({})) as { path?: string };
   if (!body.path) return c.json({ error: "path required" }, 400);
-  const absPath = resolveSafe(body.path);
+  const absPath = WorkspaceService.resolve(body.path);
   if (!absPath) return c.json({ error: "invalid path" }, 400);
   mkdirSync(absPath, { recursive: true });
-  return c.json({ ok: true, path: relativePath(absPath) });
+  return c.json({ ok: true, path: WorkspaceService.relative(absPath) });
 });
 
 workspaceApi.delete("/delete", async (c) => {
@@ -126,17 +200,17 @@ workspaceApi.delete("/delete", async (c) => {
   const body = await c.req.json().catch(() => ({})) as { path?: string };
   const rawPath = queryPath ?? body.path;
   if (!rawPath) return c.json({ error: "path required" }, 400);
-  const absPath = resolveSafe(rawPath);
-  if (!absPath || absPath === rootRealpath()) return c.json({ error: "invalid path" }, 400);
+  const absPath = WorkspaceService.resolve(rawPath);
+  if (!absPath || absPath === WorkspaceService.root()) return c.json({ error: "invalid path" }, 400);
   if (!existsSync(absPath)) return c.json({ error: "not found" }, 404);
-  rmSync(absPath, { recursive: true, force: true });
-  return c.json({ ok: true });
+  const trashPath = join(WorkspaceService.trashRoot(), `${Date.now()}-${basename(absPath)}`);
+  renameSync(absPath, trashPath);
+  return c.json({ ok: true, trashPath: WorkspaceService.relative(trashPath) });
 });
 
 workspaceApi.get("/info", (c) => {
-  const rawPath = c.req.query("path") ?? ".";
-  const absPath = resolveSafe(rawPath);
+  const absPath = WorkspaceService.resolve(c.req.query("path") ?? ".");
   if (!absPath || !existsSync(absPath)) return c.json({ error: "not found" }, 404);
   const stat = statSync(absPath);
-  return c.json({ path: relativePath(absPath), type: stat.isDirectory() ? "dir" : "file", size: stat.size, mtime: stat.mtimeMs });
+  return c.json({ path: WorkspaceService.relative(absPath), type: stat.isDirectory() ? "dir" : "file", size: stat.size, mtime: stat.mtimeMs });
 });

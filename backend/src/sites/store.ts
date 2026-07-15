@@ -2,9 +2,10 @@ import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
 import { mkdirSync, existsSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { WorkspaceService } from "../workspace/index.ts";
 
-const WORKSPACE_ROOT = process.env.LAB_WORKSPACE_ROOT || "/home/workspace";
-const SITES_DIR = join(WORKSPACE_ROOT, "Sites");
+const WORKSPACE_ROOT = WorkspaceService.root();
+const SITES_DIR = WorkspaceService.sitesRoot();
 
 export interface Site {
   id: string;

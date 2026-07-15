@@ -25,6 +25,7 @@ import {
 import { recordHistory } from "./history.ts";
 import { decryptSecret } from "../secrets/vault.ts";
 import { rmSync } from "node:fs";
+import { WorkspaceService } from "../workspace/index.ts";
 
 export interface AgentRecord {
   id: string;
@@ -96,7 +97,7 @@ function safeRead(id: string, name: string): string {
 }
 
 function pathForSkills(id: string): string {
-  return path.join(process.env.LAB_DATA_DIR ?? "/home/workspace/Projects/ai-automation-lab/data", "agents", id, "skills");
+  return WorkspaceService.agentSkillsRoot(id);
 }
 
 async function updateHash(id: string): Promise<void> {

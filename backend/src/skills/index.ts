@@ -48,6 +48,7 @@ import {
 } from "node:fs";
 import { join, resolve, basename, extname, dirname } from "node:path";
 import { nanoid } from "nanoid";
+import { WorkspaceService } from "../workspace/index.ts";
 
 export interface SkillFrontmatter {
   id: string;
@@ -79,9 +80,7 @@ export interface Skill extends SkillFrontmatter {
   updatedAt: number;
 }
 
-const SKILLS_ROOT = process.env.LAB_SKILLS_DIR
-  ? resolve(process.env.LAB_SKILLS_DIR)
-  : resolve(import.meta.dir, "..", "..", "data", "skills");
+const SKILLS_ROOT = WorkspaceService.skillsRoot();
 
 const BUILTIN_DIR = resolve(import.meta.dir, "builtin");
 const GLOBAL_DIR = join(SKILLS_ROOT, "global");

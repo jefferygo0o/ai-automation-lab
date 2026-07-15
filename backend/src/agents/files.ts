@@ -17,8 +17,9 @@
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync, statSync, copyFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { AGENTS_DIR as WORKSPACE_AGENTS_DIR, WorkspaceService } from "../workspace/index.ts";
 
-export const AGENTS_DIR = process.env.LAB_AGENTS_DIR ?? join(import.meta.dir, "..", "..", "data", "agents");
+export const AGENTS_DIR = WORKSPACE_AGENTS_DIR;
 
 export const AGENT_FILE_NAMES = ["system.md", "persona.md", "user.md", "instructions.md", "skills.md", "tools.md", "memory.md", "config.json"] as const;
 export type AgentFileName = typeof AGENT_FILE_NAMES[number];

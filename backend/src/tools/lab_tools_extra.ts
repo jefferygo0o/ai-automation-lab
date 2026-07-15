@@ -39,10 +39,11 @@ import { join, resolve, isAbsolute, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { WorkspaceService } from "../workspace/index.ts";
 
-const LAB_PROJECT_ROOT = process.env.LAB_PROJECT_ROOT ?? "/home/workspace/Projects/ai-automation-lab";
-const LAB_BACKEND_ROOT = process.env.LAB_BACKEND_ROOT ?? join(LAB_PROJECT_ROOT, "backend");
-const DATA_DIR = process.env.LAB_DATA_DIR ?? join(LAB_BACKEND_ROOT, "data");
+const LAB_PROJECT_ROOT = WorkspaceService.root();
+const LAB_BACKEND_ROOT = WorkspaceService.zoRoot();
+const DATA_DIR = WorkspaceService.root();
 mkdirSync(DATA_DIR, { recursive: true });
 
 // ---------------------------------------------------------------------------
