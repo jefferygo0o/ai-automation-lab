@@ -134,7 +134,7 @@ export async function runAgentTurn(
   // Load user's active rules (Zo-style: persistent behavioural constraints)
   const activeRules = await RuleStore.listEnabled(ownerId);
   const rulesBlock = activeRules.length > 0
-    ? `\n\n# Active Rules (always-applied)\n${activeRules.map(r => r.condition ? `- WHEN ${r.condition}: ${r.instruction}` : `- ${r.instruction}`).join("\n")}\n`
+    ? `\n\n# Active Rules (always-applied)\n${activeRules.map(r => `- ${r.instruction}`).join("\n")}\n`
     : "";
 
   let skillsBlock = skillsMd;

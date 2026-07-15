@@ -40,7 +40,7 @@ FROM base AS runtime
 WORKDIR /app
 # Runtime: install browsers' shared libs + ffmpeg + imagemagick + node + uv
 RUN apt-get update -qq && apt-get install -y --no-install-recommends \
-    curl ca-certificates \
+    curl ca-certificates git \
     ffmpeg imagemagick fonts-liberation \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
     libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \

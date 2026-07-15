@@ -21,7 +21,7 @@ const LOG_MAX = 5 * 1024 * 1024; // 5 MB per log
 
 interface ManagedProcess {
   serviceId: string;
-  proc: Subprocess<"pipe", "pipe", "pipe"> | null;
+  proc: Subprocess<"ignore", "pipe"> | null;
   restartTimer: ReturnType<typeof setTimeout> | null;
   shuttingDown: boolean;
 }
