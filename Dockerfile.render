@@ -54,7 +54,7 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
 ENV PATH="/root/.local/bin:${PATH}"
 # Install agent-browser CLI (the fast browser automation Zo Computer provides)
 RUN node -v && npm -v
-RUN curl -fsSL https://media.zocomputer.com/install/agentbrowser2.sh | bash
+# RUN curl -fsSL https://media.zocomputer.com/install/agentbrowser2.sh | bash
 # Copy the source tree (includes node_modules from install stage via COPY)
 COPY --from=install /app/backend/node_modules ./backend/node_modules
 COPY --from=install /app/frontend/node_modules ./frontend/node_modules
