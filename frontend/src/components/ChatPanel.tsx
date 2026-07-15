@@ -300,7 +300,6 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
           } else if (type === "tool_call") {
             // Close active thinking block
             closeThinking(aid);
-            toolSeqRef.current++;
             // Check if this is a streaming delta for an existing tool
             const aidBlocks = blocksRef.current[aid] ?? [];
             // Match by toolCallId when available, else by name+pending (backward compat)
@@ -310,27 +309,36 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                 ? b.tool.toolCallId === payload.toolCallId
                 : b.tool.name === payload.name && b.tool.status === "pending";
             });
-            if (existingIdx >= 0 && payload.args) {
-              // Streaming delta — accumulate raw JSON args string
+            if (existingIdx >= 0) {
+              // Update existing block (streaming delta or name/args finalisation)
               const existing = aidBlocks[existingIdx] as Extract<Block, { type: "tool_call" }>;
-              const oldRaw = existing.tool.rawArgs ?? '';
-              const newRaw = typeof payload.args === 'string' ? payload.args : JSON.stringify(payload.args ?? {});
-              const rawArgs = oldRaw.length >= newRaw.length ? oldRaw : newRaw;
-              // Try to parse the accumulated rawArgs into proper args fields
-              const parsedArgs = (() => {
-                try { return JSON.parse(rawArgs); } catch { return null; }
-              })();
-              const liveArgsStream = parsedArgs && typeof parsedArgs === 'object' ? parsedArgs : null;
-              const mergedArgs = {
-                ...(existing.tool.args ?? {}),
-                ...(liveArgsStream ?? {}),
+              const mergedName = payload.name || existing.tool.name;
+              let mergedArgs = existing.tool.args;
+              let rawArgs = existing.tool.rawArgs ?? '';
+              if (payload.args) {
+                const newRaw = typeof payload.args === 'string' ? payload.args : JSON.stringify(payload.args ?? {});
+                rawArgs = rawArgs.length >= newRaw.length ? rawArgs : newRaw;
+                const parsedArgs = (() => {
+                  try { return JSON.parse(rawArgs); } catch { return null; }
+                })();
+                const liveArgsStream = parsedArgs && typeof parsedArgs === 'object' ? parsedArgs : null;
+                mergedArgs = {
+                  ...(existing.tool.args ?? {}),
+                  ...(liveArgsStream ?? {}),
+                };
+              }
+              const updatedTool: ToolCallInfo = {
+                ...existing.tool,
+                name: mergedName,
+                args: mergedArgs,
+                rawArgs,
               };
-              const updatedTool = { ...existing.tool, args: mergedArgs, rawArgs };
               const newBlocks = [...aidBlocks];
               newBlocks[existingIdx] = { type: "tool_call", tool: updatedTool };
               setBlocksByMessage((p) => ({ ...p, [aid]: newBlocks }));
               blocksRef.current[aid] = newBlocks;
             } else {
+              toolSeqRef.current++;
               // New tool call
               const tool: ToolCallInfo = {
                 id: `tool_${aid}_${toolSeqRef.current}`,

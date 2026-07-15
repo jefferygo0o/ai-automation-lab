@@ -528,6 +528,7 @@ export function getToolLabel(
   if (meta_kind === "read" || meta_kind === "write" || meta_kind === "edit" || meta_kind === "list") {
     const p = typeof a.path === "string" ? a.path
       : typeof a.target_file === "string" ? a.target_file
+      : typeof a.file === "string" ? a.file
       : null;
     if (p) return p;
     if (meta_kind === "list" && typeof a.source === "string") return a.source;
@@ -536,6 +537,7 @@ export function getToolLabel(
   if (meta_kind === "delete") {
     const p = typeof a.path === "string" ? a.path
       : typeof a.target_file === "string" ? a.target_file
+      : typeof a.file === "string" ? a.file
       : null;
     return p;
   }
