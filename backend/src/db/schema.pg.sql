@@ -239,6 +239,7 @@ CREATE TABLE IF NOT EXISTS approval_requests (
   chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
   run_id TEXT,
   agent_id TEXT REFERENCES agents(id) ON DELETE CASCADE,
+  tool_call_id TEXT,
   kind TEXT NOT NULL DEFAULT 'plan',
   title TEXT NOT NULL DEFAULT '',
   body TEXT NOT NULL DEFAULT '',

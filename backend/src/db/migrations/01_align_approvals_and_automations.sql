@@ -31,8 +31,12 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='approval_requests' AND column_name='resolved_at') THEN
     ALTER TABLE approval_requests ADD COLUMN resolved_at BIGINT;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='approval_requests' AND column_name='tool_call_id') THEN
+    ALTER TABLE approval_requests ADD COLUMN tool_call_id TEXT;
+  END IF;
   -- Make agent_id nullable so plans don't require an agent
   ALTER TABLE approval_requests ALTER COLUMN agent_id DROP NOT NULL;
+  ALTER TABLE approval_requests ALTER COLUMN tool_call_id DROP NOT NULL;
 END $$;
 
 -- === automations ===
