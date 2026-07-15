@@ -112,7 +112,7 @@ function splitSqlStatements(sql: string): string[] {
         current += char;
       }
     } else if (inDollarQuote) {
-      if (char === "$" && sql.slice(i, i + dollarQuoteMarker.length) === dollarQuoteMarker) {
+      if (char === "$" && dollarQuoteMarker && sql.slice(i, i + dollarQuoteMarker.length) === dollarQuoteMarker) {
         inDollarQuote = false;
         current += dollarQuoteMarker;
         i += dollarQuoteMarker.length;

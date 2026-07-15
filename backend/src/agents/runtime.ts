@@ -34,8 +34,8 @@ import { Approvals } from "../approvals/index.ts";
 export type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "thinking"; delta: string }
-  | { type: "tool_call"; name: string; args: any }
-  | { type: "tool_result"; name: string; result: any; ok: boolean; durationMs: number; error?: string }
+  | { type: "tool_call"; name: string; args: any; toolCallId?: string }
+  | { type: "tool_result"; name: string; result: any; ok: boolean; durationMs: number; error?: string; toolCallId?: string }
   | { type: "approval_requested"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired" | "auto-approved" }
   | { type: "message"; content: string; messageId?: string }
   | { type: "run_started"; runId: string }
@@ -282,7 +282,7 @@ export async function runAgentTurn(
               // the tool card with progressively filling content.
               // Use safeJsonParse to format args as a string for transport.
               const argsStr = typeof c.toolCall.arguments === 'string' ? c.toolCall.arguments : JSON.stringify(c.toolCall.arguments ?? {});
-              emit({ type: 'tool_call', name: c.toolCall.name, args: argsStr });
+              emit({ type: 'tool_call', name: c.toolCall.name, args: argsStr, toolCallId: c.toolCall.id });
             }
           },
         });
@@ -355,7 +355,7 @@ export async function runAgentTurn(
       for (const tc of validToolCalls) {
         let fnArgs: any = {};
         try { fnArgs = typeof tc.arguments === "string" ? JSON.parse(tc.arguments) : (tc.arguments ?? {}); } catch { fnArgs = {}; }
-        await emit({ type: "tool_call", name: tc.name, args: fnArgs });
+        await emit({ type: "tool_call", name: tc.name, args: fnArgs, toolCallId: tc.id });
       }
         messages.push(assistantMsg);
         // Persist to ChatStore so subsequent runs don't load orphaned tools
@@ -381,7 +381,7 @@ export async function runAgentTurn(
         const tool = toolRegistry.get(tc.name);
         if (!tool) {
           const result = { error: `unknown tool: ${tc.name}` };
-          await emit({ type: "tool_result", name: tc.name, result, ok: false, durationMs: 0, error: String(result.error) });
+          await emit({ type: "tool_result", name: tc.name, result, ok: false, durationMs: 0, error: String(result.error), toolCallId: tc.id });
           pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
           continue;
         }
@@ -427,7 +427,7 @@ export async function runAgentTurn(
         }
         const resultStr = normalizeToolResult(result, ok);
         const toolDuration = Date.now() - toolStart;
-        await emit({ type: "tool_result", name: tc.name, result, ok, durationMs: toolDuration, error: ok ? undefined : String(result?.error ?? "failed") });
+        await emit({ type: "tool_result", name: tc.name, result, ok, durationMs: toolDuration, error: ok ? undefined : String(result?.error ?? "failed"), toolCallId: tc.id });
         pushToolMessage(messages, chatId, tc, resultStr, run.id);
         onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: toolDuration, at: toolStart });
         recordHistory(agent.id, tc.name, resultStr);
