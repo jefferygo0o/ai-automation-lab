@@ -36,7 +36,7 @@ export interface AgentTemplate {
 const BUILTIN_DIR = resolve(import.meta.dir, "builtin");
 
 export const Templates = {
-  async list(): Promise<AgentTemplate[]> {
+  async list(ownerId: string): Promise<AgentTemplate[]> {
     const out: AgentTemplate[] = [];
     if (existsSync(BUILTIN_DIR)) {
       for (const f of readdirSync(BUILTIN_DIR)) {
@@ -47,8 +47,8 @@ export const Templates = {
         } catch {}
       }
     }
-    // user-saved templates
-    const rows = await db.query(`SELECT * FROM agent_templates ORDER BY created_at DESC`).all() as any[];
+    // user-saved templates (callers' own only — no cross-tenant visibility)
+    const rows = await db.query(`SELECT * FROM agent_templates WHERE owner_id = ? ORDER BY created_at DESC`).all(ownerId) as any[];
     for (const r of rows) {
       try {
         out.push({
@@ -64,8 +64,8 @@ export const Templates = {
     return out;
   },
 
-  async get(id: string): Promise<AgentTemplate | null> {
-    const list = await Templates.list();
+  async get(id: string, ownerId: string): Promise<AgentTemplate | null> {
+    const list = await Templates.list(ownerId);
     return list.find((t) => t.id === id) ?? null;
   },
 
@@ -81,7 +81,7 @@ export const Templates = {
       JSON.stringify(input.template.config),
       JSON.stringify(input.template.recommendedSkills), Date.now()
     );
-    const created = await Templates.get(id);
+    const created = await Templates.get(id, input.ownerId);
     return created!;
   },
 
@@ -91,8 +91,8 @@ export const Templates = {
   },
 
   /** Apply a template to a fresh agent directory + record metadata. */
-  async materialize(templateId: string, agentId: string) {
-    const t = Templates.get(templateId);
+  async materialize(templateId: string, agentId: string, ownerId: string) {
+    const t = Templates.get(templateId, ownerId);
     if (!t) throw new Error(`template not found: ${templateId}`);
     return t;
   },

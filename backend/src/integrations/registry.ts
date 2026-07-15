@@ -2,18 +2,18 @@
  * Integration Registry — manages connected integrations and their credentials.
  *
  * Each integration connection stores:
- *   - The app slug (which Pipedream app it connects to)
+ *   - The app slug (which Foundry app it connects to)
  *   - Auth type (oauth, api_key, keys, none)
  *   - Credential reference (key into the secrets vault)
- *   - The Pipedream connected_account_id (for OAuth flows)
+ *   - The Foundry connected_account_id (for OAuth flows)
  *   - Status (disconnected, connecting, connected, error)
  *
  * The action cache stores the app's action/trigger schemas locally so the
- * frontend and agents can discover available actions without hitting Pipedream's API.
+ * frontend and agents can discover available actions without hitting Foundry's API.
  */
 
 import { nanoid } from "nanoid";
-import type { PdApp } from "./pipedream.ts";
+import type { PdApp } from "./foundry.ts";
 import { db } from "../db/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,7 @@ export interface IntegrationConnection {
   logoUrl: string;
   status: "disconnected" | "connecting" | "connected" | "error";
   credentialsRef: string | null;     // name of the secret holding credentials
-  connectedAccountId: string | null;  // Pipedream account ID (for OAuth)
+  connectedAccountId: string | null;  // Foundry account ID (for OAuth)
   categories: string[];
   createdAt: number;
   updatedAt: number;

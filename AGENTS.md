@@ -359,8 +359,8 @@ frontend/
 
 | Feature | Status |
 | --- | --- |
-| Integrations System (Pipedream-powered) | ✅ |
-| Browsing Pipedream catalog (search + categories) | ✅ |
+| Integrations System (Foundry-powered) | ✅ |
+| Browsing Foundry catalog (search + categories) | ✅ |
 | Connect/disconnect integrations (API key & OAuth) | ✅ |
 | Integration action execution | ✅ |
 | Integration credentials for agents | ✅ |
@@ -491,17 +491,17 @@ To use a real provider (OpenAI, Anthropic, etc.):
 1. Go to **Secrets** page and add your API key
 2. Edit your agent's **config.json** → set `provider` + `model` + `apiKeySecret`
 
-## Integrations System (Pipedream-powered)
+## Integrations System (Foundry-powered)
 
-The integrations subsystem connects the lab to Pipedream's catalog of 2,500+
-external services. Users add a Pipedream API key as a secret (`pipedream_api_key`),
+The integrations subsystem connects the lab to Foundry's catalog of 2,500+
+external services. Users add a Foundry API key as a secret (`foundry_api_key`),
 then browse the catalog, connect accounts, and execute actions.
 
 ### Files
 
 | File | Description |
 | --- | --- |
-|  | Pipedream Connect API client (catalog, accounts, actions) |
+|  | Foundry Connect API client (catalog, accounts, actions) |
 |  | Integration connection CRUD (DB-backed) |
 |  | REST API routes for integrations |
 |  | Lab tools: manage_integrations, use_integration |
@@ -513,7 +513,7 @@ then browse the catalog, connect accounts, and execute actions.
 | Table | Description |
 | --- | --- |
 | `integration_connections` | Active integration connections per user (app_slug, auth_type, status, credentials_ref) |
-| `integration_action_cache` | Cached action schemas per app (fetched from Pipedream) |
+| `integration_action_cache` | Cached action schemas per app (fetched from Foundry) |
 
 ### API Endpoints
 
@@ -526,14 +526,14 @@ then browse the catalog, connect accounts, and execute actions.
 | POST | /api/integrations/:id/execute | Execute an action on the integration |
 | PUT | /api/integrations/:id/credentials | Update credentials for a connection |
 | PUT | /api/integrations/:id/oauth | Update OAuth connected_account_id |
-| GET | /api/integrations/catalog | Browse Pipedream catalog (?q=search, ?page=, ?per_page=) |
+| GET | /api/integrations/catalog | Browse Foundry catalog (?q=search, ?page=, ?per_page=) |
 | GET | /api/integrations/catalog/:slug | Get app details with actions/triggers |
-| POST | /api/integrations/catalog/:slug/refresh | Re-fetch app from Pipedream |
+| POST | /api/integrations/catalog/:slug/refresh | Re-fetch app from Foundry |
 | POST | /api/integrations/connect/:slug | Full OAuth connect flow |
 | GET | /api/integrations/stats | Count by connection status |
 | GET | /api/integrations/categories | List all catalog categories |
-| GET | /api/integrations/pipedream/status | Check if PD API key is configured |
-| PUT | /api/integrations/pipedream/key | Set/update the PD API key via secrets |
+| GET | /api/integrations/foundry/status | Check if Foundry API key is configured |
+| PUT | /api/integrations/foundry/key | Set/update the Foundry API key via secrets |
 
 ### Agent Tools
 
@@ -546,17 +546,17 @@ Two lab tools are registered for agents:
 
 ### Authentication Flow
 
-1. User creates a Pipedream project + OAuth client at pipedream.com
-2. Saves the Pipedream API key to the lab secrets vault as `pipedream_api_key`
+1. User creates a Foundry project + OAuth client at foundry.com
+2. Saves the Foundry API key to the lab secrets vault as `foundry_api_key`
 3. Browses the catalog in the Integrations UI or via agent tools
 4. Connects an app by providing API keys or completing OAuth
 5. Agents can then discover and execute actions on connected integrations
 
 ### Known Limitations
 
-- Requires a Pipedream account and API key (free tier works)
-- OAuth integrations require setting up a Pipedream OAuth client
-- Action execution goes through Pipedream's servers (network latency)
+- Requires a Foundry account and API key (free tier works)
+- OAuth integrations require setting up a Foundry OAuth client
+- Action execution goes through Foundry's servers (network latency)
 ### 2026-06-22: Chat panel media previews + sandbox file serving + video generation
 
 **Issues fixed:**

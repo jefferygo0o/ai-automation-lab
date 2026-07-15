@@ -23,9 +23,9 @@ export const SecretStore = {
   /**
    * Normalize a secret name to the canonical form: UPPERCASE.
    * All secret names are stored uppercase so the lookup contract is
-   * trivially case-insensitive — "pipedream_api_key" and "PIPEDREAM_API_KEY"
+   * trivially case-insensitive — "foundry_api_key" and "FOUNDRY_API_KEY"
    * both resolve to the same row, and integration routes can use
-   * `SecretStore.get(ownerId, "PIPEDREAM_API_KEY")` without gymnastics.
+   * `SecretStore.get(ownerId, "FOUNDRY_API_KEY")` without gymnastics.
    */
   norm(name: string): string {
     return String(name ?? "").trim().toUpperCase();
@@ -67,7 +67,7 @@ export const SecretStore = {
 
   /**
    * Case-insensitive lookup. Returns the secret value regardless of the casing
-   * the user typed when saving it (PIPEDREAM_API_KEY vs pipedream_api_key).
+   * the user typed when saving it (FOUNDRY_API_KEY vs foundry_api_key).
    */
   async getCI(ownerId: string, name: string): Promise<string | null> {
     const row = await db

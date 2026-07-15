@@ -5,11 +5,16 @@
  * Provides:
  *   - list_integrations — show all connected integrations
  *   - use_integration  — execute an action on a connected integration
+ *   - get_integration_actions — list available actions for a connected app
+ *   - manage_integrations — connect/disconnect/sync integrations
+ *
+ * Backend: Foundry Connect (https://github.com/jefferygo0o/foundry-connect)
+ *   running at https://api-gateway-production-4984.up.railway.app
  */
 
 import { toolRegistry, type ToolContext } from "./registry.ts";
 import { SecretStore } from "../secrets/store.ts";
-import { PipedreamClient } from "../integrations/pipedream.ts";
+import { FoundryClient } from "../integrations/foundry.ts";
 import { IntegrationRegistry } from "../integrations/registry.ts";
 
 function text(s: string) {
@@ -20,14 +25,14 @@ function err(s: string) {
 }
 
 /**
- * Resolve the Pipedream API key.
- * Order: process.env.PIPEDREAM_API_KEY -> SecretStore (case-insensitive).
+ * Resolve the Foundry Connect API key.
+ * Order: process.env.FOUNDRY_API_KEY -> SecretStore (case-insensitive).
  * Either source is accepted; env wins when set.
  */
-async function resolvePipedreamKey(ctx: ToolContext): Promise<string | null> {
-  const envKey = process.env.PIPEDREAM_API_KEY?.trim();
+async function resolveFoundryKey(ctx: ToolContext): Promise<string | null> {
+  const envKey = process.env.FOUNDRY_API_KEY?.trim();
   if (envKey) return envKey;
-  return await SecretStore.getCI(ctx.ownerId, "pipedream_api_key");
+  return await SecretStore.getCI(ctx.ownerId, "foundry_api_key");
 }
 
 toolRegistry.register({
@@ -35,7 +40,7 @@ toolRegistry.register({
   description:
     "List all connected third-party integrations available to you. " +
     "Each integration connects to an external service (e.g. Slack, Gmail, GitHub) " +
-    "via Pipedream. Returns the app name, auth type, and current status. " +
+    "via Foundry Connect. Returns the app name, auth type, and current status. " +
     "Use this to discover what external services you can interact with.",
   parameters: {
     status: {
@@ -72,7 +77,7 @@ toolRegistry.register({
 toolRegistry.register({
   name: "use_integration",
   description:
-    "Execute an action on a connected third-party integration via Pipedream. " +
+    "Execute an action on a connected third-party integration via Foundry Connect. " +
     "Use this to send Slack messages, create Google Sheets rows, search GitHub, etc. " +
     "The integration must first be connected via the Integrations page or by an agent using manage_integrations. " +
     "Find the app slug via list_integrations, then find available actions via get_integration_actions.",
@@ -104,12 +109,12 @@ toolRegistry.register({
     if (!args.action || typeof args.action !== "string") return err("action key is required");
     if (!args.params || typeof args.params !== "object") return err("params (JSON object) is required");
 
-    const pdKey = await resolvePipedreamKey(ctx);
-    if (!pdKey) {
+    const foundryKey = await resolveFoundryKey(ctx);
+    if (!foundryKey) {
       return err(
-        'No Pipedream API key configured. Ask the user to:\n' +
-        '1. Get a Pipedream API key from https://pipedream.com/user/settings/api\n' +
-        '2. Save it as a secret named "pipedream_api_key" on the Secrets page'
+        'No Foundry Connect API key configured. Ask the user to:\n' +
+        '1. Get a Foundry Connect API key from the foundry-connect dashboard\n' +
+        '2. Save it as a secret named "foundry_api_key" on the Secrets page'
       );
     }
 
@@ -118,13 +123,14 @@ toolRegistry.register({
       const conn = await IntegrationRegistry.getByApp(ctx.ownerId, args.app as string);
       const accountId = conn?.connectedAccountId ?? "";
 
-      // Pass the lab-prefixed external user id used at OAuth time.
-      // The new Connect actions/run endpoint requires it.
-      const result = await PipedreamClient.executeAction(
-        pdKey,
+      // Pass the lab-prefixed external user id used at connection time.
+      // Foundry Connect's /v1/tools/execute accepts it as the orgId.
+      const result = await FoundryClient.executeAction(
+        foundryKey,
+        args.app as string,
         args.action as string,
-        args.params as Record<string, unknown>,
-        accountId,
+        (args.params ?? {}) as Record<string, unknown>,
+        undefined,
         `lab_${ctx.ownerId}`,
       );
 
@@ -156,31 +162,30 @@ toolRegistry.register({
   async execute(args, ctx: ToolContext) {
     if (!args.app || typeof args.app !== "string") return err("app slug is required");
 
-    const pdKey = await resolvePipedreamKey(ctx);
-    if (!pdKey) {
-      return err("Pipedream API key not configured. Save it as a secret named 'pipedream_api_key'.");
+    const foundryKey = await resolveFoundryKey(ctx);
+    if (!foundryKey) {
+      return err("Foundry Connect API key not configured. Save it as a secret named 'foundry_api_key'.");
     }
 
     try {
-      const components = await PipedreamClient.listComponents(pdKey, args.app as string);
-      const actions = components.filter((c: any) => c.type === "action");
-      if (!actions.length) {
+      const components = await FoundryClient.listActions(foundryKey, args.app as string);
+      if (!components.length) {
         return text(`No actions found for "${args.app}". It may only support triggers.`);
       }
-      const lines = actions.map((a: any, i: number) => {
-        const schema = a.input_schema
+      const lines = components.map((a: any, i: number) => {
+        const schema = a.inputSchema
           ? Object.entries(
-              (a.input_schema?.properties ?? a.input_schema ?? {}) as Record<string, any>
+              (a.inputSchema?.properties ?? a.inputSchema ?? {}) as Record<string, any>
             )
               .map(([k, v]: [string, any]) => {
-                const req = (a.input_schema?.required ?? []).includes(k)
+                const req = (a.inputSchema?.required ?? []).includes(k)
                   ? " (required)"
                   : "";
                 return `    - ${k}${req}: ${v?.type ?? "any"} — ${v?.description ?? ""}`;
               })
               .join("\n")
           : "    (no parameters)";
-        return `\n### ${i + 1}. ${a.name}\n**Key:** \`${a.key}\`\n**Description:** ${a.description}\n**Parameters:**\n${schema}`;
+        return `\n### ${i + 1}. ${a.displayName ?? a.name}\n**Key:** \`${a.name}\`\n**Description:** ${a.description ?? ""}\n**Parameters:**\n${schema}`;
       });
       return text(`## Actions for ${args.app}\n` + lines.join("\n"));
     } catch (e: any) {
@@ -192,10 +197,10 @@ toolRegistry.register({
 toolRegistry.register({
   name: "manage_integrations",
   description:
-    "Manage connected integrations (third-party app connections via Pipedream). " +
+    "Manage connected integrations (third-party app connections via Foundry Connect). " +
     "Use action='list' to see all, 'connect' to start a new connection, " +
     "'disconnect' to remove a connection, 'sync' to refresh the action cache. " +
-    "Before connecting, the user must have a Pipedream API key saved as a secret.",
+    "Before connecting, the user must have a Foundry Connect API key saved as a secret.",
   parameters: {
     action: {
       type: "string",
@@ -224,7 +229,7 @@ toolRegistry.register({
             return text(
               "No integrations configured. Users can connect integrations via:\n" +
               "1. The Integrations page in the UI\n" +
-              "2. Having a Pipedream API key saved as a secret named 'pipedream_api_key'"
+              "2. Having a Foundry Connect API key saved as a secret named 'foundry_api_key'"
             );
           }
           const lines = all.map((i: any) => {
@@ -234,22 +239,22 @@ toolRegistry.register({
         }
         case "connect": {
           if (!args.app_slug) return err("app_slug is required for connect");
-          const pdKey = await resolvePipedreamKey(ctx);
-          if (!pdKey) {
+          const foundryKey = await resolveFoundryKey(ctx);
+          if (!foundryKey) {
             return err(
-              "Pipedream API key not found. Save it as a secret named 'pipedream_api_key' first."
+              "Foundry Connect API key not found. Save it as a secret named 'foundry_api_key' first."
             );
           }
-          // Fetch app info from Pipedream to get name and auth type
-          const appInfo = await PipedreamClient.getApp(pdKey, args.app_slug as string);
+          // Fetch app info from Foundry Connect to get name and auth type
+          const appInfo = await FoundryClient.getApp(foundryKey, args.app_slug as string);
           const connection = await IntegrationRegistry.create(ctx.ownerId, {
             appSlug: args.app_slug as string,
-            appName: appInfo?.app?.name ?? args.app_name ?? args.app_slug,
+            appName: appInfo?.app?.name ?? appInfo?.app?.name ?? args.app_name ?? args.app_slug,
             appDescription: appInfo?.app?.description ?? "",
-            authType: (appInfo?.app?.auth_type ?? "none") as "oauth" | "api_key" | "keys" | "none",
-            authDescription: appInfo?.app?.auth_description ?? "",
-            logoUrl: appInfo?.app?.logo_url ?? "",
-            categories: appInfo?.app?.categories ?? [],
+            authType: (FoundryClient.toAuthType(appInfo?.app?.auth_type) ?? "none") as "oauth" | "api_key" | "keys" | "none",
+            authDescription: appInfo?.app?.auth_type ?? "",
+            logoUrl: "",
+            categories: [],
           });
           const msgParts = [
             `Integration initiated: **${connection.appName}** (\`${connection.appSlug}\`)`,
@@ -269,7 +274,7 @@ toolRegistry.register({
               "",
               `This app uses OAuth. The user needs to:`,
               `1. Complete the OAuth flow via the Integrations page in the UI`,
-              `2. Pipedream Connect will handle the OAuth redirect automatically`,
+              `2. Foundry Connect will handle the OAuth redirect automatically`,
             );
           }
           return text(msgParts.join("\n"));
@@ -282,27 +287,25 @@ toolRegistry.register({
           return text(ok ? `Disconnected integration: ${args.app_slug}` : `Failed to disconnect: ${args.app_slug}`);
         }
         case "sync": {
-          const pdKey = await resolvePipedreamKey(ctx);
-          if (!pdKey) return err("Pipedream API key not configured");
+          const foundryKey = await resolveFoundryKey(ctx);
+          if (!foundryKey) return err("Foundry Connect API key not configured");
           const cachedApps = await IntegrationRegistry.getCachedApps(ctx.ownerId);
           let total = 0;
           for (const app of cachedApps.slice(0, 20)) {
             try {
-              // The new Connect API split: getApp returns metadata,
-              // listComponents returns the actions/triggers for the app.
-              const components = await PipedreamClient.listComponents(pdKey, app.appSlug);
-              const actions = components.map((c: any) => ({
-                id: c.id,
+              const actions = await FoundryClient.listActions(foundryKey, app.appSlug);
+              const cached = actions.map((a: any) => ({
+                id: a.name,
                 appSlug: app.appSlug,
-                actionKey: c.key,
-                name: c.name,
-                description: c.description,
-                type: c.type as "action" | "trigger",
-                inputSchema: c.input_schema ?? {},
-                outputSchema: c.output_schema ?? {},
+                actionKey: a.name,
+                name: a.displayName ?? a.name,
+                description: a.description ?? "",
+                type: "action" as const,
+                inputSchema: a.inputSchema ?? {},
+                outputSchema: a.outputSchema ?? {},
               }));
-              await IntegrationRegistry.cacheActions(app.appSlug, actions);
-              total += actions.length;
+              await IntegrationRegistry.cacheActions(app.appSlug, cached);
+              total += cached.length;
             } catch {
               // skip individual app failures
             }

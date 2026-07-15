@@ -20,10 +20,10 @@ function ChevronLeftIcon(props: any) {
 }
 
 // ==============================================================
-// SECTION: Pipedream API Key Setup
+// SECTION: Foundry API Key Setup
 // ==============================================================
 
-function PipedreamKeySetup({
+function FoundryKeySetup({
   onConfigured,
 }: {
   onConfigured: () => void;
@@ -38,7 +38,7 @@ function PipedreamKeySetup({
     setSaving(true);
     setError("");
     try {
-      await Integrations.setPipedreamKey(key.trim());
+      await Integrations.setFoundryKey(key.trim());
       onConfigured();
     } catch (e: any) {
       setError(e?.message || "Failed to save key");
@@ -51,18 +51,18 @@ function PipedreamKeySetup({
       <div className="px-5 py-4 border-b border-line bg-amber-50/50">
         <div className="flex items-center gap-2">
           <Key className="w-4 h-4 text-amber-600" />
-          <h3 className="font-medium text-ink-900 text-sm">Pipedream API Key Required</h3>
+          <h3 className="font-medium text-ink-900 text-sm">Foundry API Key Required</h3>
         </div>
         <p className="text-xs text-ink-500 mt-1 ml-6">
-          The app catalog and action execution are powered by Pipedream's API.
+          The app catalog and action execution are powered by Foundry's API.
           Get your key from{" "}
           <a
-            href="https://pipedream.com/settings/keys"
+            href="https://foundry.dev/settings/keys"
             target="_blank"
             rel="noreferrer"
             className="underline text-amber-700 hover:text-amber-800"
           >
-            pipedream.com/settings/keys
+            foundry.dev/settings/keys
           </a>
         </p>
       </div>
@@ -106,10 +106,10 @@ function PipedreamKeySetup({
 }
 
 // ==============================================================
-// SECTION: Pipedream Key Status
+// SECTION: Foundry Key Status
 // ==============================================================
 
-function PipedreamKeyBanner({
+function FoundryKeyBanner({
   status,
   onOpenKeySetup,
 }: {
@@ -128,13 +128,13 @@ function PipedreamKeyBanner({
       {!status.configured ? (
         <>
           <Key className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1">Pipedream API key not configured — the app catalog and action execution require one.</span>
+          <span className="flex-1">Foundry API key not configured — the app catalog and action execution require one.</span>
           <button onClick={onOpenKeySetup} className="underline font-medium">Configure</button>
         </>
       ) : (
         <>
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-          <span className="flex-1">Pipedream API key is invalid or expired.</span>
+          <span className="flex-1">Foundry API key is invalid or expired.</span>
           <button onClick={onOpenKeySetup} className="underline font-medium">Update</button>
         </>
       )}
@@ -299,16 +299,16 @@ function AppCard({
               <button
                 onClick={handleRefresh}
                 className="btn btn-ghost btn-icon btn-sm text-ink-400 hover:text-ink-700"
-                title="Refresh cached actions from Pipedream"
+                title="Refresh cached actions from Foundry"
               >
                 <RefreshCw className="w-3 h-3" />
               </button>
               <a
-                href={`https://pipedream.com/apps/${app.name_slug}`}
+                href={`https://foundry.dev/apps/${app.name_slug}`}
                 target="_blank"
                 rel="noreferrer"
                 className="btn btn-ghost btn-icon btn-sm text-ink-400 hover:text-ink-700"
-                title="View on Pipedream"
+                title="View on Foundry"
               >
                 <ExternalLink className="w-3 h-3" />
               </a>
@@ -534,7 +534,7 @@ function CatalogView({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Search all 2,500+ Pipedream apps..."
+            placeholder="Search all 2,500+ Foundry apps..."
             className="input pl-10 w-full"
             autoFocus
           />
@@ -564,7 +564,7 @@ function CatalogView({
       {!pdConfigured && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
           <Key className="w-3.5 h-3.5 shrink-0" />
-          Set up your Pipedream API key above to browse the full catalog and connect apps.
+          Set up your Foundry API key above to browse the full catalog and connect apps.
         </div>
       )}
 
@@ -581,7 +581,7 @@ function CatalogView({
       {loading && (
         <div className="flex items-center justify-center py-16 text-ink-400 gap-2">
           <Loader2 className="w-5 h-5 animate-spin" />
-          <span className="text-sm">Searching Pipedream catalog...</span>
+          <span className="text-sm">Searching Foundry catalog...</span>
         </div>
       )}
 
@@ -715,12 +715,12 @@ function CatalogView({
             <p className="text-xs text-ink-400">
               Can't find what you need? Search the full{" "}
               <a
-                href="https://pipedream.com/apps"
+                href="https://foundry.dev/apps"
                 target="_blank"
                 rel="noreferrer"
                 className="underline hover:text-ink-700"
               >
-                Pipedream catalog
+                Foundry catalog
               </a>{" "}
               of 2,500+ apps above.
             </p>
@@ -896,7 +896,7 @@ function ConnectedView({
                     )}
                     {connActions && connActions.length === 0 && (
                       <p className="text-xs text-ink-400 py-2 italic">
-                        No actions cached. Sync from Pipedream to populate.
+                        No actions cached. Sync from Foundry to populate.
                       </p>
                     )}
                     {connActions?.slice(0, 12).map((ac) => (
@@ -997,7 +997,7 @@ function ApiKeyDialog({
       const res: any = await Integrations.connect(app.name_slug);
 
       if (isOAuth && res.oauth?.connectLinkUrl) {
-        // OAuth flow — open Pipedream Connect Link
+        // OAuth flow — open Foundry Connect Link
         setConnectionId(res.connection?.id || "");
         setConnectLinkUrl(res.oauth.connectLinkUrl);
         setStep("oauth");
@@ -1115,7 +1115,7 @@ function ApiKeyDialog({
                 This app uses <strong>OAuth</strong> authentication.
               </p>
               <p className="text-xs text-ink-500">
-                {app.auth_description || `${app.name} will be authorized via Pipedream.`}
+                {app.auth_description || `${app.name} will be authorized via Foundry.`}
               </p>
               {error && (
                 <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 border border-red-200 rounded p-2.5">
@@ -1143,7 +1143,7 @@ function ApiKeyDialog({
               <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-xs">
                 <ExternalLink className="w-3.5 h-3.5 shrink-0" />
                 <span>
-                  A new window opened to authorize {app.name} on Pipedream. Complete the authorization there, then come back.
+                  A new window opened to authorize {app.name} on Foundry. Complete the authorization there, then come back.
                 </span>
               </div>
               {connectLinkUrl && (
@@ -1238,7 +1238,7 @@ export default function IntegrationsPage() {
   const [error, setError] = useState("");
   const [showCatalog, setShowCatalog] = useState(false);
   const [connectingApp, setConnectingApp] = useState<PdApp | null>(null);
-  const [pdStatus, setPdStatus] = useState<{ configured: boolean; valid: boolean; message: string } | null>(null);
+  const [foundryStatus, setFoundryStatus] = useState<{ configured: boolean; valid: boolean; message: string } | null>(null);
   const [showKeySetup, setShowKeySetup] = useState(false);
   const [stats, setStats] = useState<{ total: number; byStatus: Record<string, number> } | null>(null);
   const [oauthVerificationState, setOauthVerificationState] = useState<{
@@ -1253,7 +1253,7 @@ export default function IntegrationsPage() {
     setError("");
 
     // Check PD key status in parallel with fetching connections
-    const statusPromise = Integrations.pipedreamStatus().then(setPdStatus).catch(() => {});
+    const statusPromise = Integrations.foundryStatus().then(setFoundryStatus).catch(() => {});
     const statsPromise = Integrations.stats().then(setStats).catch(() => {});
 
     try {
@@ -1270,7 +1270,7 @@ export default function IntegrationsPage() {
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
   // Handle oauth_success query param — auto-verify after OAuth redirect
-  // Pipedream appends ?token=<one-time-connect-token> to the successRedirectUri
+  // Foundry appends ?token=<one-time-connect-token> to the successRedirectUri
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const oauthSuccessId = params.get("oauth_success");
@@ -1352,7 +1352,7 @@ export default function IntegrationsPage() {
   };
 
   // Determine if PD is ready
-  const pdReady = pdStatus?.configured && pdStatus?.valid;
+  const foundryReady = foundryStatus?.configured && foundryStatus?.valid;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-5">
@@ -1365,17 +1365,17 @@ export default function IntegrationsPage() {
           </div>
           <h1 className="serif text-2xl text-ink-900">Integrations</h1>
           <p className="text-sm text-ink-500 mt-1">
-            Connect your agents to {pdReady ? "2,500+" : ""} external services via Pipedream
+            Connect your agents to {foundryReady ? "2,500+" : ""} external services via Foundry
           </p>
         </div>
 
         {/* PD Key status indicator */}
-        {pdStatus && (
+        {foundryStatus && (
           <div className="flex items-center gap-2">
-            {pdReady ? (
+            {foundryReady ? (
               <span className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-full px-3 py-1.5">
                 <Check className="w-3 h-3" />
-                Pipedream Connected
+                Foundry Connected
               </span>
             ) : (
               <button
@@ -1383,17 +1383,17 @@ export default function IntegrationsPage() {
                 className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 hover:bg-amber-100 transition-colors"
               >
                 <Key className="w-3 h-3" />
-                {pdStatus.configured ? "Invalid Key" : "Set Up Pipedream Key"}
+                {foundryStatus.configured ? "Invalid Key" : "Set Up Foundry Key"}
               </button>
             )}
           </div>
         )}
       </div>
 
-      {/* Pipedream key setup banner (when shown) */}
-      {showKeySetup && (!pdReady) && (
+      {/* Foundry key setup banner (when shown) */}
+      {showKeySetup && (!foundryReady) && (
         <div className="relative">
-          <PipedreamKeySetup
+          <FoundryKeySetup
             onConfigured={() => {
               setShowKeySetup(false);
               fetchAll();
@@ -1408,10 +1408,10 @@ export default function IntegrationsPage() {
         </div>
       )}
 
-      {/* Pipedream key warning banner (when not shown but needed) */}
-      {!showKeySetup && !pdReady && (
-        <PipedreamKeyBanner
-          status={pdStatus}
+      {/* Foundry key warning banner (when not shown but needed) */}
+      {!showKeySetup && !foundryReady && (
+        <FoundryKeyBanner
+          status={foundryStatus}
           onOpenKeySetup={() => setShowKeySetup(true)}
         />
       )}
@@ -1439,7 +1439,7 @@ export default function IntegrationsPage() {
               <Loader2 className="w-5 h-5 animate-spin shrink-0 mt-0.5" />
               <div className="flex-1">
                 <p className="text-sm font-medium">Verifying your connection{oauthVerificationState.appName ? ` to ${oauthVerificationState.appName}` : ""}...</p>
-                <p className="text-xs mt-1 opacity-80">Checking with Pipedream that the authorization was successful.</p>
+                <p className="text-xs mt-1 opacity-80">Checking with Foundry that the authorization was successful.</p>
               </div>
             </>
           ) : oauthVerificationState.status === "success" ? (
@@ -1460,7 +1460,7 @@ export default function IntegrationsPage() {
                 <p className="text-sm font-medium">Connection pending{oauthVerificationState.appName ? ` for ${oauthVerificationState.appName}` : ""}</p>
                 <p className="text-xs mt-1 opacity-80">
                   {oauthVerificationState.error || "The OAuth flow didn't complete yet."}
-                  {" "}If you completed the authorization in the Pipedream window, try refreshing this page or clicking "I've Authorized" on the connection.
+                  {" "}If you completed the authorization in the Foundry window, try refreshing this page or clicking "I've Authorized" on the connection.
                 </p>
               </div>
               <button
@@ -1475,7 +1475,7 @@ export default function IntegrationsPage() {
                       setOauthVerificationState((prev) => prev ? {
                         ...prev,
                         status: "failed",
-                        error: res.message || "Still not connected. Try completing the authorization in Pipedream.",
+                        error: res.message || "Still not connected. Try completing the authorization in Foundry.",
                       } : null);
                     }
                   } catch (e: any) {
@@ -1567,7 +1567,7 @@ export default function IntegrationsPage() {
           <CatalogView
             onConnect={handleConnect}
             onBack={() => setShowCatalog(false)}
-            pdConfigured={!!pdReady}
+            pdConfigured={!!foundryReady}
           />
         ) : (
           <ConnectedView

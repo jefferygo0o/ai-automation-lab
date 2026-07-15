@@ -3,14 +3,26 @@
  *
  * Mounted under /api/integrations in the main API server.
  * Provides endpoints for:
- *   - Browsing the Pipedream app catalog (with search)
+ *   - Browsing the Foundry Connect provider catalog (with search)
  *   - Connecting/disconnecting integrations
  *   - Listing and executing integration actions
  *   - Syncing the action cache
+ *
+ * Auth: single Foundry Connect API key (FOUNDRY_API_KEY) stored per-user
+ * as the `foundry_api_key` secret. Used for all upstream calls.
+ *
+ * OAuth flow:
+ *   - The lab calls Foundry `POST /v1/oauth/start` to get an
+ *     `authorizationUrl`, which it surfaces to the browser.
+ *   - Foundry completes the OAuth dance and redirects back to its
+ *     own callback. Connections are then visible via
+ *     `GET /v1/connections` and the lab reconciles by polling
+ *     (`/:id/verify-oauth`) or via Foundry's webhook to
+ *     `/api/integrations/oauth-webhook`.
  */
 
 import { Hono } from "hono";
-import { PipedreamClient, type PdComponent, type PdApp } from "./pipedream.ts";
+import { FoundryClient, type PdComponent, type PdApp } from "./foundry.ts";
 import { IntegrationRegistry, type IntegrationConnection, type CachedCatalogApp } from "./registry.ts";
 import { SecretStore } from "../secrets/store.ts";
 import { Audit } from "../audit/index.ts";
@@ -26,16 +38,16 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour cache for catalog
 // ---------------------------------------------------------------------------
 
 /**
- * Get the user's Pipedream API key.
+ * Get the user's Foundry API key.
  * Resolution order:
- *   1. Process env (PIPEDREAM_API_KEY) — useful for self-hosted / CI.
- *   2. Secrets DB (case-insensitive lookup of "pipedream_api_key").
+ *   1. Process env (FOUNDRY_API_KEY) — useful for self-hosted / CI.
+ *   2. Secrets DB (case-insensitive lookup of "foundry_api_key").
  * Either source is accepted; the env var wins when present.
  */
 async function getPdApiKey(ownerId: string): Promise<string | null> {
-  const envKey = process.env.PIPEDREAM_API_KEY?.trim();
+  const envKey = process.env.FOUNDRY_API_KEY?.trim();
   if (envKey && envKey.length > 0) return envKey;
-  return await SecretStore.getCI(ownerId, "pipedream_api_key");
+  return await SecretStore.getCI(ownerId, "foundry_api_key");
 }
 
 /** Reusable guard — returns 400 if no PD key set. */
@@ -70,51 +82,15 @@ function sanitizeConn(c: IntegrationConnection) {
 }
 
 // ---------------------------------------------------------------------------
-// Pipedream Connect API helpers
+// Foundry Connect (OAuth flow) — Foundry exposes a single bearer-auth API;
+// the OAuth "start" call is made via FoundryClient.startOAuth().
 // ---------------------------------------------------------------------------
-
-interface ConnectConfig {
-  clientId: string;
-  clientSecret: string;
-  projectId: string;
-  environment: string;
-}
-
-function getConnectConfig(): ConnectConfig | null {
-  const clientId = process.env.PIPEDREAM_CLIENT_ID?.trim();
-  const clientSecret = process.env.PIPEDREAM_CLIENT_SECRET?.trim();
-  const projectId = process.env.PIPEDREAM_PROJECT_ID?.trim();
-  if (!clientId || !clientSecret || !projectId) return null;
-  return {
-    clientId,
-    clientSecret,
-    projectId,
-    environment: process.env.PIPEDREAM_ENVIRONMENT?.trim() ?? "production",
-  };
-}
-
-async function requiresConnectConfig(c: any): Promise<ConnectConfig | null> {
-  const cfg = getConnectConfig();
-  if (!cfg) {
-    c.status(400);
-    return null;
-  }
-  return cfg;
-}
-
-/**
- * Get a fresh OAuth token for the Pipedream Connect API.
- */
-async function getConnectOAuthToken(cfg: ConnectConfig): Promise<string> {
-  const tokenResp = await PipedreamClient.createOAuthToken(cfg.clientId, cfg.clientSecret);
-  return tokenResp.access_token;
-}
 
 async function pdKeyMissingPayload(ownerId: string) {
   const existing = await (await SecretStore.list(ownerId)).map((s) => s.name);
   return {
     error:
-      "Pipedream API key not configured. Save it as a secret named 'pipedream_api_key' on the Secrets page, or set the PIPEDREAM_API_KEY environment variable on the server.",
+      "Foundry API key not configured. Save it as a secret named 'foundry_api_key' on the Secrets page, or set the FOUNDRY_API_KEY environment variable on the server.",
     hint: "Secret lookup is case-insensitive, so any case works.",
     yourSecrets: existing,
   };
@@ -125,7 +101,7 @@ async function pdKeyMissingPayload(ownerId: string) {
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch the full Pipedream catalog and cache it locally.
+ * Fetch the full Foundry catalog and cache it locally.
  * Updates sync state so the UI can show progress.
  */
 async function syncCatalogFromPd(ownerId: string, pdKey: string): Promise<number> {
@@ -137,8 +113,8 @@ async function syncCatalogFromPd(ownerId: string, pdKey: string): Promise<number
   console.log("[sync] starting sync for", ownerId);
   await IntegrationRegistry.updateCatalogSyncState(ownerId, "syncing", { total: 0 });
   try {
-    const apps = await PipedreamClient.listApps(pdKey);
-    console.log("[sync] Pipedream listApps returned", apps.length, "apps");
+    const apps = await FoundryClient.listApps(pdKey);
+    console.log("[sync] Foundry listApps returned", apps.length, "apps");
     await IntegrationRegistry.cacheAppCatalog(ownerId, apps);
     await IntegrationRegistry.updateCatalogSyncState(ownerId, "complete", { total: apps.length });
     console.log("[sync] complete for", ownerId, "(" + apps.length + " apps)");
@@ -162,7 +138,7 @@ async function syncCatalogFromPd(ownerId: string, pdKey: string): Promise<number
 
 /**
  * POST /api/integrations/catalog/sync
- * Force a full re-sync of the Pipedream app catalog into the local cache.
+ * Force a full re-sync of the Foundry app catalog into the local cache.
  */
 API.post("/catalog/sync", async (c) => {
   const userId = c.get("userId") as string;
@@ -192,7 +168,7 @@ API.get("/categories", async (c) => {
     const count = await IntegrationRegistry.getCachedAppsCount(userId);
     const fresh = await IntegrationRegistry.isCacheFresh(userId, CACHE_TTL_MS);
 
-    // Never block on Pipedream — return cached data immediately.
+    // Never block on Foundry — return cached data immediately.
     // If the cache is empty or stale, trigger a background refresh.
     if (count === 0 || !fresh) {
       syncCatalogFromPd(userId, pdKey).catch(e => console.error("[integrations] sync error:", e?.message ?? String(e)));
@@ -215,7 +191,7 @@ API.get("/categories", async (c) => {
 
 /**
  * GET /api/integrations/catalog
- * Browse the Pipedream app catalog from the local cache.
+ * Browse the Foundry app catalog from the local cache.
  * Supports ?q=search&page=&per_page=&category=
  * Auto-triggers background sync if cache is stale.
  */
@@ -243,14 +219,14 @@ API.get("/catalog", async (c) => {
     // original "background sync + return cached" strategy returned [] for
     // every request. To make search and browse work immediately, when the
     // cache has zero apps for this user we synchronously fetch from
-    // Pipedream and persist the result. For search queries, we also fall
-    // back to Pipedream live when the local cache has no matches.
+    // Foundry and persist the result. For search queries, we also fall
+    // back to Foundry live when the local cache has no matches.
     let liveFetched: PdApp[] | null = null;
     if (count === 0) {
       try {
         liveFetched = query
-          ? await PipedreamClient.searchApps(pdKey, query)
-          : await PipedreamClient.listApps(pdKey);
+          ? await FoundryClient.searchApps(pdKey, query)
+          : await FoundryClient.listApps(pdKey);
         if (liveFetched.length > 0) {
           await IntegrationRegistry.cacheAppCatalog(userId, liveFetched);
         }
@@ -262,11 +238,11 @@ API.get("/catalog", async (c) => {
         console.error("[integrations] background sync error:", e?.message ?? String(e)),
       );
     } else if (query) {
-      // Cache has apps but search yielded nothing — try Pipedream live as a supplement.
+      // Cache has apps but search yielded nothing — try Foundry live as a supplement.
       const localResult = await IntegrationRegistry.searchCachedApps(userId, query, 1, 10000);
       if (localResult.total === 0) {
         try {
-          liveFetched = await PipedreamClient.searchApps(pdKey, query);
+          liveFetched = await FoundryClient.searchApps(pdKey, query);
           if (liveFetched.length > 0) {
             await IntegrationRegistry.cacheAppCatalog(userId, liveFetched);
           }
@@ -393,13 +369,13 @@ API.get("/catalog/:slug", async (c) => {
         cached: true,
       };
     } else {
-      // Fetch app + components from Pipedream.
-      // Note: Pipedream Connect split these into two endpoints — getApp
+      // Fetch app + components from Foundry.
+      // Note: Foundry Connect split these into two endpoints — getApp
       // returns app metadata only; components come from listComponents.
-      const result = await PipedreamClient.getApp(pdKey, slug);
+      const result = await FoundryClient.getApp(pdKey, slug);
       app = result.app;
       try {
-        const list = await PipedreamClient.listComponents(pdKey, slug);
+        const list = await FoundryClient.listComponents(pdKey, slug);
         components = list.map((comp: any) => ({
           id: comp.id,
           appSlug: slug,
@@ -444,12 +420,12 @@ API.post("/catalog/:slug/refresh", async (c) => {
 
   const slug = c.req.param("slug");
   try {
-    // Pipedream Connect split the legacy /apps/{slug} endpoint: app
+    // Foundry Connect split the legacy /apps/{slug} endpoint: app
     // metadata comes from getApp, components come from listComponents.
-    await PipedreamClient.getApp(pdKey, slug);
-    const list = await PipedreamClient.listComponents(pdKey, slug);
+    await FoundryClient.getApp(pdKey, slug);
+    const list = await FoundryClient.listComponents(pdKey, slug);
     const components = list.map((comp: any) => ({
-      id: comp.id,
+      id: comp.key,
       appSlug: slug,
       actionKey: comp.key,
       name: comp.name,
@@ -495,14 +471,14 @@ API.post("/connect/:slug", async (c) => {
     return c.json({ error: "Already connected", connection: sanitizeConn(existing) }, 409);
   }
 
-  // Fetch app details from Pipedream
+  // Fetch app details from Foundry
   try {
-    const { app } = await PipedreamClient.getApp(pdKey, slug);
+    const { app } = await FoundryClient.getApp(pdKey, slug);
 
     // Components now come from a separate endpoint in the new Connect API.
     let components: PdComponent[] = [];
     try {
-      components = await PipedreamClient.listComponents(pdKey, slug);
+      components = await FoundryClient.listComponents(pdKey, slug);
     } catch (componentErr: any) {
       console.warn(
         "[integrations] listComponents failed for",
@@ -513,7 +489,7 @@ API.post("/connect/:slug", async (c) => {
 
     // Cache the components
     const cached = components.map((comp) => ({
-      id: comp.id,
+      id: comp.key,
       appSlug: slug,
       actionKey: comp.key,
       name: comp.name,
@@ -546,50 +522,26 @@ API.post("/connect/:slug", async (c) => {
       metadata: { appSlug: slug, appName: app.name },
     });
 
-    // For OAuth apps, require Pipedream Connect config.
-    // If the env vars aren't set, return a clear error instead of
-    // silently falling back to API-key credentials mode.
+    // For OAuth apps, start the OAuth flow via Foundry Connect and return
+    // the authorization URL for the browser to redirect to.
     if (app.auth_type === "oauth") {
-      const connectCfg = getConnectConfig();
-      if (!connectCfg) {
-        return c.json({
-          error: "Pipedream Connect (OAuth) is not configured. Set PIPEDREAM_CLIENT_ID, PIPEDREAM_CLIENT_SECRET, and PIPEDREAM_PROJECT_ID environment variables on the server to enable OAuth-based integration connections.",
-          connection: sanitizeConn(conn),
-          oauthNotConfigured: true,
-        }, 400);
-      }
       try {
-        const oauthTokenRes = await PipedreamClient.createOAuthToken(
-          connectCfg.clientId,
-          connectCfg.clientSecret,
-        );
         const host = c.req.header("host") ?? "";
         const proto = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
         const baseUrl = `${proto}://${host}`;
-        const ctRes = await PipedreamClient.createConnectToken(
-          oauthTokenRes.access_token,
-          connectCfg.projectId,
-          `lab_${userId}`,
-          {
-            app: slug,
-            successRedirectUri: `${baseUrl}/integrations?oauth_success=${conn.id}`,
-            webhookUri: `${baseUrl}/api/integrations/oauth-webhook`,
-            environment: connectCfg.environment,
-          },
-        );
-        // Mark the connection as "connecting" until OAuth completes
+        const { authorizationUrl } = await FoundryClient.startOAuth(pdKey, slug, {
+          externalUserId: `lab_${userId}`,
+          redirectUri: `${baseUrl}/integrations?oauth_success=${conn.id}`,
+        });
         await IntegrationRegistry.updateStatus(conn.id, userId, "connecting");
         return c.json({
           connection: sanitizeConn(conn),
-          oauth: {
-            connectLinkUrl: ctRes.connect_link_url + (slug ? `&app=${slug}` : ""),
-            token: ctRes.token,
-          },
+          oauth: { authorizationUrl },
         });
       } catch (oauthErr: any) {
-        console.warn("[integrations] OAuth connect token failed:", oauthErr?.message ?? String(oauthErr));
+        console.warn("[integrations] OAuth start failed:", oauthErr?.message ?? String(oauthErr));
         return c.json({
-          error: `Failed to initiate OAuth flow: ${oauthErr?.message ?? String(oauthErr)}. Check your Pipedream Connect credentials and try again.`,
+          error: `Failed to initiate OAuth flow: ${oauthErr?.message ?? String(oauthErr)}. Check your Foundry API key and try again.`,
           connection: sanitizeConn(conn),
         }, 502);
       }
@@ -597,7 +549,7 @@ API.post("/connect/:slug", async (c) => {
 
     return c.json({ connection: sanitizeConn(conn) });
   } catch (e: any) {
-    // If Pipedream fetch fails, still allow a minimal connection
+    // If Foundry fetch fails, still allow a minimal connection
     const conn = await IntegrationRegistry.create(userId, {
       appSlug: slug,
       appName: slug.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
@@ -644,7 +596,7 @@ API.put("/:id/credentials", async (c) => {
 
 /**
  * PUT /api/integrations/:id/oauth-callback
- * Record a Pipedream connected_account_id after OAuth flow.
+ * Record a Foundry connected_account_id after OAuth flow.
  */
 API.put("/:id/oauth", async (c) => {
   const userId = c.get("userId") as string;
@@ -677,11 +629,11 @@ API.delete("/:id", async (c) => {
   const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
   if (!conn) return c.json({ error: "not found" }, 404);
 
-  // Clean up the Pipedream account if it exists
+  // Clean up the Foundry account if it exists
   const pdKey = await getPdApiKey(userId);
   if (pdKey && conn.connectedAccountId) {
     try {
-      await PipedreamClient.deleteAccount(pdKey, conn.connectedAccountId);
+      await FoundryClient.deleteAccount(pdKey, conn.connectedAccountId);
     } catch {
       // Non-fatal — the local record is what matters
     }
@@ -749,22 +701,24 @@ API.post("/:id/execute", async (c) => {
 
   try {
     const accountId = conn.connectedAccountId;
+    const { appSlug } = conn;
     let result;
 
     if (accountId) {
-      // Use Pipedream Connect API for OAuth-connected accounts
-      result = await PipedreamClient.executeAction(pdKey, actionKey, input ?? {}, accountId, `lab_${userId}`);
+      // Use Foundry Connect API for OAuth-connected accounts
+      result = await FoundryClient.executeAction(pdKey, appSlug, actionKey, input ?? {}, accountId, `lab_${userId}`);
     } else if (conn.credentialsRef) {
       // For API key-based integrations, retrieve the stored key and
-      // pass it as `configured_props.api_key` — the Pipedream-standard
+      // pass it as `configured_props.api_key` — the Foundry-standard
       // name for the API key config prop in most Connect apps. The
       // user's input is merged on top so explicit overrides win.
       const storedKey = await SecretStore.get(userId, conn.credentialsRef);
       if (!storedKey) {
         return c.json({ error: "Stored credentials not found" }, 500);
       }
-      result = await PipedreamClient.executeAction(
+      result = await FoundryClient.executeAction(
         pdKey,
+        appSlug,
         actionKey,
         { api_key: storedKey, ...(input ?? {}) },
         "",
@@ -789,19 +743,19 @@ API.post("/:id/execute", async (c) => {
   }
 });
 
-// ----- Pipedream API Key Management -----
+// ----- Foundry API Key Management -----
 
 /**
- * GET /api/integrations/pipedream/status
- * Check if Pipedream API key is set and valid.
+ * GET /api/integrations/foundry/status
+ * Check if Foundry API key is set and valid.
  */
-API.get("/pipedream/status", async (c) => {
+API.get("/foundry/status", async (c) => {
   const userId = c.get("userId") as string;
   const key = await getPdApiKey(userId);
   if (!key) {
-    return c.json({ configured: false, valid: false, message: "No Pipedream API key configured" });
+    return c.json({ configured: false, valid: false, message: "No Foundry API key configured" });
   }
-  const valid = await PipedreamClient.ping(key);
+  const valid = await FoundryClient.status(key);
   return c.json({
     configured: true,
     valid,
@@ -810,20 +764,20 @@ API.get("/pipedream/status", async (c) => {
 });
 
 /**
- * PUT /api/integrations/pipedream/key
- * Set or update the Pipedream API key.
+ * PUT /api/integrations/foundry/key
+ * Set or update the Foundry API key.
  */
-API.put("/pipedream/key", async (c) => {
+API.put("/foundry/key", async (c) => {
   const userId = c.get("userId") as string;
   const { value } = (await c.req.json()) as { value: string };
   if (!value || value.length < 10) {
-    return c.json({ error: "A valid Pipedream API key is required (min 10 chars)" }, 400);
+    return c.json({ error: "A valid Foundry API key is required (min 10 chars)" }, 400);
   }
-  await SecretStore.set(userId, "pipedream_api_key", value);
+  await SecretStore.set(userId, "foundry_api_key", value);
   Audit.record({
     ownerId: userId,
     actor: "user",
-    action: "integration.set_pipedream_key",
+    action: "integration.set_foundry_key",
     metadata: { length: value.length },
   });
   return c.json({ ok: true });
@@ -842,98 +796,52 @@ API.get("/stats", async (c) => {
   return c.json({ total, byStatus });
 });
 
-// ----- Pipedream Connect (OAuth flow) -----
+// ----- Foundry Connect (OAuth flow) -----
+// Foundry only needs a single API key per user. The gateway handles the OAuth
+// handshake and the callback token, so this endpoint simply reports whether a
+// key is configured for the current user.
 
 /**
  * GET /api/integrations/connect-config
- * Check if Pipedream Connect (OAuth) is configured.
- * Returns the config status without exposing secrets.
+ * Check if Foundry Connect is configured for the calling user.
  */
 API.get("/connect-config", async (c) => {
-  const cfg = getConnectConfig();
+  const userId = c.get("userId") as string;
+  const key = await getPdApiKey(userId);
   return c.json({
-    configured: !!cfg,
-    hasProjectId: !!cfg?.projectId,
-    hasClientId: !!cfg?.clientId,
-    environment: cfg?.environment ?? "production",
+    configured: !!key,
+    hasProjectId: false,
+    hasClientId: false,
+    environment: "production",
   });
 });
 
 /**
  * POST /api/integrations/oauth-webhook
- * Called by Pipedream after a user completes the OAuth flow via Connect Link.
- * Expects a JSON body with connected_account_id, app_slug, and external_user_id.
- *
- * Verifies the request using Pipedream's webhook signing key (stored as
- * PIPEDREAM_WEBHOOK_SIGNING_KEY env var) via HMAC-SHA256 of the raw body.
- * If the signing key is set, unverified requests are rejected with 401.
- * If the signing key is not set, the endpoint accepts unverified requests
- * (legacy behaviour for backward compatibility).
+ * Called by Foundry Connect after a user completes the OAuth flow. The body
+ * shape is loose — we only need app_slug, external_id (orgId we passed in as
+ * `lab_${userId}`), and the connection id. Foundry doesn't sign these today,
+ * so we trust the request and rely on the connection record for auth.
  */
 API.post("/oauth-webhook", async (c) => {
-  const signingKey = process.env.PIPEDREAM_WEBHOOK_SIGNING_KEY?.trim();
-
-  // Read raw body for signature verification, then parse as JSON
-  let rawBody: string;
-  try {
-    rawBody = await c.req.text();
-  } catch {
-    return c.json({ error: "cannot read body" }, 400);
-  }
-
-  if (signingKey) {
-    const signature = c.req.header("x-pd-webhook-signature");
-    if (!signature) {
-      console.warn("[integrations] oauth-webhook missing x-pd-webhook-signature header");
-      return c.json({ error: "missing signature" }, 401);
-    }
-    const expected = await crypto.subtle
-      .importKey("raw", new TextEncoder().encode(signingKey), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
-      .then((key) => crypto.subtle.sign("HMAC", key, new TextEncoder().encode(rawBody)))
-      .then((sig) => Array.from(new Uint8Array(sig)).map((b) => b.toString(16).padStart(2, "0")).join(""));
-    // Constant-time compare
-    if (expected.length !== signature.length) {
-      console.warn("[integrations] oauth-webhook invalid signature (length mismatch)");
-      return c.json({ error: "invalid signature" }, 401);
-    }
-    let mismatch = 0;
-    for (let i = 0; i < expected.length; i++) {
-      mismatch |= expected.charCodeAt(i) ^ signature.charCodeAt(i);
-    }
-    if (mismatch !== 0) {
-      console.warn("[integrations] oauth-webhook invalid signature (mismatch)");
-      return c.json({ error: "invalid signature" }, 401);
-    }
-  }
-
   let body: any;
   try {
-    body = JSON.parse(rawBody);
+    body = await c.req.json();
   } catch {
     return c.json({ error: "invalid JSON" }, 400);
   }
 
-  // Pipedream Connect webhook payload shape:
-  // {
-  //   "event": "CONNECTION_SUCCESS",
-  //   "connect_token": "ctok_xxx",
-  //   "account": {
-  //     "id": "apn_xxx",
-  //     "external_id": "user-abc-123",
-  //     "app": { "name_slug": "google_sheets", ... }
-  //   }
-  // }
-  const connectedAccountId = body.account?.id;
-  const appSlug = body.account?.app?.name_slug;
-  const externalUserId = body.account?.external_id;
+  // Foundry passes back the orgId we set on the start call (lab_${userId}),
+  // plus the provider name and the new connection id.
+  const externalUserId: string = body.external_id ?? body.orgId ?? body.account?.external_id ?? "";
+  const appSlug: string = body.app ?? body.provider ?? body.account?.app?.name_slug ?? "";
+  const connectedAccountId: string = body.id ?? body.account?.id ?? body.connection_id ?? "";
 
-  if (!connectedAccountId || !appSlug || !externalUserId) {
-    // Pipedream may send different shapes; log and ack regardless
-    console.log("[integrations] oauth-webhook received unexpected payload:", JSON.stringify(body));
+  if (!appSlug || !externalUserId) {
+    console.log("[integrations] oauth-webhook missing app/user:", JSON.stringify(body));
     return c.json({ received: true });
   }
 
-  // external_user_id is prefixed with "lab_"
   const userId = externalUserId.startsWith("lab_")
     ? externalUserId.slice(4)
     : externalUserId;
@@ -963,67 +871,44 @@ API.post("/oauth-webhook", async (c) => {
 
 /**
  * POST /api/integrations/:id/verify-oauth
- * After the user returns from the Pipedream OAuth flow, the frontend calls
+ * After the user returns from the Foundry OAuth flow, the frontend calls
  * this to check whether the OAuth account was connected. If the webhook
  * already processed it, the connection will have a connectedAccountId and
- * status "connected". If not, this endpoint tries to find the account by
- * querying Pipedream's listConnectAccounts API across environments.
+ * status "connected". If not, we look the connection up via Foundry.
  */
 API.post("/:id/verify-oauth", async (c) => {
   const userId = c.get("userId") as string;
   const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
   if (!conn) return c.json({ error: "not found" }, 404);
 
-  // Already connected via webhook
   if (conn.status === "connected" && conn.connectedAccountId) {
     return c.json({ connected: true, status: "connected", connectedAccountId: conn.connectedAccountId });
   }
 
-  const connectCfg = getConnectConfig();
-  if (!connectCfg) {
-    return c.json({ connected: false, status: conn.status, message: "Pipedream Connect not configured" });
+  const pdKey = await getPdApiKey(userId);
+  if (!pdKey) {
+    return c.json({ connected: false, status: conn.status, message: "Foundry API key not configured" });
   }
 
   try {
-    const oauthTokenRes = await PipedreamClient.createOAuthToken(
-      connectCfg.clientId,
-      connectCfg.clientSecret,
-    );
-
-    // Query Pipedream's connected accounts — try primary env then fallback
-    const environments = [connectCfg.environment, connectCfg.environment === "production" ? "development" : "production"];
-    let matching: any = null;
-
-    for (const env of environments) {
-      const accounts = await PipedreamClient.listConnectAccounts(
-        oauthTokenRes.access_token,
-        connectCfg.projectId,
-        `lab_${userId}`,
-        env,
-      );
-      matching = accounts.find((a: any) => a.app_slug === conn.appSlug);
-      if (matching) {
-        console.log(`[integrations] verify-oauth found matching account in environment "${env}"`);
-        break;
-      }
-    }
+    const connections = await FoundryClient.listConnections(pdKey);
+    const matching = connections.find((x: any) => x.provider === conn.appSlug || x.app === conn.appSlug);
 
     if (matching) {
-      await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
-        connectedAccountId: matching.id,
-      });
+      const connectedAccountId = matching.id ?? matching.id;
+      await IntegrationRegistry.updateStatus(conn.id, userId, "connected", { connectedAccountId });
       Audit.record({
         ownerId: userId,
         actor: "user",
         action: "integration.oauth_verify",
         targetId: conn.id,
         targetType: "integration",
-        metadata: { appSlug: conn.appSlug, connectedAccountId: matching.id, method: "list_accounts" },
+        metadata: { appSlug: conn.appSlug, connectedAccountId, method: "list_connections" },
       });
-      return c.json({ connected: true, status: "connected", connectedAccountId: matching.id });
+      return c.json({ connected: true, status: "connected", connectedAccountId });
     }
 
-    return c.json({ connected: false, status: "connecting", message: "No matching connected account found yet. The webhook from Pipedream may still be processing — try again in a few seconds." });
+    return c.json({ connected: false, status: "connecting", message: "No matching connection found yet. The webhook from Foundry may still be processing — try again in a few seconds." });
   } catch (e: any) {
     return c.json({ connected: false, status: conn.status, error: e?.message ?? String(e) });
   }

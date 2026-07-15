@@ -20,7 +20,7 @@ import { ChatStore } from "../chats/index.ts";
 import { runAgentTurn, type StreamEvent } from "../agents/runtime.ts";
 import { Skills } from "../skills/index.ts";
 import { mcpManager, McpStore } from "../mcp/client.ts";
-import { startMcpOAuthFlow, verifyMcpOAuth, setMcpEnvAndStart } from "../mcp/connect.ts";
+import { startMcpOAuthFlow, verifyMcpOAuth, setMcpEnvAndStart, type McpOAuthStartResult } from "../mcp/connect.ts";
 import { MemoryStore } from "../memory/index.ts";
 import { readAgentConfig, AGENTS_DIR } from "../agents/files.ts";
 import { existsSync } from "node:fs";
@@ -603,12 +603,14 @@ api.delete("/api/skills/:id", async (c) => {
 
 // ---- MCP ----
 api.get("/api/mcp/servers", async (c) => {
-  return c.json({ servers: await McpStore.list() });
+  const userId = c.get("userId") as string;
+  return c.json({ servers: await McpStore.list(userId) });
 });
 
 // ---- MCP Marketplace (curated catalog) ----
 api.get("/api/mcp/marketplace", async (c) => {
-  const installedNames = new Set((await McpStore.list()).map((s) => s.name));
+  const userId = c.get("userId") as string;
+  const installedNames = new Set((await McpStore.list(userId)).map((s) => s.name));
   const entries = MCP_MARKETPLACE.map((e) => ({
     ...e,
     installed: installedNames.has(e.name),
@@ -617,9 +619,10 @@ api.get("/api/mcp/marketplace", async (c) => {
 });
 
 api.get("/api/mcp/marketplace/:id", async (c) => {
+  const userId = c.get("userId") as string;
   const entry = findMarketplaceEntry(c.req.param("id"));
   if (!entry) return c.json({ error: "marketplace entry not found" }, 404);
-  const installedNames = new Set((await McpStore.list()).map((s) => s.name));
+  const installedNames = new Set((await McpStore.list(userId)).map((s) => s.name));
   return c.json({ ...entry, installed: installedNames.has(entry.name) });
 });
 
@@ -655,7 +658,7 @@ api.post("/api/mcp/marketplace/:id/install", async (c) => {
     connectError = e?.message ?? String(e);
   }
   return c.json({
-    server: (await McpStore.list()).find((s) => s.id === server.id),
+    server: (await McpStore.list(userId)).find((s) => s.id === server.id),
     status: connectStatus,
     error: connectError,
     needs_env: (entry.envVars ?? []).filter((v) => v.required).map((v) => v.name),
@@ -672,10 +675,10 @@ api.post("/api/mcp/servers", async (c) => {
 
 api.post("/api/mcp/servers/:id/connect", async (c) => {
   const userId = c.get("userId") as string;
-  const srv = await McpStore.get(c.req.param("id"));
+  const srv = await McpStore.get(c.req.param("id"), userId);
   if (!srv) return c.json({ error: "not found" }, 404);
 
-  // Check if this server needs OAuth via Pipedream Connect
+  // Check if this server needs OAuth via Foundry Connect
   let oauthResult: McpOAuthStartResult;
   try {
     oauthResult = await startMcpOAuthFlow(c.req.param("id"), userId);
@@ -683,13 +686,13 @@ api.post("/api/mcp/servers/:id/connect", async (c) => {
     return c.json({ ok: false, error: `OAuth check failed: ${e?.message ?? String(e)}`, needsEnv: [] });
   }
 
-  if (oauthResult.connectLinkUrl || oauthResult.connectionId) {
+  if (oauthResult.authorizationUrl || oauthResult.connectionId) {
     // OAuth flow started — return the link for the frontend to open
     return c.json({
       ok: true,
       needs_oauth: true,
       oauth: {
-        connectLinkUrl: oauthResult.connectLinkUrl,
+        authorizationUrl: oauthResult.authorizationUrl,
         connectionId: oauthResult.connectionId,
         authType: oauthResult.authType,
       },
@@ -728,12 +731,12 @@ api.post("/api/mcp/servers/:id/verify-oauth", async (c) => {
 api.put("/api/mcp/servers/:id/env", async (c) => {
   const userId = c.get("userId") as string;
   const { env } = (await c.req.json()) as { env: Record<string, string> };
-  const result = await setMcpEnvAndStart(c.req.param("id"), env);
+  const result = await setMcpEnvAndStart(c.req.param("id"), env, userId);
   return c.json(result);
 });
 
 api.post("/api/mcp/servers/:id/oauth-callback", async (c) => {
-  // This is called by Pipedream's webhook after OAuth completes.
+  // This is called by Foundry's webhook after OAuth completes.
   // The connect.ts module handles verification via verifyMcpOAuth.
   // For now, just log and acknowledge.
   console.log("[mcp] oauth-callback received for server", c.req.param("id"));
@@ -741,24 +744,26 @@ api.post("/api/mcp/servers/:id/oauth-callback", async (c) => {
 });
 
 api.post("/api/mcp/servers/:id/disconnect", async (c) => {
-  const srv = await McpStore.get(c.req.param("id"));
+  const userId = c.get("userId") as string;
+  const srv = await McpStore.get(c.req.param("id"), userId);
   if (!srv) return c.json({ ok: false, error: "not found" }, 404);
   mcpManager.stopServer(srv.name);
   return c.json({ ok: true });
 });
 
 api.delete("/api/mcp/servers/:id", async (c) => {
+  const userId = c.get("userId") as string;
   const id = c.req.param("id");
-  const ok = await McpStore.delete(id);
+  const ok = await McpStore.delete(id, userId);
   if (ok) {
-    const userId = c.get("userId") as string;
     Audit.record({ ownerId: userId, actor: "user", action: "mcp.delete", targetId: id, targetType: "mcp_server" });
   }
   return c.json({ ok });
 });
 
 api.get("/api/mcp/servers/:id/tools", async (c) => {
-  const srv = await McpStore.get(c.req.param("id"));
+  const userId = c.get("userId") as string;
+  const srv = await McpStore.get(c.req.param("id"), userId);
   if (!srv) return c.json({ tools: [] });
   try {
     await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });

@@ -1,48 +1,54 @@
 /**
- * MCP Connect bridge — wires MCP servers to Pipedream Connect OAuth.
+ * MCP Connect bridge — wires MCP servers to Foundry Connect OAuth.
  *
  * When a marketplace MCP server (e.g. Cloudflare) needs env vars that a
- * Pipedream app can provide, this module handles the OAuth dance:
- *   1. Create (or find) a Pipedream integration connection for the app
- *   2. Return a Pipedream Connect link URL to the frontend
- *   3. After the user authorizes, Pipedream calls our webhook
+ * Foundry Connect provider can provide, this module handles the OAuth dance:
+ *   1. Create (or find) a Foundry integration connection for the provider
+ *   2. Return a Foundry Connect authorization URL to the frontend
+ *   3. Foundry completes the OAuth flow and stores the connection
  *   4. Frontend calls verify-oauth → we finalize + start the MCP server
+ *
+ * Foundry's OAuth model differs from Foundry Connect:
+ *   - We POST /v1/oauth/start with { provider, redirectUri? } to get an
+ *     authorizationUrl managed by Foundry. The token callback lives on
+ *     Foundry (OAUTH_CALLBACK_BASE), not on our server.
+ *   - On success, the connection surfaces via GET /v1/connections.
  */
 
-import { PipedreamClient } from "../integrations/pipedream.ts";
+import { FoundryClient } from "../integrations/foundry.ts";
 import { IntegrationRegistry } from "../integrations/registry.ts";
 import { SecretStore } from "../secrets/store.ts";
 import { McpStore, mcpManager } from "./client.ts";
-import { MCP_MARKETPLACE, MCP_TO_PIPEDREAM_MAP } from "./marketplace.ts";
+import { MCP_MARKETPLACE, MCP_TO_FOUNDRY_MAP } from "./marketplace.ts";
 
 // ---------------------------------------------------------------------------
-// Pipedream Connect config (mirrors what integrations/api.ts does)
+// Foundry Connect config (single API key; replaces Foundry's client/secret/project envs)
 // ---------------------------------------------------------------------------
 
-interface ConnectConfig {
-  clientId: string;
-  clientSecret: string;
-  projectId: string;
-  environment: string;
+interface FoundryConfig {
+  apiKey: string;
+  /** Foundry's OAuth callback base (their hosted flow). Override for non-prod. */
+  oauthCallbackBase: string;
 }
 
-function getConnectConfig(): ConnectConfig | null {
-  const clientId = process.env.PIPEDREAM_CLIENT_ID?.trim();
-  const clientSecret = process.env.PIPEDREAM_CLIENT_SECRET?.trim();
-  const projectId = process.env.PIPEDREAM_PROJECT_ID?.trim();
-  if (!clientId || !clientSecret || !projectId) return null;
+function getFoundryConfig(): FoundryConfig | null {
+  const envKey = process.env.FOUNDRY_API_KEY?.trim();
+  const apiKey = envKey && envKey.length > 0
+    ? envKey
+    : null;
+  if (!apiKey) return null;
   return {
-    clientId,
-    clientSecret,
-    projectId,
-    environment: process.env.PIPEDREAM_ENVIRONMENT?.trim() ?? "production",
+    apiKey,
+    oauthCallbackBase:
+      process.env.FOUNDRY_OAUTH_CALLBACK_BASE?.trim() ??
+      "https://api-gateway-production-4984.up.railway.app/v1/connections/oauth/callback",
   };
 }
 
-async function getPdApiKey(ownerId: string): Promise<string | null> {
-  const envKey = process.env.PIPEDREAM_API_KEY?.trim();
+async function getFoundryApiKey(ownerId: string): Promise<string | null> {
+  const envKey = process.env.FOUNDRY_API_KEY?.trim();
   if (envKey && envKey.length > 0) return envKey;
-  return await SecretStore.getCI(ownerId, "pipedream_api_key");
+  return await SecretStore.getCI(ownerId, "foundry_api_key");
 }
 
 // ---------------------------------------------------------------------------
@@ -50,12 +56,12 @@ async function getPdApiKey(ownerId: string): Promise<string | null> {
 // ---------------------------------------------------------------------------
 
 export interface McpOAuthStartResult {
-  /** The Pipedream app slug we're connecting to. */
-  pipedreamSlug: string;
+  /** The Foundry provider slug we're connecting to. */
+  foundrySlug: string;
   /** Auth type: "oauth" or "api_key". */
   authType: string;
-  /** The Connect Link URL to open in a new window. */
-  connectLinkUrl?: string;
+  /** The authorization URL to open in a new window. */
+  authorizationUrl?: string;
   /** The integration connection ID (used for verify step). */
   connectionId?: string;
   /** Whether the user still needs to provide env vars after OAuth. */
@@ -71,118 +77,113 @@ export interface McpOAuthVerifyResult {
 }
 
 /**
- * Initiate a Pipedream Connect OAuth flow for an MCP server that was
+ * Initiate a Foundry Connect OAuth flow for an MCP server that was
  * installed from the marketplace.
- *
- * Returns an OAuth link URL for the frontend to open, or a message if
- * the integration is already connected.
  */
 export async function startMcpOAuthFlow(
   serverId: string,
   userId: string,
 ): Promise<McpOAuthStartResult> {
-  const connectCfg = getConnectConfig();
-  if (!connectCfg) {
+  const cfg = getFoundryConfig();
+  if (!cfg) {
     return {
-      pipedreamSlug: "",
+      foundrySlug: "",
       authType: "none",
       needsEnv: [],
-      message: "Pipedream Connect not configured. Set PIPEDREAM_CLIENT_ID, PIPEDREAM_CLIENT_SECRET, and PIPEDREAM_PROJECT_ID.",
+      message:
+        "Foundry Connect not configured. Set FOUNDRY_API_KEY in the environment.",
     };
   }
 
   // Find the marketplace entry matching this server
-  const srv = await McpStore.get(serverId);
+  const srv = await McpStore.get(serverId, userId);
   if (!srv) {
-    return { pipedreamSlug: "", authType: "none", needsEnv: [], message: "Server not found" };
+    return { foundrySlug: "", authType: "none", needsEnv: [], message: "Server not found" };
   }
 
   const marketEntry = MCP_MARKETPLACE.find((e) => e.name === srv.name);
   if (!marketEntry) {
-    return { pipedreamSlug: "", authType: "none", needsEnv: [], message: "This server is not from the marketplace." };
+    return { foundrySlug: "", authType: "none", needsEnv: [], message: "This server is not from the marketplace." };
   }
 
-  const pipedreamSlug = MCP_TO_PIPEDREAM_MAP[marketEntry.id];
-  if (!pipedreamSlug) {
-    // No Pipedream mapping — just return the needed env vars
+  const foundrySlug = MCP_TO_FOUNDRY_MAP[marketEntry.id];
+  if (!foundrySlug) {
+    // No Foundry mapping — just return the needed env vars
     return {
-      pipedreamSlug: "",
+      foundrySlug: "",
       authType: "none",
       needsEnv: marketEntry.envVars?.filter((v) => v.required).map((v) => v.name) ?? [],
-      message: `No Pipedream app mapped for ${marketEntry.name}. Set environment variables manually.`,
+      message: `No Foundry provider mapped for ${marketEntry.name}. Set environment variables manually.`,
     };
   }
 
-  // Check if a Pipedream integration already exists for this app
-  const existingConn = await IntegrationRegistry.getByApp(userId, pipedreamSlug);
+  // Check if a Foundry integration already exists for this provider
+  const existingConn = await IntegrationRegistry.getByApp(userId, foundrySlug);
   if (existingConn && existingConn.status === "connected") {
-    // Already connected — try to use its credentials
     return {
-      pipedreamSlug,
+      foundrySlug,
       authType: existingConn.authType,
       needsEnv: marketEntry.envVars?.filter((v) => v.required).map((v) => v.name) ?? [],
       message: "Integration already connected.",
     };
   }
 
-  // Get the Pipedream API key
-  const pdKey = await getPdApiKey(userId);
-  if (!pdKey) {
+  // Get the Foundry API key (env first, then per-user secret)
+  const apiKey = await getFoundryApiKey(userId);
+  if (!apiKey) {
     return {
-      pipedreamSlug,
+      foundrySlug,
       authType: "unknown",
       needsEnv: marketEntry.envVars?.filter((v) => v.required).map((v) => v.name) ?? [],
-      message: "Pipedream API key not configured.",
+      message: "Foundry API key not configured.",
     };
   }
 
-  // Fetch app details from Pipedream to know auth type. Components are
-  // NOT in getApp's response under the new Connect API — we fetch them
-  // separately via listComponents (best-effort, non-fatal).
-  let app: any;
+  // Fetch provider details from Foundry. Components are NOT included in
+  // getProvider's response — we fetch them separately via listActions.
+  const foundry = FoundryClient;
+  let provider: any;
   try {
-    const result = await PipedreamClient.getApp(pdKey, pipedreamSlug);
-    app = result.app;
+    provider = provider = await foundry.getProvider(apiKey, foundrySlug);
   } catch (e: any) {
     // If fetch fails, create a minimal connection anyway
-    app = {
-      name_slug: pipedreamSlug,
-      name: marketEntry.name,
+    provider = {
+      name: foundrySlug,
+      displayName: marketEntry.name,
       description: marketEntry.description,
-      auth_type: "api_key",
-      auth_description: "Cloudflare API Token",
-      logo_url: "",
+      auth: { type: "api_key" },
       categories: marketEntry.categories,
     };
   }
 
   // Cache the action components (best-effort, non-fatal)
   try {
-    const components = await PipedreamClient.listComponents(pdKey, pipedreamSlug);
-    const cached = components.map((comp: any) => ({
-      id: comp.id,
-      appSlug: pipedreamSlug,
-      actionKey: comp.key,
-      name: comp.name,
-      description: comp.description,
-      type: comp.type,
-      inputSchema: comp.input_schema ?? {},
-      outputSchema: comp.output_schema ?? {},
+    const actions = await foundry.listProviderActions(apiKey, foundrySlug);
+    const cached = actions.map((a: any) => ({
+      id: `${foundrySlug}:${a.name}`,
+      appSlug: foundrySlug,
+      actionKey: a.name,
+      name: a.displayName ?? a.name,
+      description: a.description ?? "",
+      type: "action" as const,
+      inputSchema: a.inputSchema ?? {},
+      outputSchema: a.outputSchema ?? {},
     }));
-    await IntegrationRegistry.cacheActions(pipedreamSlug, cached);
+    await IntegrationRegistry.cacheActions(foundrySlug, cached);
   } catch {
     // Non-fatal
   }
 
   // Create the integration connection record
+  const authType = (provider.auth?.type ?? "api_key") as string;
   const conn = await IntegrationRegistry.create(userId, {
-    appSlug: pipedreamSlug,
-    appName: app.name ?? marketEntry.name,
-    appDescription: app.description ?? marketEntry.description,
-    authType: app.auth_type ?? "api_key",
-    authDescription: app.auth_description ?? "",
-    logoUrl: app.logo_url ?? "",
-    categories: app.categories ?? marketEntry.categories,
+    appSlug: foundrySlug,
+    appName: provider.displayName ?? provider.name ?? marketEntry.name,
+    appDescription: provider.description ?? marketEntry.description ?? "",
+    authType: authType as "oauth" | "api_key" | "keys" | "none",
+    authDescription: "",
+    logoUrl: "",
+    categories: provider.categories ?? marketEntry.categories ?? [],
   });
 
   // Store a reference linking this integration to the MCP server
@@ -192,44 +193,24 @@ export async function startMcpOAuthFlow(
     .filter((v) => v.required)
     .map((v) => v.name);
 
-  // For OAuth apps, create a Connect token to get the OAuth link
-  if (app.auth_type === "oauth") {
+  // For OAuth providers, ask Foundry to mint an authorizationUrl.
+  if (authType === "oauth" || authType === "oauth2") {
     try {
-      const oauthTokenRes = await PipedreamClient.createOAuthToken(
-        connectCfg.clientId,
-        connectCfg.clientSecret,
-      );
-
-      // Use the MCP-server-specific success redirect
-      const oauthHost = process.env.RENDER_EXTERNAL_URL ?? "";
-      const webhookUri = oauthHost
-        ? `${oauthHost}/api/mcp/servers/${serverId}/oauth-callback`
-        : undefined;
-
-      const ctRes = await PipedreamClient.createConnectToken(
-        oauthTokenRes.access_token,
-        connectCfg.projectId,
-        `lab_${userId}`,
-        {
-          app: pipedreamSlug,
-          webhookUri,
-          environment: connectCfg.environment,
-        },
-      );
+      const { authorizationUrl } = await FoundryClient.startOAuth(apiKey, foundrySlug, { externalUserId: userId, redirectUri: cfg.oauthCallbackBase });
 
       await IntegrationRegistry.updateStatus(conn.id, userId, "connecting");
 
       return {
-        pipedreamSlug,
+        foundrySlug,
         authType: "oauth",
-        connectLinkUrl: ctRes.connect_link_url,
+        authorizationUrl,
         connectionId: conn.id,
         needsEnv,
-        message: "Open the link to authorize via Pipedream Connect.",
+        message: "Open the link to authorize via Foundry Connect.",
       };
     } catch (e: any) {
       return {
-        pipedreamSlug,
+        foundrySlug,
         authType: "oauth",
         needsEnv,
         message: `Failed to create OAuth link: ${e?.message ?? String(e)}`,
@@ -237,10 +218,10 @@ export async function startMcpOAuthFlow(
     }
   }
 
-  // For API key apps, the user just needs to provide the key
+  // For API key providers, the user just needs to provide the key
   return {
-    pipedreamSlug,
-    authType: app.auth_type ?? "api_key",
+    foundrySlug,
+    authType,
     connectionId: conn.id,
     needsEnv,
     message: "Provide credentials to connect.",
@@ -248,14 +229,14 @@ export async function startMcpOAuthFlow(
 }
 
 /**
- * Verify that OAuth completed and try to start the MCP server.
- * Returns whether the server was successfully connected.
+ * Verify that OAuth completed (by polling Foundry's /v1/connections) and
+ * try to start the MCP server.
  */
 export async function verifyMcpOAuth(
   serverId: string,
   userId: string,
 ): Promise<McpOAuthVerifyResult> {
-  const srv = await McpStore.get(serverId);
+  const srv = await McpStore.get(serverId, userId);
   if (!srv) {
     return { connected: false, error: "Server not found" };
   }
@@ -271,9 +252,8 @@ export async function verifyMcpOAuth(
     return { connected: false, error: "Linked integration not found." };
   }
 
-  // Already connected via webhook
+  // Already marked connected
   if (conn.status === "connected" && conn.connectedAccountId) {
-    // Try to start the MCP server
     try {
       await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
     } catch (e: any) {
@@ -282,30 +262,20 @@ export async function verifyMcpOAuth(
     return { connected: true, connectedAccountId: conn.connectedAccountId };
   }
 
-  // Try to find the connected account via Pipedream Connect API
-  const connectCfg = getConnectConfig();
-  if (!connectCfg) {
-    return { connected: false, error: "Pipedream Connect not configured." };
+  const apiKey = await getFoundryApiKey(userId);
+  if (!apiKey) {
+    return { connected: false, error: "Foundry API key not configured." };
   }
 
+  // Poll Foundry for a connection matching our provider.
   try {
-    const oauthTokenRes = await PipedreamClient.createOAuthToken(
-      connectCfg.clientId,
-      connectCfg.clientSecret,
-    );
-    const accounts = await PipedreamClient.listConnectAccounts(
-      oauthTokenRes.access_token,
-      connectCfg.projectId,
-      `lab_${userId}`,
-      connectCfg.environment,
-    );
-    const matching = accounts.find((a) => a.app_slug === conn.appSlug);
+    const conns = await FoundryClient.listConnections(apiKey, { provider: conn.appSlug });
+    const matching = conns[0];
 
     if (matching) {
       await IntegrationRegistry.updateStatus(conn.id, userId, "connected", {
         connectedAccountId: matching.id,
       });
-      // Try to start the MCP server
       try {
         await mcpManager.startServer({ name: srv.name, command: srv.command, args: srv.args, env: srv.env });
       } catch (e: any) {
@@ -314,7 +284,7 @@ export async function verifyMcpOAuth(
       return { connected: true, connectedAccountId: matching.id };
     }
 
-    return { connected: false, error: "No matching connected account found yet." };
+    return { connected: false, error: "No matching connection found yet." };
   } catch (e: any) {
     return { connected: false, error: e?.message ?? String(e) };
   }
@@ -327,8 +297,9 @@ export async function verifyMcpOAuth(
 export async function setMcpEnvAndStart(
   serverId: string,
   env: Record<string, string>,
+  userId: string,
 ): Promise<{ ok: boolean; error?: string }> {
-  const srv = await McpStore.get(serverId);
+  const srv = await McpStore.get(serverId, userId);
   if (!srv) return { ok: false, error: "Server not found" };
 
   // Merge existing env with the new values
@@ -337,11 +308,11 @@ export async function setMcpEnvAndStart(
   // Re-save with updated env
   await McpStore.upsert(
     { name: srv.name, command: srv.command, args: srv.args, env: mergedEnv, enabled: true },
-    "",  // ownerId not used for upsert's DB check since we match by name
+    userId,
   );
 
   // Re-read to get the server ID
-  const updated = await McpStore.get(serverId);
+  const updated = await McpStore.get(serverId, userId);
   if (!updated) return { ok: false, error: "Failed to update server" };
 
   // Stored the env — now try to start

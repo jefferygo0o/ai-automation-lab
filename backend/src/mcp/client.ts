@@ -43,25 +43,26 @@ function rowToConfig(r: McpServerRow): McpServerConfig & { id: string; enabled: 
 }
 
 export const McpStore = {
-  async list(): Promise<Array<McpServerConfig & { id: string; enabled: boolean; connected: boolean }>> {
-    return await (await db.prepare("SELECT * FROM mcp_servers ORDER BY name").all() as McpServerRow[]).map((r) => {
+  async list(ownerId: string): Promise<Array<McpServerConfig & { id: string; enabled: boolean; connected: boolean }>> {
+    const rows = await db.prepare("SELECT * FROM mcp_servers WHERE owner_id = ? ORDER BY name").all(ownerId) as McpServerRow[];
+    return rows.map((r) => {
       const cfg = rowToConfig(r);
       return { ...cfg, connected: mcpManager.isConnected(cfg.name) };
     });
   },
-  async get(id: string) {
-    const r = await db.prepare("SELECT * FROM mcp_servers WHERE id = ?").get(id) as McpServerRow | undefined;
+  async get(id: string, ownerId: string) {
+    const r = await db.prepare("SELECT * FROM mcp_servers WHERE id = ? AND owner_id = ?").get(id, ownerId) as McpServerRow | undefined;
     return r ? rowToConfig(r) : null;
   },
   async upsert(input: { name: string; command: string; args?: string[]; env?: Record<string, string>; enabled?: boolean }, ownerId: string): Promise<McpServerConfig & { id: string; enabled: boolean }> {
-    const existing = await db.prepare("SELECT id FROM mcp_servers WHERE name = ?").get(input.name) as { id: string } | undefined;
+    const existing = await db.prepare("SELECT id FROM mcp_servers WHERE owner_id = ? AND name = ?").get(ownerId, input.name) as { id: string } | undefined;
     const args = JSON.stringify(input.args ?? []);
     const env = JSON.stringify(input.env ?? {});
     const enabled = input.enabled === false ? 0 : 1;
     if (existing) {
-      await db.prepare("UPDATE mcp_servers SET command=?, args=?, env=?, enabled=? WHERE id=?")
-        .run(input.command, args, env, enabled, existing.id);
-      const result = await this.get(existing.id);
+      await db.prepare("UPDATE mcp_servers SET command=?, args=?, env=?, enabled=? WHERE id = ? AND owner_id = ?")
+        .run(input.command, args, env, enabled, existing.id, ownerId);
+      const result = await this.get(existing.id, ownerId);
       return result!;
     }
     const id = `mcp_${nanoid(10)}`;
@@ -69,12 +70,20 @@ export const McpStore = {
       .run(id, ownerId, input.name, input.command, args, env, enabled, Date.now());
     return { id, name: input.name, command: input.command, args: input.args ?? [], env: input.env ?? {}, enabled: !!enabled };
   },
-  async delete(id: string): Promise<boolean> {
-    const r = await db.prepare("DELETE FROM mcp_servers WHERE id = ?").run(id);
+  async delete(id: string, ownerId: string): Promise<boolean> {
+    const r = await db.prepare("DELETE FROM mcp_servers WHERE id = ? AND owner_id = ?").run(id, ownerId);
     return r.changes > 0;
   },
-  async setEnabled(id: string, enabled: boolean) {
-    await db.prepare("UPDATE mcp_servers SET enabled = ? WHERE id = ?").run(enabled ? 1 : 0, id);
+  async setEnabled(id: string, ownerId: string, enabled: boolean) {
+    await db.prepare("UPDATE mcp_servers SET enabled = ? WHERE id = ? AND owner_id = ?").run(enabled ? 1 : 0, id, ownerId);
+  },
+  /**
+   * Admin-only: list every enabled MCP server across all users.
+   * Used by server boot to warm the in-process MCP manager. Never expose via API.
+   */
+  async listAllEnabled(): Promise<Array<McpServerConfig & { id: string; enabled: boolean }>> {
+    const rows = await db.prepare("SELECT * FROM mcp_servers WHERE enabled = 1 ORDER BY name").all() as McpServerRow[];
+    return rows.map((r) => rowToConfig(r));
   },
 };
 
@@ -257,26 +266,9 @@ class McpManager {
     return out;
   }
 
-  async ensureAgentServers(agentId: string) {
-    const cfgText = readAgentFile(agentId, "config.json");
-    if (!cfgText) return;
-    let cfg: any;
-    try { cfg = JSON.parse(cfgText); } catch { return; }
-    const enabled = Array.isArray(cfg.mcpServers) ? cfg.mcpServers as string[] : [];
-    for (const serverName of enabled) {
-      if (this.servers.has(serverName)) continue;
-      const all = await McpStore.list();
-      const def = all.find((s) => s.name === serverName && s.enabled);
-      if (def) {
-        try { await this.startServer({ name: def.name, command: def.command, args: def.args, env: def.env }); }
-        catch (e) { console.warn(`[mcp] failed to start ${def.name}:`, e); }
-      }
-    }
-  }
-
   async startAll() {
-    const allServers = await McpStore.list();
-    for (const s of allServers.filter((x) => x.enabled)) {
+    const allServers = await McpStore.listAllEnabled();
+    for (const s of allServers) {
       if (this.servers.has(s.name)) continue;
       const live = await this.startServer({ name: s.name, command: s.command, args: s.args, env: s.env });
       if (live.status === "ready") {

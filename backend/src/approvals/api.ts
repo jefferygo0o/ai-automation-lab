@@ -14,13 +14,16 @@ approvalsApi.get("/pending", async (c) => {
 });
 
 approvalsApi.get("/:id", async (c) => {
+  const userId = c.get("userId") as string;
   const a = await Approvals.get(c.req.param("id"));
-  if (!a) return c.json({ error: "not found" }, 404);
+  if (!a || a.ownerId !== userId) return c.json({ error: "not found" }, 404);
   return c.json({ approval: a });
 });
 
 approvalsApi.post("/:id/approve", async (c) => {
   const userId = c.get("userId") as string;
+  const existing = await Approvals.get(c.req.param("id"));
+  if (!existing || existing.ownerId !== userId) return c.json({ error: "not found" }, 404);
   const body = await c.req.json().catch(() => ({})) as { response?: string };
   const a = await Approvals.resolve(c.req.param("id"), "approved", body.response);
   if (!a) return c.json({ error: "not found or already resolved" }, 404);
@@ -30,6 +33,8 @@ approvalsApi.post("/:id/approve", async (c) => {
 
 approvalsApi.post("/:id/reject", async (c) => {
   const userId = c.get("userId") as string;
+  const existing = await Approvals.get(c.req.param("id"));
+  if (!existing || existing.ownerId !== userId) return c.json({ error: "not found" }, 404);
   const body = await c.req.json().catch(() => ({})) as { response?: string };
   const a = await Approvals.resolve(c.req.param("id"), "rejected", body.response);
   if (!a) return c.json({ error: "not found or already resolved" }, 404);

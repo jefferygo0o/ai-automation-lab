@@ -12,13 +12,15 @@ import { nanoid } from "nanoid";
 export const templatesApi = new Hono<HonoEnv>();
 
 templatesApi.get("/", async (c) => {
+  const userId = c.get("userId") as string;
   const category = c.req.query("category");
-  const list = category ? (await Templates.list()).filter((t) => t.category === category) : await Templates.list();
+  const list = category ? (await Templates.list(userId)).filter((t) => t.category === category) : await Templates.list(userId);
   return c.json({ templates: list });
 });
 
 templatesApi.get("/:id", async (c) => {
-  const t = await Templates.get(c.req.param("id"));
+  const userId = c.get("userId") as string;
+  const t = await Templates.get(c.req.param("id"), userId);
   if (!t) return c.json({ error: "not found" }, 404);
   return c.json({ template: t });
 });
@@ -29,7 +31,7 @@ templatesApi.get("/:id", async (c) => {
  */
 templatesApi.post("/:id/instantiate", async (c) => {
   const userId = c.get("userId") as string;
-  const t = await Templates.get(c.req.param("id"));
+  const t = await Templates.get(c.req.param("id"), userId);
   if (!t) return c.json({ error: "template not found" }, 404);
 
   const body = (await c.req.json().catch(() => ({}))) as { name?: string; installSkills?: boolean };

@@ -412,8 +412,8 @@ export const MCP_MARKETPLACE: McpMarketplaceEntry[] = [
   },
 ];
 
-/** Map marketplace entry IDs to Pipedream app slugs for OAuth/credentials. */
-export const MCP_TO_PIPEDREAM_MAP: Record<string, string> = {
+/** Map marketplace entry IDs to Foundry Connect provider slugs for OAuth/credentials. */
+export const MCP_TO_FOUNDRY_MAP: Record<string, string> = {
   "cloudflare": "cloudflare",
   "github": "github",
   "slack": "slack",

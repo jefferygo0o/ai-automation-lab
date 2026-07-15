@@ -33,14 +33,8 @@ services:
         description: "Supabase Storage bucket name for agent workspace snapshots. Auto-created on first run if missing."
       - key: SUPABASE_DB_URL
         description: "Supabase DB connection string — Transaction pooler, port 6543. Example: postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres"
-      # === Pipedream Connect config (set these to enable OAuth integrations) ===
-      - key: PIPEDREAM_CLIENT_ID
-        description: "Pipedream Connect OAuth client ID"
-      - key: PIPEDREAM_CLIENT_SECRET
-        description: "Pipedream Connect OAuth client secret"
-      - key: PIPEDREAM_PROJECT_ID
-        description: "Pipedream Connect project ID"
-      - key: PIPEDREAM_ENVIRONMENT
-        value: production
-      - key: PIPEDREAM_WEBHOOK_SIGNING_KEY
-        description: "Webhook signing key from Pipedream Connect settings — used to verify OAuth webhook signatures (x-pd-webhook-signature). Add this after setting up the webhook URL in Pipedream."
+      # === Foundry Connect config (single API key) ===
+      - key: FOUNDRY_API_URL
+        value: https://api-gateway-production-4984.up.railway.app
+        description: "Foundry Connect API gateway base URL"
+      # Foundry API key can also be set per-user as a secret (foundry_api_key) on the Secrets page.

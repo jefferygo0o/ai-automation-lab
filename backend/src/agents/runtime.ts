@@ -78,7 +78,7 @@ export async function runAgentTurn(
   const builtinToolSpecs: ToolSpec[] = toolRegistry.all().map((t) => toolToSpec(t));
 
   // Add MCP tools (if any servers configured for this agent)
-  const agentMcpServers = (await McpStore.list()).filter((s) => s.enabled);
+  const agentMcpServers = (await McpStore.list(ownerId)).filter((s) => s.enabled);
   if (agentMcpServers.length) {
     for (const cfg of agentMcpServers) {
       try { await mcpManager.startServer({ name: cfg.name, command: cfg.command, args: cfg.args, env: cfg.env }); }

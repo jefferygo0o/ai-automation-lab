@@ -239,7 +239,7 @@ export const Automations = {
     api<{ run: AutomationRun; output?: string }>(`/api/automations/${id}/run`, { method: "POST" }),
 };
 
-// ---- Integrations (Pipedream-powered) ----
+// ---- Integrations (Foundry-powered) ----
 
 export interface PdApp {
   id: string;
@@ -335,10 +335,10 @@ export const Integrations = {
       `/api/integrations/${id}/execute`,
       { method: "POST", body: JSON.stringify({ actionKey, input }) }
     ),
-  pipedreamStatus: () =>
-    api<{ configured: boolean; valid: boolean; message: string }>("/api/integrations/pipedream/status"),
-  setPipedreamKey: (value: string) =>
-    api<{ ok: boolean }>("/api/integrations/pipedream/key", { method: "PUT", body: JSON.stringify({ value }) }),
+  foundryStatus: () =>
+    api<{ configured: boolean; valid: boolean; message: string }>("/api/integrations/foundry/status"),
+  setFoundryKey: (value: string) =>
+    api<{ ok: boolean }>("/api/integrations/foundry/key", { method: "PUT", body: JSON.stringify({ value }) }),
   stats: () =>
     api<{ total: number; byStatus: Record<string, number> }>("/api/integrations/stats"),
   categories: () =>

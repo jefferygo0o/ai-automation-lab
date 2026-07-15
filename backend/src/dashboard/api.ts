@@ -24,7 +24,7 @@ dashboardApi.get("/", async (c) => {
     "SELECT COUNT(*) AS n FROM approval_requests WHERE owner_id = ? AND status = 'pending'"
   ).get(userId) as { n: number }).n;
   const skills = await (await db.query("SELECT COUNT(*) AS n FROM skills WHERE owner_id = ? OR owner_id IS NULL").get(userId) as { n: number }).n;
-  const mcpServers = await (await db.query("SELECT COUNT(*) AS n FROM mcp_servers").get() as { n: number }).n;
+  const mcpServers = await (await db.query("SELECT COUNT(*) AS n FROM mcp_servers WHERE owner_id = ?").get(userId) as { n: number }).n;
   const automations = await (await db.query("SELECT COUNT(*) AS n FROM automations WHERE owner_id = ?").get(userId) as { n: number }).n;
   const webhooks = await (await db.query("SELECT COUNT(*) AS n FROM webhook_endpoints WHERE owner_id = ?").get(userId) as { n: number }).n;
   const last24h = Date.now() - MS_PER_DAY;

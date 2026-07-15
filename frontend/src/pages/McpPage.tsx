@@ -41,7 +41,7 @@ function OAuthConnectDialog({
         setDone(true);
         onVerified();
       } else {
-        setError(res.error || "Not connected yet. Complete the authorization in the Pipedream window.");
+        setError(res.error || "Not connected yet. Complete the authorization in the Foundry Connect window.");
       }
     } catch (e: any) {
       setError(e?.message || "Verification failed");
@@ -70,7 +70,7 @@ function OAuthConnectDialog({
               <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-xs">
                 <ExternalLink className="w-3.5 h-3.5 shrink-0" />
                 <span>
-                  A new window opened to authorize {serverName} on Pipedream. Complete the authorization there, then come back.
+                  A new window opened to authorize {serverName} on Foundry Connect. Complete the authorization there, then come back.
                 </span>
               </div>
               {connectLinkUrl && (
@@ -433,7 +433,7 @@ export default function McpPage() {
       const res = await MCP.connect(server.id);
       // Response can have: oauth (OAuth link), needsEnv (env var prompt), ok (direct success)
       if ((res as any).oauth?.connectLinkUrl) {
-        // Need Pipedream OAuth
+        // Need Foundry Connect OAuth
         const oauthData = (res as any).oauth;
         setOauthServer({
           id: server.id,
@@ -709,7 +709,7 @@ export default function McpPage() {
           <div className="bg-white rounded-xl shadow-2xl p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-semibold mb-2">Connect {oauthServer.name}</h3>
             <p className="text-sm text-ink-500 mb-4">
-              Connect the Pipedream integration for {oauthServer.name} to authorize this MCP server.
+              Connect the Foundry Connect integration for {oauthServer.name} to authorize this MCP server.
             </p>
             <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-xs mb-4">
               <ExternalLink className="w-3.5 h-3.5 shrink-0" />
