@@ -45,12 +45,15 @@ RUN apt-get update -qq && apt-get install -y --no-install-recommends \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libdrm2 libxkbcommon0 \
     libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
     libpango-1.0-0 libcairo2 libasound2 libcups2 libxss1 libgtk-3-0 \
-    nodejs npm python3 python3-pip \
-    && rm -rf /var/lib/apt/lists/* && \
-    curl -fsSL https://astral.sh/uv/install.sh | sh \
+    python3 python3-pip \
+    && curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://astral.sh/uv/install.sh | sh \
     && rm -rf /root/.cargo
 ENV PATH="/root/.local/bin:${PATH}"
 # Install agent-browser CLI (the fast browser automation Zo Computer provides)
+RUN node -v && npm -v
 RUN curl -fsSL https://media.zocomputer.com/install/agentbrowser2.sh | bash
 # Copy the source tree (includes node_modules from install stage via COPY)
 COPY --from=install /app/backend/node_modules ./backend/node_modules
