@@ -1,5 +1,5 @@
 import { Pool } from "pg";
-import { readFileSync } from "fs";
+import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 
@@ -213,6 +213,12 @@ export async function initSchema(): Promise<void> {
   }
   try {
     await db.exec(readFileSync(p, "utf8"));
+    const migrationsDir = join(dir, "migrations");
+    const migrations = readdirSync(migrationsDir, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".sql")).map((entry) => entry.name).sort();
+    for (const migration of migrations) {
+      await db.exec(readFileSync(join(migrationsDir, migration), "utf8"));
+      console.log("[db] migration applied:", migration);
+    }
     console.log("[db] schema applied from", p);
   } catch (e: any) {
     console.error("[db] schema apply failed:", e?.message ?? e, "(path:", p, ")");
