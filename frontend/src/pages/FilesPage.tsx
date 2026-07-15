@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Agents, type Agent, type FileEntry, type SandboxEntry } from "../api";
+import { Agents, Workspace, type Agent, type FileEntry, type SandboxEntry, type WorkspaceEntry } from "../api";
 import {
   Folder, FolderOpen, File, FileText, Image, FileCode,
   ChevronRight, Search, ArrowUp, FolderTree,
@@ -40,7 +40,7 @@ function formatTime(ms?: number): string {
 }
 
 interface PreviewState {
-  source: "agent" | "sandbox";
+  source: "agent" | "sandbox" | "workspace";
   path: string;
   content: string;
 }
@@ -51,9 +51,9 @@ export default function FilesPage() {
 
   const [agents, setAgents] = useState<Agent[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState(agentIdParam);
-  const [activeTab, setActiveTab] = useState<"agent" | "sandbox">(() => {
+  const [activeTab, setActiveTab] = useState<"agent" | "sandbox" | "workspace">(() => {
     const t = searchParams.get("tab");
-    return t === "agent" || t === "sandbox" ? t : "sandbox";
+    return t === "agent" || t === "sandbox" || t === "workspace" ? t : "workspace";
   });
   const [currentPath, setCurrentPath] = useState(".");
   const [entries, setEntries] = useState<SandboxEntry[]>([]);
@@ -64,6 +64,8 @@ export default function FilesPage() {
   const [preview, setPreview] = useState<PreviewState | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<SandboxEntry | null>(null);
   const [selectedAgentFile, setSelectedAgentFile] = useState<string | null>(null);
+  const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceEntry[]>([]);
+  const [workspacePath, setWorkspacePath] = useState(".");
 
   useEffect(() => {
     Agents.list().then((res) => setAgents(res.agents)).catch(() => {});
@@ -105,14 +107,29 @@ export default function FilesPage() {
     setLoading(false);
   }, []);
 
+  const fetchWorkspaceEntries = useCallback(async (path: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await Workspace.tree(path);
+      setWorkspaceEntries(res.entries);
+    } catch (e: any) {
+      setError(e.message || "Failed to load workspace files");
+      setWorkspaceEntries([]);
+    }
+    setLoading(false);
+  }, []);
+
   useEffect(() => {
     if (!selectedAgentId) return;
     if (activeTab === "sandbox") {
       fetchSandboxEntries(selectedAgentId, currentPath);
-    } else {
+    } else if (activeTab === "agent") {
       fetchAgentFiles(selectedAgentId);
+    } else {
+      fetchWorkspaceEntries(workspacePath);
     }
-  }, [selectedAgentId, activeTab, currentPath, fetchSandboxEntries, fetchAgentFiles]);
+  }, [selectedAgentId, activeTab, currentPath, workspacePath, fetchSandboxEntries, fetchAgentFiles, fetchWorkspaceEntries]);
 
   function handleAgentChange(agentId: string) {
     setSelectedAgentId(agentId);
@@ -123,7 +140,7 @@ export default function FilesPage() {
     setSearchParams(agentId ? { agent: agentId } : {}, { replace: true });
   }
 
-  function handleTabChange(tab: "agent" | "sandbox") {
+  function handleTabChange(tab: "agent" | "sandbox" | "workspace") {
     setActiveTab(tab);
     setCurrentPath(".");
     setPreview(null);
@@ -207,6 +224,7 @@ export default function FilesPage() {
   };
 
   const pathParts = currentPath === "." ? [] : currentPath.split("/");
+  const workspacePathParts = workspacePath === "." ? [] : workspacePath.split("/");
   const selectedAgent = agents.find((a) => a.id === selectedAgentId);
 
   const filteredEntries = searchQuery
@@ -281,6 +299,12 @@ export default function FilesPage() {
             >
               Sandbox
             </button>
+            <button
+              onClick={() => handleTabChange("workspace")}
+              className={`px-2.5 h-7 text-xs border-l border-line ${activeTab === "workspace" ? "bg-paper-200 text-ink-900" : "text-ink-500 hover:bg-paper-100"}`}
+            >
+              Workspace
+            </button>
           </div>
 
           {activeTab === "sandbox" && (
@@ -321,6 +345,9 @@ export default function FilesPage() {
               {selectedAgent?.name ?? selectedAgentId} / config
             </span>
           )}
+          {activeTab === "workspace" && (
+            <span className="text-ink-400 font-medium shrink-0 ml-2">Workspace / {workspacePath}</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -337,6 +364,7 @@ export default function FilesPage() {
             onClick={() => {
               if (activeTab === "sandbox") fetchSandboxEntries(selectedAgentId, currentPath);
               else fetchAgentFiles(selectedAgentId);
+              if (activeTab === "workspace") fetchWorkspaceEntries(workspacePath);
             }}
             className="btn btn-ghost btn-icon"
             title="Refresh"
@@ -364,6 +392,10 @@ export default function FilesPage() {
               loading={loading}
               searchQuery={searchQuery}
             />
+          ) : activeTab === "workspace" ? (
+            workspaceEntries.length === 0 ? <div className="p-4 text-xs text-ink-400 text-center">Workspace directory is empty.</div> : (
+              <div className="p-2 space-y-px">{workspaceEntries.map((entry) => <div key={entry.path} className="flex items-center gap-2 px-2.5 py-1.5 rounded-sm cursor-pointer text-xs text-ink-500 hover:text-ink-900 hover:bg-paper-200/40" onClick={async () => { if (entry.type === "dir") { const next = workspacePath === "." ? entry.name : `${workspacePath}/${entry.name}`; setWorkspacePath(next); const res = await Workspace.tree(next); setWorkspaceEntries(res.entries); } else { const res = await Workspace.read(entry.path); setPreview({ source: "workspace", path: entry.path, content: res.content }); } }}>{entry.type === "dir" ? <Folder className="w-4 h-4 text-amber-500" /> : fileIcon(entry.name, entry.type)}<span className="flex-1 truncate">{entry.name}</span></div>)}</div>
+            )
           ) : loading ? (
             <div className="p-4 text-xs text-ink-400">Loading files...</div>
           ) : filteredEntries.length === 0 ? (
@@ -412,7 +444,7 @@ export default function FilesPage() {
             <div className="h-9 border-b border-line flex items-center justify-between px-4 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-2xs font-mono text-ink-400 shrink-0">
-                  {preview.source === "agent" ? "agent/" : "sandbox/"}
+                  {preview.source === "agent" ? "agent/" : preview.source === "workspace" ? "workspace/" : "sandbox/"}
                 </span>
                 <span className="text-xs font-mono font-medium truncate">{preview.path}</span>
               </div>

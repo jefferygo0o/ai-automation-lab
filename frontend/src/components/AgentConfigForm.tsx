@@ -69,7 +69,7 @@ export default function AgentConfigForm({
   const [data, setData] = useState<ConfigFormData>({ ...DEFAULT_DATA, ...initial });
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
-  const onChangeRef = useRef<(d: ConfigFormData) => void>();
+  const onChangeRef = useRef<(d: ConfigFormData) => void>(undefined);
   onChangeRef.current = (d) => onSubmitRef.current?.(d);
 
   // If agentId is provided and onSubmit wasn't, default to updating agent config.
@@ -89,7 +89,7 @@ export default function AgentConfigForm({
 
   // Forward changes to parent via onChange callback if provided
   // (We use a ref to avoid loops in the auto-fetch useEffect below.)
-  const onSubmitRef = useRef<(d: ConfigFormData) => void | Promise<void>>();
+  const onSubmitRef = useRef<(d: ConfigFormData) => void | Promise<void>>(undefined);
   onSubmitRef.current = effectiveSubmit;
 
   const update = <K extends keyof ConfigFormData>(field: K, value: ConfigFormData[K]) => {

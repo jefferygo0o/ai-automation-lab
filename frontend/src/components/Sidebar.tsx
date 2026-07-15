@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   Bot, MessagesSquare, Globe, FolderTree, Timer,
   Wand2, Wrench, KeyRound, History, Compass, Puzzle,
-  Panel, PanelRightOpen, Plus, X, Sparkles, Clock,
+  PanelRightOpen, Plus, X, Sparkles, Clock,
   LayoutDashboard, Scale, Server,
 } from "lucide-react";
 import { useState, useEffect } from "react";

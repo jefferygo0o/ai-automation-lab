@@ -1,11 +1,11 @@
-/**
- * Workspace file browser — browse, read, write, delete files in /home/workspace.
- */
-import { readdirSync, existsSync, lstatSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync } from "fs";
-import { join, relative, basename } from "path";
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Hono } from "hono";
+import type { HonoEnv } from "../types/hono.ts";
 
-const WORKSPACE_ROOT = process.env.LAB_PROJECT_ROOT ?? "/home/workspace/Projects/ai-automation-lab";
+const WORKSPACE_ROOT = resolve(process.env.LAB_WORKSPACE_ROOT ?? process.env.LAB_PROJECT_ROOT ?? "/home/workspace/Projects/ai-automation-lab");
+const EXCLUDED_DIRS = new Set(["node_modules", ".git", "__pycache__", ".cache", ".next", "dist", ".venv", "venv", ".bun", "build", ".turbo"]);
+const MAX_READ_BYTES = 2 * 1024 * 1024;
 
 export interface FileEntry {
   name: string;
@@ -15,139 +15,128 @@ export interface FileEntry {
   mtime: number;
 }
 
-// Directories to exclude from listings
-const EXCLUDED_DIRS = new Set([
-  "node_modules", ".git", "__pycache__", ".cache", ".next", "dist",
-  ".venv", "venv", ".bun", "build", ".sass-cache", ".turbo",
-]);
-
-function isTextFile(fn: string): boolean {
-  const name = fn ?? "";
-  const ext = name.split(".").pop()?.toLowerCase();
-  const textExts = new Set([
-    "md", "txt", "json", "yaml", "yml", "toml", "xml", "csv",
-    "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts",
-    "css", "scss", "less", "html", "htm", "svg",
-    "sh", "bash", "zsh", "fish",
-    "py", "rb", "rs", "go", "java", "kt", "swift", "c", "cpp", "h", "hpp",
-    "sql", "graphql", "proto",
-    "env", "gitignore", "dockerfile", "nginx",
-    "conf", "cfg", "ini", "properties",
-    "vue", "svelte", "astro", "liquid",
-    "tsconfig", "eslintrc", "prettierrc", "babelrc",
-    "lock", "mod", "sum",
-  ]);
-  return textExts.has(ext ?? "") || textExts.has(name.toLowerCase());
+function rootRealpath(): string {
+  if (!existsSync(WORKSPACE_ROOT)) mkdirSync(WORKSPACE_ROOT, { recursive: true });
+  return realpathSync(WORKSPACE_ROOT);
 }
 
-function walkDir(dirPath: string, basePath: string): FileEntry[] {
-  const entries: FileEntry[] = [];
+function resolveSafe(rawPath: string): string | null {
+  const root = rootRealpath();
+  const candidate = resolve(root, rawPath || ".");
+  let resolved = candidate;
   try {
-    const names = readdirSync(dirPath);
-    for (const name of names) {
-      if (name.startsWith(".") && name !== ".gitkeep") continue;
-      if (EXCLUDED_DIRS.has(name)) continue;
-
-      const fullPath = join(dirPath, name);
-      const stat = statSync(fullPath);
-      const relative = join(basePath, name);
-      if (stat.isDirectory()) {
-        entries.push(...walkDir(fullPath, relative));
-      } else {
-        entries.push({ path: relative, name, type: "file", size: 0, mtime: 0 });
-      }
-    }
+    resolved = realpathSync(candidate);
   } catch {
-    // Permission denied or non-existent — skip
+    const parent = dirname(candidate);
+    try {
+      const parentReal = realpathSync(parent);
+      resolved = join(parentReal, basename(candidate));
+    } catch {
+      return null;
+    }
   }
-  return entries;
-}
-
-function resolvePath(rawPath: string): string | null {
-  if (rawPath.startsWith(WORKSPACE_ROOT)) {
-    return rawPath;
-  }
-  const resolved = join(WORKSPACE_ROOT, rawPath);
-  if (!resolved.startsWith(WORKSPACE_ROOT)) return null;
+  if (resolved !== root && !resolved.startsWith(root + sep)) return null;
   return resolved;
 }
 
-function readFile(rawPath: string): { content: string; encoding: string } | null {
-  const resolved = resolvePath(rawPath);
-  if (!resolved || !existsSync(resolved) || lstatSync(resolved).isDirectory()) return null;
-
-  const name = basename(rawPath);
-  if (name && isTextFile(name)) {
-    return { content: readFileSync(resolved, "utf-8"), encoding: "utf-8" };
-  }
-  // Binary files: return as base64
-  const buf = readFileSync(resolved);
-  return { content: buf.toString("base64"), encoding: "base64" };
+function relativePath(absPath: string): string {
+  const value = relative(rootRealpath(), absPath);
+  return value || ".";
 }
 
-function writeFile(rawPath: string, content: string): boolean {
-  const absPath = resolvePath(rawPath);
-  if (!absPath) return false;
-  const dir = join(absPath, "..");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(absPath, content);
-  return true;
+function entryFor(absPath: string, name: string): FileEntry {
+  const stat = statSync(absPath);
+  return {
+    name,
+    path: relativePath(absPath),
+    type: stat.isDirectory() ? "dir" : "file",
+    size: stat.isFile() ? stat.size : 0,
+    mtime: stat.mtimeMs,
+  };
 }
 
-function deleteFile(rawPath: string): boolean {
-  const absPath = resolvePath(rawPath);
-  if (!absPath) return false;
-  if (!existsSync(absPath)) return false;
-  unlinkSync(absPath);
-  return true;
+function listDirectory(absDir: string): FileEntry[] {
+  return readdirSync(absDir, { withFileTypes: true })
+    .filter((entry) => !EXCLUDED_DIRS.has(entry.name))
+    .map((entry) => entryFor(join(absDir, entry.name), entry.name))
+    .sort((a, b) => a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : 1);
 }
 
-export const workspaceApi = new Hono();
+function isTextFile(name: string): boolean {
+  const lower = name.toLowerCase();
+  const ext = lower.includes(".") ? lower.slice(lower.lastIndexOf(".")) : lower;
+  return new Set([
+    ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".xml", ".csv", ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".css", ".scss", ".less", ".html", ".htm", ".svg", ".sh", ".bash", ".py", ".rb", ".rs", ".go", ".java", ".kt", ".swift", ".c", ".cpp", ".h", ".hpp", ".sql", ".graphql", ".proto", ".env", ".conf", ".cfg", ".ini", ".properties", ".vue", ".svelte", ".astro", ".lock", ".mod", ".sum", "dockerfile", ".gitignore",
+  ]).has(ext);
+}
+
+function readWorkspaceFile(rawPath: string): { content: string; encoding: "utf-8" | "base64"; size: number } | null {
+  const absPath = resolveSafe(rawPath);
+  if (!absPath || !existsSync(absPath) || lstatSync(absPath).isDirectory()) return null;
+  const stat = statSync(absPath);
+  if (stat.size > MAX_READ_BYTES) throw new Error(`file exceeds ${MAX_READ_BYTES} byte read limit`);
+  const buffer = readFileSync(absPath);
+  if (isTextFile(basename(absPath))) return { content: buffer.toString("utf8"), encoding: "utf-8", size: stat.size };
+  return { content: buffer.toString("base64"), encoding: "base64", size: stat.size };
+}
+
+export const workspaceApi = new Hono<HonoEnv>();
 
 workspaceApi.get("/tree", (c) => {
-  const rawPath = c.req.query("path") || ".";
-  const absDir = resolvePath(rawPath);
+  const rawPath = c.req.query("path") ?? ".";
+  const absDir = resolveSafe(rawPath);
   if (!absDir) return c.json({ error: "invalid path" }, 400);
-  if (!existsSync(absDir)) return c.json({ error: "directory not found" }, 404);
-  const relPath = absDir === WORKSPACE_ROOT ? "." : relative(WORKSPACE_ROOT, absDir);
-  return c.json({
-    path: relPath,
-    entries: walkDir(absDir, WORKSPACE_ROOT),
-  });
+  if (!existsSync(absDir) || !lstatSync(absDir).isDirectory()) return c.json({ error: "directory not found" }, 404);
+  return c.json({ path: relativePath(absDir), entries: listDirectory(absDir) });
 });
 
 workspaceApi.get("/read", (c) => {
-  const path = c.req.query("path") ?? "";
-  if (!path) return c.json({ error: "path required" }, 400);
-  const result = readFile(path);
-  if (!result) return c.json({ error: "not found or directory" }, 404);
-  return c.json({ path, ...result });
+  const rawPath = c.req.query("path") ?? "";
+  if (!rawPath) return c.json({ error: "path required" }, 400);
+  try {
+    const result = readWorkspaceFile(rawPath);
+    if (!result) return c.json({ error: "file not found" }, 404);
+    return c.json({ path: relativePath(resolveSafe(rawPath)!), ...result });
+  } catch (error: any) {
+    return c.json({ error: error?.message ?? String(error) }, 413);
+  }
 });
 
 workspaceApi.put("/write", async (c) => {
-  const { path, content } = (await c.req.json()) as { path: string; content: string };
-  if (!path) return c.json({ error: "path required" }, 400);
-  return c.json({ ok: writeFile(path, content) });
-});
-
-workspaceApi.delete("/delete", (c) => {
-  const path = c.req.query("path") ?? "";
-  if (!path) return c.json({ error: "path required" }, 400);
-  return c.json({ ok: deleteFile(path) });
-});
-
-// Get file metadata
-workspaceApi.get("/info", (c) => {
-  const path = c.req.query("path") ?? "";
-  if (!path) return c.json({ error: "path required" }, 400);
-  const absPath = resolvePath(path);
+  const body = await c.req.json().catch(() => ({})) as { path?: string; content?: string };
+  if (!body.path || typeof body.content !== "string") return c.json({ error: "path and string content required" }, 400);
+  const absPath = resolveSafe(body.path);
   if (!absPath) return c.json({ error: "invalid path" }, 400);
+  mkdirSync(dirname(absPath), { recursive: true });
+  writeFileSync(absPath, body.content, "utf8");
+  return c.json({ ok: true, path: relativePath(absPath) });
+});
+
+workspaceApi.post("/mkdir", async (c) => {
+  const body = await c.req.json().catch(() => ({})) as { path?: string };
+  if (!body.path) return c.json({ error: "path required" }, 400);
+  const absPath = resolveSafe(body.path);
+  if (!absPath) return c.json({ error: "invalid path" }, 400);
+  mkdirSync(absPath, { recursive: true });
+  return c.json({ ok: true, path: relativePath(absPath) });
+});
+
+workspaceApi.delete("/delete", async (c) => {
+  const queryPath = c.req.query("path");
+  const body = await c.req.json().catch(() => ({})) as { path?: string };
+  const rawPath = queryPath ?? body.path;
+  if (!rawPath) return c.json({ error: "path required" }, 400);
+  const absPath = resolveSafe(rawPath);
+  if (!absPath || absPath === rootRealpath()) return c.json({ error: "invalid path" }, 400);
   if (!existsSync(absPath)) return c.json({ error: "not found" }, 404);
-  const stat = lstatSync(absPath);
-  return c.json({
-    path,
-    type: stat.isDirectory() ? "dir" : "file",
-    size: stat.size,
-    mtime: stat.mtimeMs,
-  });
+  rmSync(absPath, { recursive: true, force: true });
+  return c.json({ ok: true });
+});
+
+workspaceApi.get("/info", (c) => {
+  const rawPath = c.req.query("path") ?? ".";
+  const absPath = resolveSafe(rawPath);
+  if (!absPath || !existsSync(absPath)) return c.json({ error: "not found" }, 404);
+  const stat = statSync(absPath);
+  return c.json({ path: relativePath(absPath), type: stat.isDirectory() ? "dir" : "file", size: stat.size, mtime: stat.mtimeMs });
 });

@@ -415,6 +415,11 @@ export interface DashboardStats {
   counts: {
     [key: string]: number;
   };
+  usage: {
+    totalTokens: number;
+    recentRuns: number;
+    failedLast24h: number;
+  };
 }
 
 export const Dashboard = {
@@ -438,9 +443,9 @@ export interface Rule {
 export const Rules = {
   list: () => api<{ rules: Rule[] }>("/api/rules"),
   get: (id: string) => api<{ rule: Rule }>(`/api/rules/${id}`),
-  create: (name: string, instruction: string, opts?: { description?: string; category?: string }) =>
+  create: (name: string, instruction: string, opts?: { description?: string; category?: string; priority?: number }) =>
     api<{ rule: Rule }>("/api/rules", { method: "POST", body: JSON.stringify({ name, instruction, ...opts }) }),
-  update: (id: string, data: Partial<{ name: string; instruction: string; description: string; category: string; enabled: boolean }>) =>
+  update: (id: string, data: Partial<{ name: string; instruction: string; description: string; category: string; priority: number; enabled: boolean }>) =>
     api<{ rule: Rule }>(`/api/rules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) => api<{ ok: boolean }>(`/api/rules/${id}`, { method: "DELETE" }),
   reorder: (id: string, direction: "up" | "down") =>

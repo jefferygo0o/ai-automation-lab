@@ -56,6 +56,7 @@ type Block =
   | { type: "thinking"; content: string; done: boolean }
   | { type: "tool_call"; tool: ToolCallInfo }
   | { type: "tool_result"; tool: ToolCallInfo }
+  | { type: "approval"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired" }
   | { type: "text"; content: string };
 
 interface MessageBlocks {
@@ -366,6 +367,9 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
             setBlocksByMessage((ps) => ({ ...ps, [aid]: newBlocks }));
             blocksRef.current[aid] = newBlocks;
             setExpandedTool((ps) => { const n = new Set(ps); n.delete(updated.id); return n; });
+          } else if (type === "approval_requested") {
+            closeThinking(aid);
+            pushBlock(aid, { type: "approval", approvalId: payload.approvalId, title: payload.title ?? "Approval required", body: payload.body ?? "", status: payload.status ?? "pending" });
           } else if (type === "run_started") {
             currentRunIdRef.current = payload.runId;
           } else if (type === "message") {
@@ -751,7 +755,29 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                 </div>
                               </div>
                             );
-                          }                          if (block.type === "text") {
+                          }                          if (block.type === "approval") {
+                            const pending = block.status === "pending";
+                            const resolveApproval = async (decision: "approve" | "reject") => {
+                              const path = `/api/approvals/${encodeURIComponent(block.approvalId)}/${decision}`;
+                              const token = getToken();
+                              const res = await fetch(path, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" });
+                              if (res.ok) {
+                                const json = await res.json();
+                                block.status = json.approval?.status ?? (decision === "approve" ? "approved" : "rejected");
+                                setBlocksByMessage((p) => ({ ...p }));
+                              }
+                            };
+                            return (
+                              <div key={`approval_${block.approvalId}`} className="border border-amber-300 bg-amber-50 rounded-lg p-3 text-sm">
+                                <div className="font-medium text-amber-900">{block.title || "Approval required"}</div>
+                                <div className="mt-1 whitespace-pre-wrap text-amber-800">{block.body}</div>
+                                {pending && <div className="mt-3 flex gap-2"><button className="btn btn-primary btn-xs" onClick={() => resolveApproval("approve")}>Approve</button><button className="btn btn-xs" onClick={() => resolveApproval("reject")}>Reject</button></div>}
+                                {!pending && <div className="mt-2 text-xs text-amber-700">Status: {block.status}</div>}
+                              </div>
+                            );
+                          }
+
+                          if (block.type === "text") {
                             return (
                               <MarkdownContent key={`text_${m.id}_${bi}`} content={block.content + (isLive && bi === blocks.length - 1 ? "▍" : "")} />
                             );

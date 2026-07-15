@@ -35,6 +35,7 @@ export interface ToolContext {
   };
   abort: AbortSignal;
   onLog: (entry: ToolLogEntry) => void;
+  onApproval?: (approval: { approvalId: string; title: string; body: string; status: string }) => void | Promise<void>;
 }
 
 export interface ToolLogEntry {

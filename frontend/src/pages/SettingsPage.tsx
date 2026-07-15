@@ -556,7 +556,7 @@ function RulesSection() {
               ) : (
                 <>
                   <div className="text-xs font-medium text-ink-900">{r.instruction}</div>
-                  {r.condition && <div className="text-[11px] text-ink-400 italic">when: {r.condition}</div>}
+                  {r.description && <div className="text-[11px] text-ink-400 italic">{r.description}</div>}
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <span className="text-2xs px-1 py-0.5 rounded bg-paper-200 text-ink-500">{r.category}</span>
                     <span className="text-2xs text-ink-300">#{r.priority}</span>
@@ -569,7 +569,7 @@ function RulesSection() {
                 <button onClick={() => toggle(r.id, r.enabled)} className="btn btn-ghost btn-xs" title={r.enabled ? "Disable" : "Enable"}>
                   {r.enabled ? <ToggleRight className="w-3.5 h-3.5 text-emerald-600" /> : <ToggleLeft className="w-3.5 h-3.5 text-ink-400" />}
                 </button>
-                <button onClick={() => { setEditingId(r.id); setEditInstruction(r.instruction); setEditCondition(r.condition ?? ""); }}
+                <button onClick={() => { setEditingId(r.id); setEditInstruction(r.instruction); setEditCondition(r.description ?? ""); }}
                   className="btn btn-ghost btn-xs text-ink-400 hover:text-ink-700">Edit</button>
                 <button onClick={() => del(r.id)} className="btn btn-ghost btn-xs text-rose-700"><Trash2 className="w-3 h-3" /></button>
               </div>

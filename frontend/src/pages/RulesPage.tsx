@@ -30,7 +30,7 @@ export default function RulesPage() {
 
   async function create() {
     if (!name.trim() || !instruction.trim()) return;
-    await Rules.create(name.trim(), instruction.trim(), category);
+    await Rules.create(name.trim(), instruction.trim(), { category });
     setName(""); setInstruction(""); setCategory("general"); setShowCreate(false);
     await reload();
   }
@@ -225,7 +225,7 @@ export default function RulesPage() {
                     setEditingId(r.id);
                     setEditName(r.name);
                     setEditInstruction(r.instruction);
-                    setEditCategory(r.category);
+                    setEditCategory(r.category ?? "");
                   }} className="btn btn-ghost btn-xs text-ink-400 hover:text-ink-700">Edit</button>
                   <button onClick={() => remove(r.id)}
                     className="btn btn-ghost btn-xs text-rose-700 hover:text-rose-800">

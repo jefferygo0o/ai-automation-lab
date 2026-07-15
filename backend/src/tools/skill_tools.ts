@@ -112,11 +112,11 @@ toolRegistry.register({
     plan: { type: "string", description: "the plan text (markdown)", required: true },
     risks: { type: "string", description: "optional risk callouts", required: false },
   },
-  defaultPermission: "ask",
+  defaultPermission: "always",
   async execute(args, ctx) {
     if (!args.plan) return err("plan is required");
     try {
-      const id = await Approvals.create({
+      const approval = await Approvals.create({
         ownerId: ctx.ownerId,
         agentId: ctx.agentId,
         chatId: ctx.chatId,
@@ -126,7 +126,8 @@ toolRegistry.register({
         body: (args.plan ?? ""),
         payload: { plan: args.plan, risks: args.risks },
       });
-      return text(`## Plan proposed for review\n\n${args.plan}\n\n${args.risks ? `### Risks\n${args.risks}\n` : ""}\n\n(approval id: ${id} — waiting for user to approve in the UI before continuing)`);
+      await ctx.onApproval?.({ approvalId: approval.id, title: approval.title, body: approval.body, status: approval.status });
+      return { ...text(`## Plan proposed for review\n\n${args.plan}\n\n${args.risks ? `### Risks\n${args.risks}\n` : ""}\n\n(approval id: ${approval.id} — waiting for user to approve in the UI before continuing)`), approval };
     } catch (e: any) {
       return err(`failed to create approval: ${e?.message ?? String(e)}`);
     }

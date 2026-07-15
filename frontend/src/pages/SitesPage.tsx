@@ -72,11 +72,11 @@ function SitesPanel({ sites, onReload }: { sites: Site[]; onReload: () => void }
   }
 
   async function startDev(site: Site) {
-    try { await Sites.startDevServer(site.id); onReload(); } catch {}
+    try { await Sites.startDev(site.id); onReload(); } catch {}
   }
 
   async function stopDev(site: Site) {
-    try { await Sites.stopDevServer(site.id); onReload(); } catch {}
+    try { await Sites.stopDev(site.id); onReload(); } catch {}
   }
 
   return (
@@ -159,7 +159,7 @@ function ServicesPanel({ services, onReload }: { services: UserService[]; onRelo
     if (!label.trim() || !entrypoint.trim()) return;
     setCreating(true);
     try {
-      await Services.create(label.trim(), mode, entrypoint.trim(), { workdir: workdir.trim() || undefined });
+      await Services.create({ label: label.trim(), mode, entrypoint: entrypoint.trim(), workdir: workdir.trim() || undefined });
       setShowCreate(false); setLabel(""); setEntrypoint(""); setMode("http"); setWorkdir("");
       onReload();
     } catch (e: any) { alert(e?.message ?? "create failed"); }

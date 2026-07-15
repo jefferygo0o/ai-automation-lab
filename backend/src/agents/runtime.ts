@@ -29,12 +29,14 @@ import { PersonaStore } from "../personas/store.ts";
 import { RuleStore } from "../rules/store.ts";
 import { recordHistory } from "./history.ts";
 import { RunStore } from "../runs/index.ts";
+import { Approvals } from "../approvals/index.ts";
 
 export type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "thinking"; delta: string }
   | { type: "tool_call"; name: string; args: any }
   | { type: "tool_result"; name: string; result: any; ok: boolean; durationMs: number; error?: string }
+  | { type: "approval_requested"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired" | "auto-approved" }
   | { type: "message"; content: string; messageId?: string }
   | { type: "run_started"; runId: string }
   | { type: "error"; message: string }
@@ -116,6 +118,7 @@ export async function runAgentTurn(
     },
     abort,
     onLog,
+    onApproval: (approval) => emit({ type: "approval_requested", ...approval, status: approval.status as "pending" | "approved" | "rejected" | "expired" | "auto-approved" }),
   };
 
   // Build system prompt from agent files
@@ -391,6 +394,33 @@ export async function runAgentTurn(
           result = { error: `permission denied for tool ${tc.name}` };
           ok = false;
           await RunStore.recordToolFinish(inv.id, "denied", result, "denied by permission policy");
+        } else if (perm === "ask") {
+          const approval = await Approvals.create({
+            ownerId,
+            chatId,
+            runId: run.id,
+            agentId: agent.id,
+            kind: "tool",
+            title: `Approve tool: ${tc.name}`,
+            body: `The agent requested **${tc.name}** with these arguments:\n\n\`\`\`json\n${JSON.stringify(fnArgs, null, 2)}\n\`\`\``,
+            payload: { tool: tc.name, args: fnArgs },
+          });
+          await emit({ type: "approval_requested", approvalId: approval.id, title: approval.title, body: approval.body, status: approval.status });
+          const decision = await Approvals.waitFor(approval.id, abort);
+          if (decision.status !== "approved" && decision.status !== "auto-approved") {
+            result = { error: `tool ${tc.name} was not approved`, approvalId: approval.id, status: decision.status };
+            ok = false;
+            await RunStore.recordToolFinish(inv.id, "denied", result, decision.response ?? decision.status);
+          } else {
+            try {
+              result = await tool.execute(fnArgs, toolCtx);
+            } catch (e: any) {
+              result = { error: e?.message ?? String(e) };
+              ok = false;
+            }
+            if (ok && result && typeof result === "object" && result.isError === true) ok = false;
+            await RunStore.recordToolFinish(inv.id, ok ? "ok" : "error", result, ok ? null : String(result?.error ?? ""));
+          }
         } else {
           try {
             result = await tool.execute(fnArgs, toolCtx);
