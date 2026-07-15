@@ -108,19 +108,25 @@ const MessageBubble = React.memo(function MessageBubble({
   const useGroup = runTools.length >= 5;
 
   // Pending tool cards that are still in `message.toolCalls` should be hidden
-  // if a settled `ToolInvocation` with the same name has already arrived via
-  // the SSE stream — otherwise we render the same call twice (once as
+  // if a settled `ToolInvocation` for that exact position has already arrived
+  // via the SSE stream — otherwise we render the same call twice (once as
   // "running" forever, once as "ok" after the result lands).
-  const completedToolNames = useMemo(() => {
-    const s = new Set<string>();
-    for (const t of relatedTools) s.add(t.toolName);
-    return s;
-  }, [relatedTools]);
-
-  const pendingToolCalls = useMemo(
-    () => toolCalls.filter((tc) => !completedToolNames.has(tc.name)),
-    [toolCalls, completedToolNames],
-  );
+  // Position-based: only hide the Nth tool call if the Nth invocation for
+  // that name has settled, so multiple same-named tools each correctly
+  // transition from pending to done without collapsing.
+  const pendingToolCalls = useMemo(() => {
+    // Track per-name count of settled invocations
+    const settledCount: Record<string, number> = {};
+    for (const t of relatedTools) {
+      settledCount[t.toolName] = (settledCount[t.toolName] || 0) + 1;
+    }
+    // Only hide tool calls whose position has been settled
+    const seen: Record<string, number> = {};
+    return toolCalls.filter((tc) => {
+      seen[tc.name] = (seen[tc.name] || 0) + 1;
+      return (settledCount[tc.name] || 0) < seen[tc.name];
+    });
+  }, [toolCalls, relatedTools]);
 
   const completedThinking = useMemo(
     () => (isUser ? [] : parseCompletedThinking(message.content ?? "")),

@@ -13,7 +13,7 @@
  */
 
 import { nanoid } from "nanoid";
-import type { PdApp } from "./foundry.ts";
+import type { FoundryApp } from "./foundry.ts";
 import { db } from "../db/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -381,7 +381,7 @@ export const IntegrationRegistry = {
     return Array.from(cats).sort();
   },
 
-  async cacheAppCatalog(ownerId: string, apps: PdApp[]): Promise<void> {
+  async cacheAppCatalog(ownerId: string, apps: FoundryApp[]): Promise<void> {
     const now = Date.now();
     const batch = apps.map((a) => ({
       id: `cat_${nanoid(8)}`,

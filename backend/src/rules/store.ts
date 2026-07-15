@@ -7,17 +7,34 @@
 import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
 
+export interface RuleCondition {
+  channel?: string;
+  tool?: string;
+  provider?: string;
+  route?: string;
+  userMessage?: string;
+}
+
 export interface Rule {
   id: string;
   ownerId: string;
   name: string;
   description: string;
   instruction: string;
+  condition?: RuleCondition;
   category: string;
   priority: number;
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
+}
+
+function safeParseJson<T>(json: string): T | undefined {
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return undefined;
+  }
 }
 
 interface RuleRow {
@@ -26,6 +43,7 @@ interface RuleRow {
   name: string;
   description: string;
   instruction: string;
+  condition_json?: string;
   category: string;
   priority: number;
   enabled: number;
@@ -34,12 +52,16 @@ interface RuleRow {
 }
 
 function rowToRule(r: RuleRow): Rule {
+  const condition = r.condition_json
+    ? safeParseJson<RuleCondition>(r.condition_json)
+    : undefined;
   return {
     id: r.id,
     ownerId: r.owner_id,
     name: r.name,
     description: r.description,
     instruction: r.instruction,
+    condition: condition && Object.keys(condition).length > 0 ? condition : undefined,
     category: r.category,
     priority: r.priority,
     enabled: r.enabled === 1,
@@ -74,15 +96,16 @@ export const RuleStore = {
     ownerId: string,
     name: string,
     instruction: string,
-    opts: { description?: string; category?: string; priority?: number } = {}
+    opts: { description?: string; category?: string; priority?: number; condition?: RuleCondition } = {}
   ): Promise<Rule> {
     const id = `rule_${nanoid(12)}`;
     const now = Date.now();
+    const conditionJson = opts.condition ? JSON.stringify(opts.condition) : "{}";
     await db.prepare(
-      `INSERT INTO rules (id, owner_id, name, description, instruction, category, priority, enabled, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
+      `INSERT INTO rules (id, owner_id, name, description, instruction, condition_json, category, priority, enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`
     ).run(
-      id, ownerId, name, opts.description ?? "", instruction,
+      id, ownerId, name, opts.description ?? "", instruction, conditionJson,
       opts.category ?? "general", opts.priority ?? 0, now, now
     );
     return (await RuleStore.get(id, ownerId))!;
@@ -91,28 +114,21 @@ export const RuleStore = {
   async update(
     id: string,
     ownerId: string,
-    fields: Partial<Pick<Rule, "name" | "description" | "instruction" | "category" | "priority" | "enabled">>
+    fields: { name?: string; description?: string; instruction?: string; condition?: RuleCondition; category?: string; priority?: number; enabled?: boolean }
   ): Promise<Rule | null> {
-    const existing = await RuleStore.get(id, ownerId);
-    if (!existing) return null;
-
     const sets: string[] = [];
     const vals: any[] = [];
-
     if (fields.name !== undefined) { sets.push("name = ?"); vals.push(fields.name); }
     if (fields.description !== undefined) { sets.push("description = ?"); vals.push(fields.description); }
     if (fields.instruction !== undefined) { sets.push("instruction = ?"); vals.push(fields.instruction); }
+    if (fields.condition !== undefined) { sets.push("condition_json = ?"); vals.push(JSON.stringify(fields.condition)); }
     if (fields.category !== undefined) { sets.push("category = ?"); vals.push(fields.category); }
     if (fields.priority !== undefined) { sets.push("priority = ?"); vals.push(fields.priority); }
     if (fields.enabled !== undefined) { sets.push("enabled = ?"); vals.push(fields.enabled ? 1 : 0); }
-
-    if (sets.length === 0) return existing;
-
+    if (sets.length === 0) return RuleStore.get(id, ownerId);
     sets.push("updated_at = ?");
     vals.push(Date.now());
-    vals.push(id);
-    vals.push(ownerId);
-
+    vals.push(id, ownerId);
     await db.prepare(`UPDATE rules SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...vals);
     return RuleStore.get(id, ownerId);
   },

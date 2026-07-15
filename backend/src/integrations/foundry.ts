@@ -12,12 +12,10 @@ function baseUrl(): string {
 }
 
 // -----------------------------------------------------------------------------
-// Public types — exported so callers can type their own structures without
-// importing from internal Foundry manifests. These names match what the prior
-// Pipedream client exported to keep call sites easy to migrate.
+// Public types
 // -----------------------------------------------------------------------------
 
-export interface PdApp {
+export interface FoundryApp {
   id: string;
   name_slug: string;
   name: string;
@@ -31,7 +29,7 @@ export interface PdApp {
   fetched_at: number;
 }
 
-export interface PdComponent {
+export interface FoundryComponent {
   key: string;
   name: string;
   description: string;
@@ -42,7 +40,7 @@ export interface PdComponent {
   output_schema: Record<string, unknown>;
 }
 
-export interface PdAccount {
+export interface FoundryAccount {
   id: string;
   app_slug: string;
   app_name: string;
@@ -52,7 +50,7 @@ export interface PdAccount {
   updated_at: number;
 }
 
-export interface PdExecuteResult {
+export interface FoundryExecuteResult {
   id: string;
   status: "success" | "error";
   outputs: Record<string, unknown>;
@@ -61,18 +59,18 @@ export interface PdExecuteResult {
   retry_count: number;
 }
 
-export interface PdOAuthStartResult {
+export interface FoundryOAuthStartResult {
   authorizationUrl: string;
   state: string;
 }
 
-export interface PdConnectTokenResult {
+export interface FoundryConnectTokenResult {
   token: string;
   connect_link_url: string;
   expires_at: number;
 }
 
-export interface PdAccountTokenResult {
+export interface FoundryAccountTokenResult {
   access_token: string;
   expires_in: number;
   token_type: string;
@@ -85,7 +83,7 @@ export interface FoundryKeyStatus {
   accountLabel?: string;
 }
 
-export type FoundryAuthType = PdApp["auth_type"];
+export type FoundryAuthType = "oauth" | "api_key" | "keys" | "none";
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -158,7 +156,7 @@ function authTypeFromManifest(t: { type?: string } | undefined): FoundryAuthType
   }
 }
 
-function normalizeProvider(p: any): PdApp {
+function normalizeProvider(p: any): FoundryApp {
   const slug = p?.name ?? p?.name_slug ?? p?.slug ?? p?.id ?? "";
   return {
     id: p?.id ?? slug,
@@ -175,7 +173,7 @@ function normalizeProvider(p: any): PdApp {
   };
 }
 
-function normalizeAction(a: any, appSlug: string): PdComponent {
+function normalizeAction(a: any, appSlug: string): FoundryComponent {
   return {
     key: a?.name ?? a?.key ?? "",
     name: a?.displayName ?? a?.name ?? "",
@@ -188,7 +186,7 @@ function normalizeAction(a: any, appSlug: string): PdComponent {
   };
 }
 
-function normalizeAccount(raw: any): PdAccount {
+function normalizeAccount(raw: any): FoundryAccount {
   return {
     id: raw?.id ?? raw?.accountId ?? "",
     app_slug: raw?.appSlug ?? raw?.provider ?? raw?.app ?? "",
@@ -227,13 +225,13 @@ export const FoundryClient = {
     }
   },
 
-  async listApps(apiKey: string): Promise<PdApp[]> {
+  async listApps(apiKey: string): Promise<FoundryApp[]> {
     const json = await get(apiKey, "/v1/providers");
     const providers = json?.providers ?? json?.data ?? [];
     return providers.map(normalizeProvider);
   },
 
-  async searchApps(apiKey: string, query: string): Promise<PdApp[]> {
+  async searchApps(apiKey: string, query: string): Promise<FoundryApp[]> {
     const all = await FoundryClient.listApps(apiKey);
     const q = query.toLowerCase();
     return all.filter(
@@ -244,7 +242,7 @@ export const FoundryClient = {
     );
   },
 
-  async getApp(apiKey: string, appSlug: string): Promise<{ app: PdApp; components: PdComponent[] }> {
+  async getApp(apiKey: string, appSlug: string): Promise<{ app: FoundryApp; components: FoundryComponent[] }> {
     const json = await get(apiKey, `/v1/providers/${encodeURIComponent(appSlug)}`);
     const provider = json?.provider ?? json?.data ?? json;
     const app = normalizeProvider(provider);
@@ -253,7 +251,7 @@ export const FoundryClient = {
     return { app, components };
   },
 
-  async listComponents(apiKey: string, appSlug: string): Promise<PdComponent[]> {
+  async listComponents(apiKey: string, appSlug: string): Promise<FoundryComponent[]> {
     const json = await get(apiKey, `/v1/providers/${encodeURIComponent(appSlug)}/actions`);
     const actions = json?.actions ?? json?.data ?? [];
     return actions.map((a: any) => normalizeAction(a, appSlug));
@@ -263,7 +261,7 @@ export const FoundryClient = {
     apiKey: string,
     provider: string,
     opts: { externalUserId: string; redirectUri?: string; scopes?: string[] },
-  ): Promise<PdOAuthStartResult> {
+  ): Promise<FoundryOAuthStartResult> {
     const json = await post(apiKey, "/v1/oauth/start", {
       provider,
       externalUserId: opts.externalUserId,
@@ -276,7 +274,7 @@ export const FoundryClient = {
     };
   },
 
-  async getConnectToken(apiKey: string, state: string): Promise<PdConnectTokenResult> {
+  async getConnectToken(apiKey: string, state: string): Promise<FoundryConnectTokenResult> {
     const json = await get(apiKey, "/v1/oauth/token", { state });
     return {
       token: json?.token ?? "",
@@ -285,7 +283,7 @@ export const FoundryClient = {
     };
   },
 
-  async createAccountToken(apiKey: string, accountId: string): Promise<PdAccountTokenResult> {
+  async createAccountToken(apiKey: string, accountId: string): Promise<FoundryAccountTokenResult> {
     const json = await post(apiKey, "/v1/connections/account-token", { accountId });
     return {
       access_token: json?.accessToken ?? json?.access_token ?? "",
@@ -294,7 +292,7 @@ export const FoundryClient = {
     };
   },
 
-  async listConnections(apiKey: string, filter?: string | { provider?: string }): Promise<PdAccount[]> {
+  async listConnections(apiKey: string, filter?: string | { provider?: string }): Promise<FoundryAccount[]> {
     const query: Record<string, string> = {};
     if (typeof filter === "string") query.provider = filter;
     else if (filter?.provider) query.provider = filter.provider;
@@ -315,7 +313,7 @@ export const FoundryClient = {
     input: Record<string, unknown>,
     accountId?: string,
     externalUserId?: string,
-  ): Promise<PdExecuteResult> {
+  ): Promise<FoundryExecuteResult> {
     const body: Record<string, unknown> = {
       app: appSlug,
       action: actionKey,
@@ -334,29 +332,23 @@ export const FoundryClient = {
     };
   },
 
-  // Aliases / convenience methods ------------------------------------------------
+  // Convenience methods
 
   async ping(apiKey: string): Promise<boolean> {
     const s = await FoundryClient.status(apiKey);
     return s.valid;
   },
 
-  async getProvider(apiKey: string, provider: string): Promise<PdApp> {
+  async getProvider(apiKey: string, provider: string): Promise<FoundryApp> {
     const { app } = await FoundryClient.getApp(apiKey, provider);
     return app;
   },
 
-  async listActions(apiKey: string, provider: string): Promise<PdComponent[]> {
+  async listActions(apiKey: string, provider: string): Promise<FoundryComponent[]> {
     return FoundryClient.listComponents(apiKey, provider);
   },
 
-  async listProviderActions(apiKey: string, provider: string): Promise<PdComponent[]> {
+  async listProviderActions(apiKey: string, provider: string): Promise<FoundryComponent[]> {
     return FoundryClient.listComponents(apiKey, provider);
   },
 };
-
-// -----------------------------------------------------------------------------
-// Backwards-compat alias — keeps old imports (`PipedreamClient`) compiling
-// while we migrate every call site to the new name.
-// -----------------------------------------------------------------------------
-export const PipedreamClient = FoundryClient;

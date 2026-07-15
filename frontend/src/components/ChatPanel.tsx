@@ -19,6 +19,7 @@ import AnimatedDots from "./AnimatedDots";
 
 interface ToolCallInfo {
   id: string;
+  toolCallId?: string;
   name: string;
   args: Record<string, unknown> | null;
   status: "pending" | "ok" | "error";
@@ -302,9 +303,12 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
             toolSeqRef.current++;
             // Check if this is a streaming delta for an existing tool
             const aidBlocks = blocksRef.current[aid] ?? [];
+            // Match by toolCallId when available, else by name+pending (backward compat)
             const existingIdx = aidBlocks.findIndex((b): boolean => {
               if (b.type !== "tool_call") return false;
-              return b.tool.name === payload.name && b.tool.status === "pending";
+              return payload.toolCallId
+                ? b.tool.toolCallId === payload.toolCallId
+                : b.tool.name === payload.name && b.tool.status === "pending";
             });
             if (existingIdx >= 0 && payload.args) {
               // Streaming delta — accumulate raw JSON args string
@@ -330,6 +334,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
               // New tool call
               const tool: ToolCallInfo = {
                 id: `tool_${aid}_${toolSeqRef.current}`,
+                toolCallId: payload.toolCallId,
                 name: payload.name,
                 args: parseToolArgs(payload.args),
                 rawArgs: typeof payload.args === 'string' ? payload.args : undefined,
@@ -345,11 +350,16 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
             closeThinking(aid);
             const blocks = blocksRef.current[aid] ?? [];
             let idx = -1;
-            for (let i = blocks.length - 1; i >= 0; i--) {
-              const b = blocks[i];
-              if (b.type !== "tool_call") continue;
-              if (b.tool.name === payload.name && b.tool.status === "pending") {
-                idx = i; break;
+            // Match by toolCallId when available (fast path), else by name+pending (backward compat)
+            if (payload.toolCallId) {
+              idx = blocks.findIndex((b) => b.type === "tool_call" && b.tool.toolCallId === payload.toolCallId);
+            } else {
+              for (let i = blocks.length - 1; i >= 0; i--) {
+                const b = blocks[i];
+                if (b.type !== "tool_call") continue;
+                if (b.tool.name === payload.name && b.tool.status === "pending") {
+                  idx = i; break;
+                }
               }
             }
             if (idx === -1) continue;
@@ -443,7 +453,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                 if (m.role === "tool") return null;
                 const liveBlocks: Block[] = blocksByMessage[m.id] ?? [];
                 const persistedToolCalls = isAssistant && liveBlocks.length === 0 && Array.isArray(m.toolCalls)
-                  ? (m.toolCalls as Array<{ id?: string; name: string; args?: any }>)
+                  ? (m.toolCalls as Array<{ id?: string; name: string; arguments?: any }>)
                   : [];
                 const blocks: Block[] = liveBlocks.length > 0
                   ? liveBlocks
@@ -452,7 +462,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                       tool: {
                         id: tc.id ?? `${m.id}_tool_${i}`,
                         name: tc.name,
-                        args: parseToolArgs(tc.args),
+                        args: parseToolArgs(tc.arguments),
                         status: "ok" as const,
                         startedAt: m.createdAt,
                         durationMs: 0,

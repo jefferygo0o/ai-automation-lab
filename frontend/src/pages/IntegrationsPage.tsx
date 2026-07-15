@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { Integrations, type PdApp, type PdComponent, type IntegrationConnection, type IntegrationAction } from "../api";
+import { Integrations, type FoundryApp, type FoundryComponent, type IntegrationConnection, type IntegrationAction } from "../api";
 import {
   Plus, Plug, Unplug, Trash2, Search, ExternalLink,
   RefreshCw, Check, X, AlertCircle, Key, Globe,
@@ -151,12 +151,12 @@ function AppCard({
   onConnect,
   onRefresh,
 }: {
-  app: PdApp;
-  onConnect: (app: PdApp) => void;
+  app: FoundryApp;
+  onConnect: (app: FoundryApp) => void;
   onRefresh: (slug: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [appData, setAppData] = useState<{ actions: PdComponent[]; triggers: PdComponent[] } | null>(null);
+  const [appData, setAppData] = useState<{ actions: FoundryComponent[]; triggers: FoundryComponent[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -355,8 +355,8 @@ function FeaturedAppCard({
   app,
   onConnect,
 }: {
-  app: PdApp;
-  onConnect: (app: PdApp) => void;
+  app: FoundryApp;
+  onConnect: (app: FoundryApp) => void;
 }) {
   return (
     <button
@@ -386,16 +386,16 @@ function FeaturedAppCard({
 function CatalogView({
   onConnect,
   onBack,
-  pdConfigured,
+  foundryConfigured,
 }: {
-  onConnect: (app: PdApp) => void;
+  onConnect: (app: FoundryApp) => void;
   onBack: () => void;
-  pdConfigured: boolean;
+  foundryConfigured: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<PdApp[] | null>(null);
-  const [featured, setFeatured] = useState<PdApp[]>([]);
+  const [searchResults, setSearchResults] = useState<FoundryApp[] | null>(null);
+  const [featured, setFeatured] = useState<FoundryApp[]>([]);
   const [loading, setLoading] = useState(false);
   const [featuredLoading, setFeaturedLoading] = useState(true);
   const [error, setError] = useState("");
@@ -403,7 +403,7 @@ function CatalogView({
   // --- Category browser state ---
   const [categories, setCategories] = useState<string[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [categoryApps, setCategoryApps] = useState<PdApp[] | null>(null);
+  const [categoryApps, setCategoryApps] = useState<FoundryApp[] | null>(null);
   const [categoryLoading, setCategoryLoading] = useState(false);
 
   // Load categories when the view mounts (and when a sync finishes)
@@ -445,7 +445,7 @@ function CatalogView({
               logo_url: "",
               categories: [],
               connected: false,
-            } as PdApp;
+            } as FoundryApp;
           })
           .catch(() => ({
             id: fallback.slug,
@@ -459,7 +459,7 @@ function CatalogView({
             logo_url: "",
             categories: [],
             connected: false,
-          } as PdApp))
+          } as FoundryApp))
       )
     ).then((apps) => {
       setFeatured(apps);
@@ -561,7 +561,7 @@ function CatalogView({
         </button>
       </div>
 
-      {!pdConfigured && (
+      {!foundryConfigured && (
         <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800">
           <Key className="w-3.5 h-3.5 shrink-0" />
           Set up your Foundry API key above to browse the full catalog and connect apps.
@@ -976,7 +976,7 @@ function ApiKeyDialog({
   onClose,
   onConnected,
 }: {
-  app: PdApp;
+  app: FoundryApp;
   onClose: () => void;
   onConnected: () => void;
 }) {
@@ -1237,7 +1237,7 @@ export default function IntegrationsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showCatalog, setShowCatalog] = useState(false);
-  const [connectingApp, setConnectingApp] = useState<PdApp | null>(null);
+  const [connectingApp, setConnectingApp] = useState<FoundryApp | null>(null);
   const [foundryStatus, setFoundryStatus] = useState<{ configured: boolean; valid: boolean; message: string } | null>(null);
   const [showKeySetup, setShowKeySetup] = useState(false);
   const [stats, setStats] = useState<{ total: number; byStatus: Record<string, number> } | null>(null);
@@ -1336,7 +1336,7 @@ export default function IntegrationsPage() {
   }, [fetchAll]);
 
   // Handle connecting an app
-  const handleConnect = useCallback((app: PdApp) => {
+  const handleConnect = useCallback((app: FoundryApp) => {
     setConnectingApp(app);
   }, []);
 
@@ -1567,7 +1567,7 @@ export default function IntegrationsPage() {
           <CatalogView
             onConnect={handleConnect}
             onBack={() => setShowCatalog(false)}
-            pdConfigured={!!foundryReady}
+            foundryConfigured={!!foundryReady}
           />
         ) : (
           <ConnectedView

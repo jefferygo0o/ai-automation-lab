@@ -22,7 +22,7 @@
  */
 
 import { Hono } from "hono";
-import { FoundryClient, type PdComponent, type PdApp } from "./foundry.ts";
+import { FoundryClient, type FoundryComponent, type FoundryApp } from "./foundry.ts";
 import { IntegrationRegistry, type IntegrationConnection, type CachedCatalogApp } from "./registry.ts";
 import { SecretStore } from "../secrets/store.ts";
 import { Audit } from "../audit/index.ts";
@@ -44,15 +44,15 @@ const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour cache for catalog
  *   2. Secrets DB (case-insensitive lookup of "foundry_api_key").
  * Either source is accepted; the env var wins when present.
  */
-async function getPdApiKey(ownerId: string): Promise<string | null> {
+async function getFoundryApiKey(ownerId: string): Promise<string | null> {
   const envKey = process.env.FOUNDRY_API_KEY?.trim();
   if (envKey && envKey.length > 0) return envKey;
   return await SecretStore.getCI(ownerId, "foundry_api_key");
 }
 
 /** Reusable guard — returns 400 if no PD key set. */
-async function requiresPdKey(ownerId: string, c: any): Promise<string | null> {
-  const key = await getPdApiKey(ownerId);
+async function requiresFoundryKey(ownerId: string, c: any): Promise<string | null> {
+  const key = await getFoundryApiKey(ownerId);
   if (!key) {
     c.status(400);
     return null;
@@ -86,7 +86,7 @@ function sanitizeConn(c: IntegrationConnection) {
 // the OAuth "start" call is made via FoundryClient.startOAuth().
 // ---------------------------------------------------------------------------
 
-async function pdKeyMissingPayload(ownerId: string) {
+async function apiKeyMissingPayload(ownerId: string) {
   const existing = await (await SecretStore.list(ownerId)).map((s) => s.name);
   return {
     error:
@@ -104,7 +104,7 @@ async function pdKeyMissingPayload(ownerId: string) {
  * Fetch the full Foundry catalog and cache it locally.
  * Updates sync state so the UI can show progress.
  */
-async function syncCatalogFromPd(ownerId: string, pdKey: string): Promise<number> {
+async function syncCatalogFromFoundry(ownerId: string, apiKey: string): Promise<number> {
   if (syncLocks.has(ownerId)) {
     console.log("[sync] skipping — sync already in progress for", ownerId);
     return 0;
@@ -113,7 +113,7 @@ async function syncCatalogFromPd(ownerId: string, pdKey: string): Promise<number
   console.log("[sync] starting sync for", ownerId);
   await IntegrationRegistry.updateCatalogSyncState(ownerId, "syncing", { total: 0 });
   try {
-    const apps = await FoundryClient.listApps(pdKey);
+    const apps = await FoundryClient.listApps(apiKey);
     console.log("[sync] Foundry listApps returned", apps.length, "apps");
     await IntegrationRegistry.cacheAppCatalog(ownerId, apps);
     await IntegrationRegistry.updateCatalogSyncState(ownerId, "complete", { total: apps.length });
@@ -142,11 +142,11 @@ async function syncCatalogFromPd(ownerId: string, pdKey: string): Promise<number
  */
 API.post("/catalog/sync", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = await requiresPdKey(userId, c);
-  if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
+  const apiKey = await requiresFoundryKey(userId, c);
+  if (!apiKey) return c.json(apiKeyMissingPayload(userId), 400);
 
   try {
-    const count = await syncCatalogFromPd(userId, pdKey);
+    const count = await syncCatalogFromFoundry(userId, apiKey);
     return c.json({ ok: true, count });
   } catch (e: any) {
     return c.json({ error: `Sync failed: ${e?.message ?? String(e)}` }, 502);
@@ -161,8 +161,8 @@ API.post("/catalog/sync", async (c) => {
  */
 API.get("/categories", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = await requiresPdKey(userId, c);
-  if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
+  const apiKey = await requiresFoundryKey(userId, c);
+  if (!apiKey) return c.json(apiKeyMissingPayload(userId), 400);
 
   try {
     const count = await IntegrationRegistry.getCachedAppsCount(userId);
@@ -171,7 +171,7 @@ API.get("/categories", async (c) => {
     // Never block on Foundry — return cached data immediately.
     // If the cache is empty or stale, trigger a background refresh.
     if (count === 0 || !fresh) {
-      syncCatalogFromPd(userId, pdKey).catch(e => console.error("[integrations] sync error:", e?.message ?? String(e)));
+      syncCatalogFromFoundry(userId, apiKey).catch(e => console.error("[integrations] sync error:", e?.message ?? String(e)));
     }
 
     const categories = await IntegrationRegistry.getCachedCategories(userId);
@@ -197,8 +197,8 @@ API.get("/categories", async (c) => {
  */
 API.get("/catalog", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = await requiresPdKey(userId, c);
-  if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
+  const apiKey = await requiresFoundryKey(userId, c);
+  if (!apiKey) return c.json(apiKeyMissingPayload(userId), 400);
 
   const query = c.req.query("q")?.trim() ?? "";
   const page = Math.max(1, Number(c.req.query("page") ?? 1));
@@ -221,12 +221,12 @@ API.get("/catalog", async (c) => {
     // cache has zero apps for this user we synchronously fetch from
     // Foundry and persist the result. For search queries, we also fall
     // back to Foundry live when the local cache has no matches.
-    let liveFetched: PdApp[] | null = null;
+    let liveFetched: FoundryApp[] | null = null;
     if (count === 0) {
       try {
         liveFetched = query
-          ? await FoundryClient.searchApps(pdKey, query)
-          : await FoundryClient.listApps(pdKey);
+          ? await FoundryClient.searchApps(apiKey, query)
+          : await FoundryClient.listApps(apiKey);
         if (liveFetched.length > 0) {
           await IntegrationRegistry.cacheAppCatalog(userId, liveFetched);
         }
@@ -234,7 +234,7 @@ API.get("/catalog", async (c) => {
         console.error("[catalog] live fetch failed:", e?.message ?? String(e));
       }
       // Also kick off a full sync in the background so the cache fills in.
-      syncCatalogFromPd(userId, pdKey).catch(e =>
+      syncCatalogFromFoundry(userId, apiKey).catch(e =>
         console.error("[integrations] background sync error:", e?.message ?? String(e)),
       );
     } else if (query) {
@@ -242,7 +242,7 @@ API.get("/catalog", async (c) => {
       const localResult = await IntegrationRegistry.searchCachedApps(userId, query, 1, 10000);
       if (localResult.total === 0) {
         try {
-          liveFetched = await FoundryClient.searchApps(pdKey, query);
+          liveFetched = await FoundryClient.searchApps(apiKey, query);
           if (liveFetched.length > 0) {
             await IntegrationRegistry.cacheAppCatalog(userId, liveFetched);
           }
@@ -252,7 +252,7 @@ API.get("/catalog", async (c) => {
       }
     } else if (!fresh) {
       // Cache exists but is stale — refresh in the background.
-      syncCatalogFromPd(userId, pdKey).catch(e =>
+      syncCatalogFromFoundry(userId, apiKey).catch(e =>
         console.error("[integrations] background sync error:", e?.message ?? String(e)),
       );
     }
@@ -339,8 +339,8 @@ API.get("/catalog", async (c) => {
  */
 API.get("/catalog/:slug", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = await requiresPdKey(userId, c);
-  if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
+  const apiKey = await requiresFoundryKey(userId, c);
+  if (!apiKey) return c.json(apiKeyMissingPayload(userId), 400);
 
   const slug = c.req.param("slug");
 
@@ -372,10 +372,10 @@ API.get("/catalog/:slug", async (c) => {
       // Fetch app + components from Foundry.
       // Note: Foundry Connect split these into two endpoints — getApp
       // returns app metadata only; components come from listComponents.
-      const result = await FoundryClient.getApp(pdKey, slug);
+      const result = await FoundryClient.getApp(apiKey, slug);
       app = result.app;
       try {
-        const list = await FoundryClient.listComponents(pdKey, slug);
+        const list = await FoundryClient.listComponents(apiKey, slug);
         components = list.map((comp: any) => ({
           id: comp.id,
           appSlug: slug,
@@ -415,15 +415,15 @@ API.get("/catalog/:slug", async (c) => {
  */
 API.post("/catalog/:slug/refresh", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = await requiresPdKey(userId, c);
-  if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
+  const apiKey = await requiresFoundryKey(userId, c);
+  if (!apiKey) return c.json(apiKeyMissingPayload(userId), 400);
 
   const slug = c.req.param("slug");
   try {
     // Foundry Connect split the legacy /apps/{slug} endpoint: app
     // metadata comes from getApp, components come from listComponents.
-    await FoundryClient.getApp(pdKey, slug);
-    const list = await FoundryClient.listComponents(pdKey, slug);
+    await FoundryClient.getApp(apiKey, slug);
+    const list = await FoundryClient.listComponents(apiKey, slug);
     const components = list.map((comp: any) => ({
       id: comp.key,
       appSlug: slug,
@@ -460,8 +460,8 @@ API.get("/", async (c) => {
  */
 API.post("/connect/:slug", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = await requiresPdKey(userId, c);
-  if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
+  const apiKey = await requiresFoundryKey(userId, c);
+  if (!apiKey) return c.json(apiKeyMissingPayload(userId), 400);
 
   const slug = c.req.param("slug");
 
@@ -473,12 +473,12 @@ API.post("/connect/:slug", async (c) => {
 
   // Fetch app details from Foundry
   try {
-    const { app } = await FoundryClient.getApp(pdKey, slug);
+    const { app } = await FoundryClient.getApp(apiKey, slug);
 
     // Components now come from a separate endpoint in the new Connect API.
-    let components: PdComponent[] = [];
+    let components: FoundryComponent[] = [];
     try {
-      components = await FoundryClient.listComponents(pdKey, slug);
+      components = await FoundryClient.listComponents(apiKey, slug);
     } catch (componentErr: any) {
       console.warn(
         "[integrations] listComponents failed for",
@@ -529,7 +529,7 @@ API.post("/connect/:slug", async (c) => {
         const host = c.req.header("host") ?? "";
         const proto = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
         const baseUrl = `${proto}://${host}`;
-        const { authorizationUrl } = await FoundryClient.startOAuth(pdKey, slug, {
+        const { authorizationUrl } = await FoundryClient.startOAuth(apiKey, slug, {
           externalUserId: `lab_${userId}`,
           redirectUri: `${baseUrl}/integrations?oauth_success=${conn.id}`,
         });
@@ -630,10 +630,10 @@ API.delete("/:id", async (c) => {
   if (!conn) return c.json({ error: "not found" }, 404);
 
   // Clean up the Foundry account if it exists
-  const pdKey = await getPdApiKey(userId);
-  if (pdKey && conn.connectedAccountId) {
+  const apiKey = await getFoundryApiKey(userId);
+  if (apiKey && conn.connectedAccountId) {
     try {
-      await FoundryClient.deleteAccount(pdKey, conn.connectedAccountId);
+      await FoundryClient.deleteAccount(apiKey, conn.connectedAccountId);
     } catch {
       // Non-fatal — the local record is what matters
     }
@@ -683,8 +683,8 @@ API.get("/:id/actions", async (c) => {
  */
 API.post("/:id/execute", async (c) => {
   const userId = c.get("userId") as string;
-  const pdKey = await requiresPdKey(userId, c);
-  if (!pdKey) return c.json(pdKeyMissingPayload(userId), 400);
+  const apiKey = await requiresFoundryKey(userId, c);
+  if (!apiKey) return c.json(apiKeyMissingPayload(userId), 400);
 
   const conn = await IntegrationRegistry.get(c.req.param("id"), userId);
   if (!conn) return c.json({ error: "not found" }, 404);
@@ -706,7 +706,7 @@ API.post("/:id/execute", async (c) => {
 
     if (accountId) {
       // Use Foundry Connect API for OAuth-connected accounts
-      result = await FoundryClient.executeAction(pdKey, appSlug, actionKey, input ?? {}, accountId, `lab_${userId}`);
+      result = await FoundryClient.executeAction(apiKey, appSlug, actionKey, input ?? {}, accountId, `lab_${userId}`);
     } else if (conn.credentialsRef) {
       // For API key-based integrations, retrieve the stored key and
       // pass it as `configured_props.api_key` — the Foundry-standard
@@ -717,7 +717,7 @@ API.post("/:id/execute", async (c) => {
         return c.json({ error: "Stored credentials not found" }, 500);
       }
       result = await FoundryClient.executeAction(
-        pdKey,
+        apiKey,
         appSlug,
         actionKey,
         { api_key: storedKey, ...(input ?? {}) },
@@ -751,7 +751,7 @@ API.post("/:id/execute", async (c) => {
  */
 API.get("/foundry/status", async (c) => {
   const userId = c.get("userId") as string;
-  const key = await getPdApiKey(userId);
+  const key = await getFoundryApiKey(userId);
   if (!key) {
     return c.json({ configured: false, valid: false, message: "No Foundry API key configured" });
   }
@@ -807,7 +807,7 @@ API.get("/stats", async (c) => {
  */
 API.get("/connect-config", async (c) => {
   const userId = c.get("userId") as string;
-  const key = await getPdApiKey(userId);
+  const key = await getFoundryApiKey(userId);
   if (!key) {
     return c.json({ error: "Foundry Connect is not configured" }, 502);
   }
@@ -888,13 +888,13 @@ API.post("/:id/verify-oauth", async (c) => {
     return c.json({ connected: true, status: "connected", connectedAccountId: conn.connectedAccountId });
   }
 
-  const pdKey = await getPdApiKey(userId);
-  if (!pdKey) {
+  const apiKey = await getFoundryApiKey(userId);
+  if (!apiKey) {
     return c.json({ connected: false, status: conn.status, message: "Foundry API key not configured" });
   }
 
   try {
-    const connections = await FoundryClient.listConnections(pdKey);
+    const connections = await FoundryClient.listConnections(apiKey);
     const matching = connections.find((x: any) => x.provider === conn.appSlug || x.app === conn.appSlug);
 
     if (matching) {

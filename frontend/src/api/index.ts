@@ -241,7 +241,7 @@ export const Automations = {
 
 // ---- Integrations (Foundry-powered) ----
 
-export interface PdApp {
+export interface FoundryApp {
   id: string;
   name: string;
   name_slug: string;
@@ -255,7 +255,7 @@ export interface PdApp {
   connected?: boolean;
 }
 
-export interface PdComponent {
+export interface FoundryComponent {
   id: string;
   key: string;
   name: string;
@@ -302,12 +302,12 @@ export const Integrations = {
     if (params?.per_page) p.set("per_page", String(params.per_page));
     if (params?.category) p.set("category", params.category);
     const qs = p.toString();
-    return api<{ apps: PdApp[]; total: number; page: number; per_page: number; pages: number }>(
+    return api<{ apps: FoundryApp[]; total: number; page: number; per_page: number; pages: number }>(
       `/api/integrations/catalog${qs ? `?${qs}` : ""}`
     );
   },
   getCatalogApp: (slug: string) =>
-    api<{ app: PdApp & { connected: boolean }; actions: PdComponent[]; triggers: PdComponent[] }>(
+    api<{ app: FoundryApp & { connected: boolean }; actions: FoundryComponent[]; triggers: FoundryComponent[] }>(
       `/api/integrations/catalog/${slug}`
     ),
   refreshCatalogCache: (slug: string) =>
