@@ -13,6 +13,7 @@ import { nanoid } from "nanoid";
 import { db } from "../db/index.ts";
 import { toolRegistry } from "../tools/registry.ts";
 import { readAgentFile } from "../agents/files.ts";
+import { Audit } from "../audit/index.ts";
 
 export interface McpServerConfig {
   name: string;
@@ -224,11 +225,12 @@ class McpManager {
     });
   }
 
-  async callTool(serverName: string, toolName: string, args: unknown): Promise<any> {
+  async callTool(serverName: string, toolName: string, args: unknown, ownerId?: string): Promise<any> {
     const s = this.servers.get(serverName);
     if (!s) throw new Error(`mcp server not running: ${serverName}`);
     if (s.status !== "ready") throw new Error(`mcp server not ready: ${serverName} (${s.status})`);
     const result = await this.rpc(s, "tools/call", { name: toolName, arguments: args ?? {} });
+    if (ownerId) await Audit.record({ ownerId, actor: "agent", action: "tool.execute", targetId: `${serverName}:${toolName}`, targetType: "mcp_tool", metadata: { server: serverName, tool: toolName, args } });
     if (Array.isArray(result?.content)) {
       return result.content.map((c: any) => c.text ?? JSON.stringify(c)).join("\n");
     }

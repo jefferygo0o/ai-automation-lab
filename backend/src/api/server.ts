@@ -472,7 +472,9 @@ api.post("/api/chats/:id/active-agent", async (c) => {
 // SSE chat streaming -- supports JSON ({ content }) and multipart/form-data (content + files[])
 api.post("/api/chats/:id/messages", async (c) => {
   const userId = c.get("userId") as string;
-  incrementHourly(userId);
+  const limit = rateLimit(`chat:${userId}`, { perMinute: 30, perHour: 1000 });
+  if (!limit.allowed) return c.json({ error: limit.reason, retryAfterMs: limit.retryAfterMs }, 429);
+  await incrementHourly(userId);
   const chat = await ChatStore.get(c.req.param("id"), userId);
   if (!chat) return c.json({ error: "chat not found" }, 404);
   const agent = await AgentStore.get(chat.activeAgentId ?? chat.agentId, userId);

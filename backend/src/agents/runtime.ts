@@ -113,7 +113,7 @@ export async function runAgentTurn(
       get: async (name: string): Promise<string | null> => SecretStore.get(ownerId, name),
     },
     mcp: {
-      call: (server, tool, args) => mcpManager.callTool(server, tool, args),
+      call: (server, tool, args) => mcpManager.callTool(server, tool, args, ownerId),
       listServers: () => mcpManager.listServers(),
     },
     abort,
@@ -412,28 +412,18 @@ export async function runAgentTurn(
             ok = false;
             await RunStore.recordToolFinish(inv.id, "denied", result, decision.response ?? decision.status);
           } else {
-            try {
-              result = await tool.execute(fnArgs, toolCtx);
-            } catch (e: any) {
-              result = { error: e?.message ?? String(e) };
-              ok = false;
-            }
+            const brokered = await toolRegistry.execute(tc.name, fnArgs, toolCtx);
+            result = brokered.result;
+            ok = brokered.ok;
             if (ok && result && typeof result === "object" && result.isError === true) ok = false;
             await RunStore.recordToolFinish(inv.id, ok ? "ok" : "error", result, ok ? null : String(result?.error ?? ""));
           }
         } else {
-          try {
-            result = await tool.execute(fnArgs, toolCtx);
-          } catch (e: any) {
-            result = { error: e?.message ?? String(e) };
-            ok = false;
-          }
-          // Detect non-thrown tool errors (the `err()` helper returns
-          // isError=true without throwing)
-          if (ok && result && typeof result === "object" && result.isError === true) {
-            ok = false;
-          }
-          RunStore.recordToolFinish(inv.id, ok ? "ok" : "error", result, ok ? null : String(result?.error ?? ""));
+          const brokered = await toolRegistry.execute(tc.name, fnArgs, toolCtx);
+          result = brokered.result;
+          ok = brokered.ok;
+          if (ok && result && typeof result === "object" && result.isError === true) ok = false;
+          await RunStore.recordToolFinish(inv.id, ok ? "ok" : "error", result, ok ? null : String(result?.error ?? ""));
         }
         const resultStr = normalizeToolResult(result, ok);
         const toolDuration = Date.now() - toolStart;
