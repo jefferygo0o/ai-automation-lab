@@ -182,10 +182,18 @@ class PgDbShim {
     const statements = splitSqlStatements(sql);
     let totalChanges = 0;
     const runNext = async (): Promise<{ changes: number }> => {
-      for (const stmt of statements) {
+      for (let i = 0; i < statements.length; i++) {
+        const stmt = statements[i];
         if (!stmt.trim()) continue;
-        const r = await getPool().query(stmt);
-        totalChanges += r.rowCount ?? 0;
+        try {
+          const r = await getPool().query(stmt);
+          totalChanges += r.rowCount ?? 0;
+        } catch (e: any) {
+          // Log the failing statement so we can diagnose which one errors
+          console.error(`[db] exec statement [${i + 1}/${statements.length}] failed:`, e?.message ?? e);
+          console.error(`[db] failing SQL (first 400 chars): ${stmt.slice(0, 400)}`);
+          throw e;
+        }
       }
       return { changes: totalChanges };
     };
@@ -214,14 +222,23 @@ export async function initSchema(): Promise<void> {
   }
   try {
     await db.exec(readFileSync(p, "utf8"));
-    const migrationsDir = join(dir, "migrations");
-    const migrations = readdirSync(migrationsDir, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".sql")).map((entry) => entry.name).sort();
-    for (const migration of migrations) {
-      await db.exec(readFileSync(join(migrationsDir, migration), "utf8"));
-      console.log("[db] migration applied:", migration);
-    }
     console.log("[db] schema applied from", p);
+    const migrationsDir = join(dir, "migrations");
+    const migrations = readdirSync(migrationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
+      .map((entry) => entry.name)
+      .sort();
+    for (const migration of migrations) {
+      const mp = join(migrationsDir, migration);
+      try {
+        await db.exec(readFileSync(mp, "utf8"));
+        console.log("[db] migration applied:", migration);
+      } catch (e: any) {
+        console.error(`[db] migration "${migration}" failed:`, e?.message ?? e, "(path:", mp, ")");
+        throw e;
+      }
+    }
   } catch (e: any) {
-    console.error("[db] schema apply failed:", e?.message ?? e, "(path:", p, ")");
+    console.error("[db] schema apply failed:", e?.message ?? e);
   }
 }
