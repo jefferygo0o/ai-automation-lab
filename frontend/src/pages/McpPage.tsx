@@ -432,16 +432,17 @@ export default function McpPage() {
     try {
       const res = await MCP.connect(server.id);
       // Response can have: oauth (OAuth link), needsEnv (env var prompt), ok (direct success)
-      if ((res as any).oauth?.connectLinkUrl) {
+      if ((res as any).oauth?.authorizationUrl) {
         // Need Foundry Connect OAuth
         const oauthData = (res as any).oauth;
+        const authUrl = oauthData.authorizationUrl;
         setOauthServer({
           id: server.id,
           name: server.name,
-          connectLinkUrl: oauthData.connectLinkUrl,
+          connectLinkUrl: authUrl,
           needsEnv: (res as any).needsEnv ?? [],
         });
-        window.open(oauthData.connectLinkUrl, "_blank", "width=600,height=700");
+        window.open(authUrl, "_blank", "width=600,height=700");
       } else if ((res as any).needsEnv && (res as any).needsEnv.length > 0) {
         // Need env vars — show env dialog
         setEnvDialog({

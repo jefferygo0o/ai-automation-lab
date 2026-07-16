@@ -996,13 +996,13 @@ function ApiKeyDialog({
     try {
       const res: any = await Integrations.connect(app.name_slug);
 
-      if (isOAuth && res.oauth?.connectLinkUrl) {
-        // OAuth flow — open Foundry Connect Link
+      if (isOAuth && res.oauth?.authorizationUrl) {
+        // OAuth flow — open authorization URL
         setConnectionId(res.connection?.id || "");
-        setConnectLinkUrl(res.oauth.connectLinkUrl);
+        setConnectLinkUrl(res.oauth.authorizationUrl);
         setStep("oauth");
         // Open the link in a new window/tab
-        window.open(res.oauth.connectLinkUrl, "_blank", "noopener,noreferrer");
+        window.open(res.oauth.authorizationUrl, "_blank", "noopener,noreferrer");
       } else if (res.connection) {
         // API key or non-OAuth — show credentials step
         setConnectionId(res.connection.id);

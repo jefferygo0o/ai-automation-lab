@@ -167,7 +167,7 @@ export const MCP = {
   save: (name: string, command: string, args: string[], env?: Record<string, string>) =>
     api<{ server: McpServer }>("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name, command, args, env }) }),
   connect: (id: string) =>
-    api<{ ok: boolean; needs_oauth?: boolean; oauth?: { connectLinkUrl?: string; connectionId?: string; authType?: string }; needsEnv?: string[]; error?: string }>(
+    api<{ ok: boolean; needs_oauth?: boolean; oauth?: { authorizationUrl?: string; connectionId?: string; authType?: string }; needsEnv?: string[]; error?: string }>(
       `/api/mcp/servers/${id}/connect`, { method: "POST" }
     ),
   disconnect: (id: string) => api<{ ok: boolean }>(`/api/mcp/servers/${id}/disconnect`, { method: "POST" }),
@@ -315,7 +315,7 @@ export const Integrations = {
   list: () =>
     api<{ connections: IntegrationConnection[]; total?: number }>("/api/integrations"),
   connect: (slug: string) =>
-    api<{ connection: IntegrationConnection; warning?: string; oauth?: { connectLinkUrl: string; token: string }; connect_link_url?: string }>(
+    api<{ connection: IntegrationConnection; warning?: string; oauth?: { authorizationUrl: string }; connect_link_url?: string }>(
       `/api/integrations/connect/${slug}`, { method: "POST" }
     ),
   setCredentials: (id: string, value: string) =>

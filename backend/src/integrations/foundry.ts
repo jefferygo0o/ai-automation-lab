@@ -189,8 +189,8 @@ function normalizeAction(a: any, appSlug: string): FoundryComponent {
 function normalizeAccount(raw: any): FoundryAccount {
   return {
     id: raw?.id ?? raw?.accountId ?? "",
-    app_slug: raw?.appSlug ?? raw?.provider ?? raw?.app ?? "",
-    app_name: raw?.appName ?? raw?.app_name ?? "",
+    app_slug: raw?.appSlug ?? raw?.provider ?? raw?.app ?? raw?.providerName ?? "",
+    app_name: raw?.appName ?? raw?.app_name ?? raw?.providerName ?? "",
     name: raw?.name ?? raw?.displayName ?? "",
     healthy: raw?.healthy ?? true,
     created_at: raw?.createdAt ?? raw?.created_at ?? 0,
@@ -260,14 +260,16 @@ export const FoundryClient = {
   async startOAuth(
     apiKey: string,
     provider: string,
-    opts: { externalUserId: string; redirectUri?: string; scopes?: string[] },
+    opts: { externalUserId?: string; redirectUri?: string; scopes?: string[]; clientRedirectUri?: string },
   ): Promise<FoundryOAuthStartResult> {
-    const json = await post(apiKey, "/v1/oauth/start", {
+    const body: Record<string, unknown> = {
       provider,
-      externalUserId: opts.externalUserId,
       redirectUri: opts.redirectUri,
-      scopes: opts.scopes,
-    });
+    };
+    if (opts.externalUserId) body.externalUserId = opts.externalUserId;
+    if (opts.scopes) body.scopes = opts.scopes;
+    if (opts.clientRedirectUri) body.client_redirect_uri = opts.clientRedirectUri;
+    const json = await post(apiKey, "/v1/oauth/start", body);
     return {
       authorizationUrl: json?.authorizationUrl ?? json?.url ?? "",
       state: json?.state ?? json?.oauthState ?? "",

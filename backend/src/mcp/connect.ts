@@ -196,7 +196,7 @@ export async function startMcpOAuthFlow(
   // For OAuth providers, ask Foundry to mint an authorizationUrl.
   if (authType === "oauth" || authType === "oauth2") {
     try {
-      const { authorizationUrl } = await FoundryClient.startOAuth(apiKey, foundrySlug, { externalUserId: userId, redirectUri: cfg.oauthCallbackBase });
+      const { authorizationUrl } = await FoundryClient.startOAuth(apiKey, foundrySlug, { externalUserId: userId, redirectUri: cfg.oauthCallbackBase, clientRedirectUri: 'https://' + (process.env.HOST ?? 'localhost:7777') + '/integrations' });
 
       await IntegrationRegistry.updateStatus(conn.id, userId, "connecting");
 

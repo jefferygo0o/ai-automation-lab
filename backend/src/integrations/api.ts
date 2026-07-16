@@ -526,12 +526,16 @@ API.post("/connect/:slug", async (c) => {
     // the authorization URL for the browser to redirect to.
     if (app.auth_type === "oauth") {
       try {
-        const host = c.req.header("host") ?? "";
-        const proto = host.includes("localhost") || host.includes("127.0.0.1") ? "http" : "https";
-        const baseUrl = `${proto}://${host}`;
+        const baseUrl = process.env.FOUNDRY_OAUTH_CALLBACK_BASE?.trim() || "https://api-gateway-production-4984.up.railway.app/v1/connections/oauth/callback";
+        const client_base = process.env.FOUNDRY_CLIENT_REDIRECT_BASE || (() => {
+          const h = c.req.header("host") ?? "";
+          const p = h.includes("localhost") || h.includes("127.0.0.1") ? "http" : "https";
+          return `${p}://${h}`;
+        })();
         const { authorizationUrl } = await FoundryClient.startOAuth(apiKey, slug, {
           externalUserId: `lab_${userId}`,
-          redirectUri: `${baseUrl}/integrations?oauth_success=${conn.id}`,
+          redirectUri: baseUrl,
+          clientRedirectUri: `${client_base}/integrations?oauth_success=${conn.id}`,
         });
         await IntegrationRegistry.updateStatus(conn.id, userId, "connecting");
         return c.json({
@@ -895,7 +899,7 @@ API.post("/:id/verify-oauth", async (c) => {
 
   try {
     const connections = await FoundryClient.listConnections(apiKey);
-    const matching = connections.find((x: any) => x.provider === conn.appSlug || x.app === conn.appSlug);
+    const matching = connections.find((x: any) => x.app_slug === conn.appSlug || x.app_name === conn.appSlug);
 
     if (matching) {
       const connectedAccountId = matching.id ?? matching.id;
