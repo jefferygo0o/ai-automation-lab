@@ -384,6 +384,9 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
             newBlocks[idx] = { type: "tool_call", tool: updated };
             setBlocksByMessage((ps) => ({ ...ps, [aid]: newBlocks }));
             blocksRef.current[aid] = newBlocks;
+            if (updated.name.startsWith("browser_") || (updated.name.startsWith("lab_") && updated.name.includes("webpage"))) {
+              window.dispatchEvent(new CustomEvent("lab:browser-tool-used"));
+            }
             setExpandedTool((ps) => { const n = new Set(ps); n.delete(updated.id); return n; });
           } else if (type === "approval_requested") {
             closeThinking(aid);

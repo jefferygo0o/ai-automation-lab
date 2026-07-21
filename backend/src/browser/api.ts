@@ -2,10 +2,10 @@ import { Hono } from "hono";
 import type { HonoEnv } from "../types/hono.ts";
 import { BrowserSessionStore } from "./store.ts";
 import { browserRuntime } from "./runtime.ts";
+import { getActiveView } from "./active.ts";
+import { db } from "../db/pg.ts";
 
 export const browserApi = new Hono<HonoEnv>();
-
-// List all sessions
 browserApi.get("/sessions", async (c) => {
   const sessions = await BrowserSessionStore.list(c.get("userId"));
   return c.json({ sessions });
@@ -134,4 +134,49 @@ browserApi.delete("/sessions/:id", async (c) => {
   await db.prepare("DELETE FROM browser_sessions WHERE id = $1 AND owner_id = $2").run(id, c.get("userId"));
   await db.prepare("DELETE FROM browser_downloads WHERE session_id = $1 AND owner_id = $2").run(id, c.get("userId"));
   return c.json({ ok: true });
+});
+
+// ====================================================================
+// Active browser preview (lab tools session, for frontend BrowserPage)
+// ====================================================================
+
+// GET /api/browser/active — return current AI browser activity for this user
+browserApi.get("/active", async (c) => {
+  const userId = c.get("userId");
+  const view = getActiveView(userId);
+  if (!view) return c.json({ active: false, url: null, title: null });
+  return c.json({
+    active: true,
+    url: view.url,
+    title: view.title,
+    agentId: view.agentId,
+    timestamp: view.timestamp,
+  });
+});
+
+// GET /api/browser/active/content — return cached HTML for iframe proxy
+browserApi.get("/active/content", async (c) => {
+  const userId = c.get("userId");
+  const view = getActiveView(userId);
+  if (!view || !view.html) {
+    return c.html("<html><body style='font-family:sans-serif;padding:2rem;color:#666'><h2>No browser activity</h2><p>The AI hasn't opened a page yet.</p></body></html>", 200);
+  }
+  // Rewrite relative URLs to absolute so they work in the iframe proxy
+  let html = view.html;
+  try {
+    const baseUrl = new URL(view.url);
+    html = html
+      .replace(/(<(?:a|link|area|base)\s[^>]*?\bhref\s*=\s*["'])\/(?!\/)/gi, `$1${baseUrl.origin}/`)
+      .replace(/(<(?:img|script|source|video|audio|iframe|embed|object|input|track)\s[^>]*?\bsrc\s*=\s*["'])\/(?!\/)/gi, `$1${baseUrl.origin}/`)
+      .replace(/(<(?:form)\s[^>]*?\baction\s*=\s*["'])\/(?!\/)/gi, `$1${baseUrl.origin}/`)
+      .replace(/(<(?:img|video|audio|source|track)\s[^>]*?\bposter\s*=\s*["'])\/(?!\/)/gi, `$1${baseUrl.origin}/`)
+      .replace(/(<(?:video|audio|source|track)\s[^>]*?\bsrcset\s*=\s*["'])\/(?!\/)/gi, `$1${baseUrl.origin}/`);
+    html = html.replace(
+      /<\/head>/i,
+      `<base href="${baseUrl.origin}/">\n</head>`
+    );
+  } catch {
+    // If URL parsing fails, serve raw
+  }
+  return c.html(html);
 });

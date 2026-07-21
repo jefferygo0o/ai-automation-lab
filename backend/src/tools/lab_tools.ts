@@ -21,6 +21,7 @@ import { SiteStore } from "../sites/store.ts";
 import { ServiceStore } from "../services/store.ts";
 import { startService, stopService, restartService, getServiceLogs } from "../sites/supervisor.ts";
 import { chromium } from "playwright";
+import { setActiveView } from "../browser/active.ts";
 
 // ---------------------------------------------------------------------------
 // helpers

@@ -41,6 +41,7 @@ import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { WorkspaceService } from "../workspace/index.ts";
 
+import { setActiveView } from "../browser/active.ts";
 const LAB_PROJECT_ROOT = WorkspaceService.root();
 const LAB_BACKEND_ROOT = WorkspaceService.zoRoot();
 const DATA_DIR = WorkspaceService.root();
@@ -1204,7 +1205,8 @@ let currentUrl = "";
 async function snapshot() {
   const text = await page.evaluate(() => document.body.innerText);
   const title = await page.title();
-  return { url: page.url(), title, text: text.slice(0, 50000) };
+  const html = (await page.content()).slice(0, 500000);
+  return { url: page.url(), title, text: text.slice(0, 50000), html };
 }
 const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", async (line) => {
@@ -1330,6 +1332,7 @@ toolRegistry.register({
     if (!args.url) return err("url is required");
     try {
       const r = await browserCall(ctx.agentId, { cmd: "open", url: args.url });
+      setActiveView(ctx.ownerId, { url: r.url, title: r.title, html: r.html ?? "", agentId: ctx.agentId });
       return ok(`# ${r.title || args.url}\n\nURL: ${r.url}\n\n${r.text}`);
     } catch (e: any) {
       return err(`lab_open_webpage failed: ${e?.message ?? String(e)}`);
@@ -1345,6 +1348,7 @@ toolRegistry.register({
   async execute(_args, ctx) {
     try {
       const r = await browserCall(ctx.agentId, { cmd: "view" });
+      setActiveView(ctx.ownerId, { url: r.url, title: r.title, html: r.html ?? "", agentId: ctx.agentId });
       return ok(`# ${r.title || r.url}\n\nURL: ${r.url}\n\n${r.text}`);
     } catch (e: any) {
       return err(`lab_view_webpage failed: ${e?.message ?? String(e)}. Did you call lab_open_webpage first?`);
@@ -1375,6 +1379,7 @@ toolRegistry.register({
         return ok(`![screenshot](${r.dataUri})\n\n---\nFull-page: ${args.fullPage !== false}`);
       }
       const r = await browserCall(ctx.agentId, { cmd: "act", action: args.action, selector: args.selector, text: args.text, value: args.value, url: args.url });
+      setActiveView(ctx.ownerId, { url: r.url, title: r.title, html: r.html ?? "", agentId: ctx.agentId });
       return ok(`# After ${args.action}\n\n## ${r.title || r.url}\n\nURL: ${r.url}\n\n${r.text}`);
     } catch (e: any) {
       return err(`lab_use_webpage failed: ${e?.message ?? String(e)}`);
