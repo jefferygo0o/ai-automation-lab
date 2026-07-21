@@ -84,8 +84,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   },
   write_file: {
     icon: FilePlus2,
-    verb: "writing",
-    verbPast: "wrote",
+    verb: "creating",
+    verbPast: "created",
     kind: "write",
     tone: TONE_WRITE,
   },
@@ -169,8 +169,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   },
   lab_write_file: {
     icon: FilePlus2,
-    verb: "writing",
-    verbPast: "wrote",
+    verb: "creating",
+    verbPast: "created",
     kind: "write",
     tone: TONE_WRITE,
   },

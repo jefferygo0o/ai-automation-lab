@@ -979,6 +979,18 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                                       </div>
                                                     ))}
                                                   </div>
+                                                ) : revealedContent !== null && meta.kind === "write" ? (
+                                                  <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre text-foreground/80" style={{ lineHeight: '1.2' }}>
+                                                    <code style={{ whiteSpace: 'pre', wordBreak: 'normal', overflowWrap: 'normal' }}>
+                                                      {revealedContent.slice(0, 4000).split("\n").map((line: string, li: number) => (
+                                                        <span key={li} className="block">
+                                                          <span className="inline-block min-w-[3.25em] pr-[1em] text-right select-none opacity-50 text-muted-foreground/50 italic text-[10px]">{li + 1}</span>
+                                                          <span>{line || '\u00A0'}</span>
+                                                        </span>
+                                                      ))}
+                                                      {revealedContent.length > 4000 && <span>… (truncated)</span>}
+                                                    </code>
+                                                  </pre>
                                                 ) : revealedContent !== null ? (
                                                   <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80 px-3">
                                                     {revealedContent.slice(0, 4000)}{revealedContent.length > 4000 ? "\n…" : ""}
