@@ -3,7 +3,7 @@ import {
   Globe, FolderTree, Timer,
   Wand2, Wrench, Compass, Puzzle,
   PanelRightOpen, PanelRightClose, Plus, X,
-  LayoutDashboard, Settings, Server, Search, Trash2, MessageSquare,
+  Settings, Server, Search, Trash2, MessageSquare,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../state/auth";
@@ -11,8 +11,8 @@ import { Personas as PersonasApi, type Persona, Chats, type Chat } from "../api"
 import { useChatPanel } from "../contexts/ChatPanelContext";
 
 const NAV_ITEMS = [
-  { to: "/chats", label: "Home", icon: LayoutDashboard },
   { to: "/web-space", label: "Web Space", icon: Globe },
+  { to: "/chats", label: "Home", icon: LayoutDashboard },
   { to: "/files", label: "Files", icon: FolderTree },
   { to: "/automations", label: "Automations", icon: Timer },
   { to: "/integrations", label: "Integrations", icon: Puzzle },

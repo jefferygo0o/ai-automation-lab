@@ -1,17 +1,17 @@
-import { useLocation, NavLink } from "react-router-dom";
-import { Menu, PanelLeft } from "lucide-react";
+import { Menu, PanelLeft, Globe, LayoutDashboard, FolderTree, Timer, Puzzle, Wrench, Wand2, Compass, Server } from "lucide-react";
+import { useLocation } from "react-router-dom";
 
-const TABS = [
-  { to: "/chats", label: "Home" },
-  { to: "/web-space", label: "Web Space" },
-  { to: "/files", label: "Files" },
-  { to: "/automations", label: "Automations" },
-  { to: "/integrations", label: "Integrations" },
-  { to: "/mcp", label: "MCP" },
-  { to: "/skills", label: "Skills" },
-  { to: "/browser", label: "Browser" },
-  { to: "/sites", label: "Hosting" },
-];
+const pageTitles: Record<string, { label: string; icon: typeof Globe }> = {
+  "/chats": { label: "Home", icon: LayoutDashboard },
+  "/web-space": { label: "Web Space", icon: Globe },
+  "/files": { label: "Files", icon: FolderTree },
+  "/automations": { label: "Automations", icon: Timer },
+  "/integrations": { label: "Integrations", icon: Puzzle },
+  "/mcp": { label: "MCP", icon: Wrench },
+  "/skills": { label: "Skills", icon: Wand2 },
+  "/browser": { label: "Browser", icon: Compass },
+  "/sites": { label: "Hosting", icon: Server },
+};
 
 export default function Topbar({
   onOpenMobileNav,
@@ -21,6 +21,12 @@ export default function Topbar({
   onToggleSidebar?: () => void;
 } = {}) {
   const loc = useLocation();
+  const current = Object.entries(pageTitles).find(([path]) =>
+    path === "/"
+      ? loc.pathname === "/"
+      : loc.pathname.startsWith(path)
+  )?.[1] ?? { label: "Lab", icon: LayoutDashboard };
+  const Icon = current.icon;
 
   return (
     <header className="h-10 border-b border-border bg-background flex items-center px-1 gap-1 shrink-0">
@@ -40,23 +46,9 @@ export default function Topbar({
       >
         <PanelLeft className="w-[18px] h-[18px] stroke-[1.5]" />
       </button>
-      <div className="flex-1 flex items-center gap-0.5 overflow-x-auto scrollbar-hide min-w-0">
-        {TABS.map(({ to, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === "/"}
-            className={({ isActive }) =>
-              `h-7 px-3 flex items-center text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                isActive
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
-              }`
-            }
-          >
-            {label}
-          </NavLink>
-        ))}
+      <div className="flex items-center gap-2 text-sm font-medium text-foreground ml-1">
+        <Icon className="w-[16px] h-[16px] stroke-[1.5] text-muted-foreground" />
+        <span>{current.label}</span>
       </div>
     </header>
   );
