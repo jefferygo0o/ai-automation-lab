@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { Panel, Group, Separator } from "react-resizable-panels";
 import { useAuth } from "./state/auth";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
@@ -84,7 +84,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Resizable panel group: main content | chat panel */}
-        <PanelGroup direction="horizontal" className="h-full w-full">
+        <Group direction="horizontal" className="h-full w-full">
           <Panel defaultSize={58} minSize={30} id="main-content">
             <div className="flex flex-col h-full min-h-0">
               <Topbar onToggleSidebar={() => setSidebarCollapsed(v => !v)} />
@@ -93,15 +93,15 @@ function Shell({ children }: { children: React.ReactNode }) {
               </main>
             </div>
           </Panel>
-          <PanelResizeHandle className="group/resizer relative flex items-center justify-center w-[7px] cursor-col-resize">
+          <Separator className="group/resizer relative flex items-center justify-center w-[7px] cursor-col-resize">
             <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border/40 transition-colors group-hover/resizer:bg-border/80" />
-          </PanelResizeHandle>
+          </Separator>
           <Panel defaultSize={42} minSize={25} maxSize={55} id="chat-sidebar">
             <div className="h-full flex flex-col min-h-0 border-l border-border">
               <ChatPanel />
             </div>
           </Panel>
-        </PanelGroup>
+        </Group>
       </div>
     </div>
   );
