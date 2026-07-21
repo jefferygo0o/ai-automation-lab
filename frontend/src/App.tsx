@@ -23,17 +23,15 @@ import DashboardPage from "./pages/DashboardPage";
 import SettingsPage from "./pages/SettingsPage";
 import SitesPage from "./pages/SitesPage";
 
-const HIDE_TOPBAR = ["/browser"];
-
 function Shell({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
-  const hideTopbar = HIDE_TOPBAR.some((p) => loc.pathname.startsWith(p));
   const { isOpen, panelWidth, setPanelWidth, closeChat } = useChatPanel();
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const bp = useBreakpoint();
   const isMobile = bp === "mobile";
-  const [chatCollapsed, setChatCollapsed] = useState(false);
+  const isTablet = bp === "tablet";
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Auto-close mobile drawer on route change
   useEffect(() => {
@@ -44,7 +42,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     function onMouseMove(e: MouseEvent) {
       if (!dragRef.current) return;
       const dx = e.clientX - dragRef.current.startX;
-      setPanelWidth(dragRef.current.startWidth + dx);
+      setPanelWidth(dragRef.current.startWidth - dx);
     }
     function onMouseUp() {
       dragRef.current = null;
@@ -68,33 +66,24 @@ function Shell({ children }: { children: React.ReactNode }) {
     document.body.style.userSelect = "none";
   }, [panelWidth]);
 
-  // Mobile layout: single column, sidebar drawer, chat as full-width sheet
+  /** Sidebar dimensions */
+  const sidebarW = sidebarCollapsed ? 44 : 260;
+
+  // Mobile: single column, sidebar as drawer, chat as full-width sheet
   if (isMobile) {
     return (
-      <div className="grid h-full min-h-0" style={{ gridTemplateColumns: "1fr" }}>
-        <div className="flex flex-col h-full min-h-0 overflow-hidden min-w-0">
-          {!hideTopbar && (
-            <Topbar onOpenMobileNav={() => setMobileNavOpen(true)} />
-          )}
-          <main className={`flex-1 min-h-0 overflow-auto ${!hideTopbar ? "bg-paper-50" : ""}`}>
+      <div className="flex h-full min-h-0">
+        <div className="flex flex-col h-full min-h-0 flex-1 overflow-hidden">
+          <Topbar onOpenMobileNav={() => setMobileNavOpen(true)} />
+          <main className="flex-1 min-h-0 overflow-auto bg-background">
             {children}
           </main>
         </div>
-        <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} />
+        <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} collapsed={false} />
         {isOpen && (
-          <div 
-            className="fixed inset-0 z-50 flex"
-            style={{ pointerEvents: "none" }}
-          >
-            <div 
-              className="flex-1 h-full bg-ink-900/20" 
-              style={{ pointerEvents: "auto" }}
-              onClick={closeChat} 
-            />
-            <div 
-              className="w-full max-w-md bg-paper-50 h-full shadow-2xl flex flex-col min-h-0 overflow-hidden"
-              style={{ pointerEvents: "auto" }}
-            >
+          <div className="fixed inset-0 z-50 flex">
+            <div className="flex-1 h-full bg-foreground/20" onClick={closeChat} />
+            <div className="w-full max-w-md bg-background h-full shadow-2xl flex flex-col min-h-0 overflow-hidden">
               <ChatPanel />
             </div>
           </div>
@@ -103,46 +92,39 @@ function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Tablet + Desktop layout with collapsible chat sidebar
+  // Desktop: Zo-style 3-column layout
   return (
-    <div
-      className="grid h-full min-h-0"
-      style={{
-        gridTemplateColumns: isOpen
-          ? `auto 1fr ${chatCollapsed ? "52px" : panelWidth + "px"}`
-          : "auto 1fr",
-        gridTemplateRows: "minmax(0, 1fr)",
-      }}
-    >
-      <Sidebar />
-      <div className="flex flex-col h-full min-h-0 overflow-hidden min-w-0">
-        {!hideTopbar && <Topbar />}
-        <main className={`flex-1 min-h-0 overflow-auto ${!hideTopbar ? "bg-paper-50" : ""}`}>
+    <div className="flex h-full min-h-0">
+      {/* Left sidebar - nav + chat list */}
+      <aside
+        className="h-full flex-shrink-0 border-r border-border flex flex-col bg-background min-h-0 overflow-hidden"
+        style={{ width: sidebarW }}
+      >
+        <Sidebar collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(v => !v)} />
+      </aside>
+
+      {/* Main content area */}
+      <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
+        <Topbar onToggleSidebar={() => setSidebarCollapsed(v => !v)} />
+        <main className="flex-1 min-h-0 overflow-auto bg-background">
           {children}
         </main>
       </div>
+
+      {/* Right chat panel (optional, resizable) */}
       {isOpen && (
-        chatCollapsed ? (
-          <aside className="w-[52px] shrink-0 border-l border-line bg-paper-50 flex flex-col items-center">
-            <button
-              onClick={() => setChatCollapsed(false)}
-              className="mt-3 w-8 h-8 flex items-center justify-center text-ink-400 hover:text-ink-900 hover:bg-paper-200/60 rounded-md"
-              title="Expand chat panel"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6" />
-              </svg>
-            </button>
+        <div className="flex h-full min-h-0">
+          <div
+            className="w-[3px] cursor-ew-resize shrink-0 bg-transparent hover:bg-border active:bg-ring transition-colors relative"
+            onMouseDown={startDrag}
+          />
+          <aside
+            className="h-full flex-shrink-0 border-l border-border bg-background flex flex-col min-h-0 overflow-hidden"
+            style={{ width: Math.min(panelWidth, typeof window !== "undefined" ? window.innerWidth * 0.45 : 420) }}
+          >
+            <ChatPanel />
           </aside>
-        ) : (
-          <div className="flex min-h-0">
-            <div
-              className="w-[3px] cursor-ew-resize shrink-0 bg-transparent hover:bg-ink-300/40 active:bg-ink-300/60 transition-colors relative"
-              onMouseDown={startDrag}
-            />
-            <ChatPanel onCollapse={() => setChatCollapsed(true)} />
-          </div>
-        )
+        </div>
       )}
     </div>
   );
@@ -177,70 +159,22 @@ export default function App() {
             <ShellWithProvider>
               <Routes>
                 <Route path="/dashboard" element={<DashboardPage />} />
-                <Route
-                  path="/sites"
-                  element={<SitesPage />}
-                />
-                <Route
-                  path="/settings/*"
-                  element={<SettingsPage />}
-                />
-                <Route
-                  path="/"
-                  element={<Navigate to="/chats" replace />}
-                />
-                <Route
-                  path="/chats"
-                  element={<ChatsPage />}
-                />
-                <Route
-                  path="/agents"
-                  element={<AgentsPage />}
-                />
-                <Route
-                  path="/agents/:id"
-                  element={<AgentEditPage />}
-                />
-                <Route
-                  path="/web-space"
-                  element={<WebSpacePage />}
-                />
-                <Route
-                  path="/files"
-                  element={<FilesPage />}
-                />
-                <Route
-                  path="/automations"
-                  element={<AutomationsPage />}
-                />
-                <Route
-                  path="/skills"
-                  element={<SkillsPage />}
-                />
-                <Route
-                  path="/mcp"
-                  element={<McpPage />}
-                />
-                <Route
-                  path="/secrets"
-                  element={<SecretsPage />}
-                />
-                <Route
-                  path="/runs"
-                  element={<RunsPage />}
-                />
-                <Route
-                  path="/browser"
-                  element={<BrowserPage />}
-                />
-                <Route
-                  path="/integrations"
-                  element={<IntegrationsPage />}
-                />
-                <Route
-                  path="*"
-                  element={<Navigate to="/chats" replace />}
-                />
+                <Route path="/sites" element={<SitesPage />} />
+                <Route path="/settings/*" element={<SettingsPage />} />
+                <Route path="/" element={<Navigate to="/chats" replace />} />
+                <Route path="/chats" element={<ChatsPage />} />
+                <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/agents/:id" element={<AgentEditPage />} />
+                <Route path="/web-space" element={<WebSpacePage />} />
+                <Route path="/files" element={<FilesPage />} />
+                <Route path="/automations" element={<AutomationsPage />} />
+                <Route path="/skills" element={<SkillsPage />} />
+                <Route path="/mcp" element={<McpPage />} />
+                <Route path="/secrets" element={<SecretsPage />} />
+                <Route path="/runs" element={<RunsPage />} />
+                <Route path="/browser" element={<BrowserPage />} />
+                <Route path="/integrations" element={<IntegrationsPage />} />
+                <Route path="*" element={<Navigate to="/chats" replace />} />
               </Routes>
             </ShellWithProvider>
           </RequireAuth>
