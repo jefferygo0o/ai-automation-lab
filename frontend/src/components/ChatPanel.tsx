@@ -643,6 +643,198 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                               ? (liveAddedLines > 0 || liveRemovedLines > 0 ? { added: liveAddedLines, removed: liveRemovedLines } : null)
                               : (finalCounts ?? argsLineCounts);
 
+                            // --- TERMINAL WIDGET for exec tools (execute_command, lab_bash, etc.) ---
+                            if (meta.kind === "exec") {
+                              // Parse result to extract exit code, stdout, stderr
+                              const parsedResult = (() => {
+                                if (isPending || isError || typeof t.result !== "string") return null;
+                                const r = t.result as string;
+                                const exitMatch = r.match(/exit=(-?\d+)/);
+                                const stderrSep = r.indexOf("--- stderr ---");
+                                const stdoutSep = r.indexOf("--- stdout ---");
+                                if (!exitMatch) return null;
+                                let stdout = "";
+                                let stderr = "";
+                                if (stdoutSep >= 0) {
+                                  const stdoutStart = stdoutSep + "--- stdout ---".length;
+                                  if (stderrSep > stdoutSep) {
+                                    stdout = r.slice(stdoutStart, stderrSep).trim();
+                                  } else {
+                                    stdout = r.slice(stdoutStart).trim();
+                                  }
+                                }
+                                if (stderrSep >= 0) {
+                                  stderr = r.slice(stderrSep + "--- stderr ---".length).trim();
+                                }
+                                // If no stdout/stderr separators, the whole thing after exit line is output
+                                if (stdoutSep < 0 && stderrSep < 0) {
+                                  stdout = r.replace(/^exit=-?\d+.*\n?/, "").trim();
+                                }
+                                return {
+                                  exitCode: parseInt(exitMatch[1], 10),
+                                  stdout,
+                                  stderr,
+                                };
+                              })();
+                              // For sequential/parallel, separate results by "# [N] cmd" markers
+                              const execOutput = parsedResult?.stdout ?? revealedContent ?? "";
+                              // Truncate to keep it manageable
+                              const displayOutput = execOutput.length > 5000 ? execOutput.slice(0, 5000) + "\n… (truncated)" : execOutput;
+                              const exitCode = parsedResult?.exitCode ?? null;
+
+                              return (
+                                <div key={t.id} className="w-full min-w-0">
+                                  <div data-state={isOpen ? "open" : "closed"} data-slot="collapsible">
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      aria-expanded={isOpen}
+                                      data-slot="collapsible-trigger"
+                                      onClick={() => { setExpandedTool((p) => toggleSet(p, t.id)); }}
+                                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpandedTool((p) => toggleSet(p, t.id)); } }}
+                                      className="cursor-pointer"
+                                    >
+                                      <div
+                                        className="grid w-full min-w-0 grid-cols-1 gap-1 overflow-hidden"
+                                        style={{ "--tool-min-width": "100px", "--tool-icon-size": "16px" } as React.CSSProperties}
+                                      >
+                                        <button
+                                          type="button"
+                                          className="flex min-w-0 items-center gap-1.5 overflow-hidden w-full min-h-7 px-2 py-0.5 cursor-pointer rounded-md hover:bg-muted/30 text-left"
+                                          onClick={() => {}}
+                                        >
+                                          <TerminalIcon size={16} className="shrink-0 text-muted-foreground/50" />
+                                          <span className="flex items-center gap-1.5 min-w-(--tool-min-width) flex-shrink-0">
+                                            <span
+                                              className={`text-xs font-medium ${isPending ? "text-transparent bg-clip-text relative inline-block" : "text-muted-foreground"}`}
+                                              style={isPending ? {
+                                                backgroundImage: "linear-gradient(90deg, transparent 0%, transparent calc(50% - 22px), #5a5a52 50%, transparent calc(50% + 22px), transparent 100%), linear-gradient(#828278, #828278)",
+                                                backgroundSize: "250% 100%, auto",
+                                                backgroundRepeat: "no-repeat, no-repeat",
+                                                backgroundClip: "text",
+                                                color: "transparent",
+                                                animation: "shimmer-sweep 1.5s linear infinite",
+                                              } as React.CSSProperties : undefined}
+                                            >
+                                              Ran command
+                                            </span>
+                                            <ChevronRight
+                                              size={14}
+                                              className={"shrink-0 text-muted-foreground/50 transition-transform duration-150 " + (isOpen ? "rotate-90" : "")}
+                                            />
+                                          </span>
+                                          <div className="flex items-center justify-end gap-1.5 pl-2 min-w-0 flex-1 [&_p]:my-0 [&_p]:whitespace-nowrap [&_p]:overflow-hidden [&_p]:text-ellipsis [&_code]:whitespace-nowrap">
+                                            {label && (
+                                              <span className="min-w-0 max-w-full truncate font-mono text-xs text-muted-foreground/50">
+                                                {label}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <div
+                                      id={contentId}
+                                      data-state={isOpen ? "open" : "closed"}
+                                      hidden={!isOpen}
+                                      data-slot="collapsible-content"
+                                      className="overflow-hidden"
+                                    >
+                                      <div className="min-w-0 overflow-hidden">
+                                        <div
+                                          className="grid overflow-hidden w-full min-w-0 rounded-sm border border-border/20"
+                                          style={{ maxHeight: "240px", gridTemplateRows: "auto minmax(0px, 1fr)" }}
+                                        >
+                                          {/* Terminal header bar */}
+                                          <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border/20 bg-muted/10 min-w-0">
+                                            <div className="min-w-0 truncate">
+                                              <span className="text-xs font-mono font-medium tracking-tight truncate text-muted-foreground">
+                                                Terminal
+                                              </span>
+                                            </div>
+                                            <div className="shrink-0 flex items-center gap-2">
+                                              {isPending && (
+                                                <span className="text-3xs px-1 py-0.5 rounded bg-amber-500/10 text-amber-600 font-mono">
+                                                  running
+                                                </span>
+                                              )}
+                                              {!isPending && !isError && parsedResult !== null && (
+                                                <span className={`text-3xs px-1 py-0.5 rounded border font-mono ${
+                                                  exitCode === 0
+                                                    ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/5"
+                                                    : "border-red-500/30 text-red-600 bg-red-500/5"
+                                                }`}>
+                                                  exit {exitCode}
+                                                </span>
+                                              )}
+                                              {isError && (
+                                                <span className="text-3xs px-1 py-0.5 rounded border border-red-500/30 text-red-600 bg-red-500/5 font-mono">
+                                                  error
+                                                </span>
+                                              )}
+                                            </div>
+                                          </div>
+                                          {/* Scrollable terminal output */}
+                                          <div className="relative overflow-hidden h-full min-h-0 min-w-0">
+                                            <div
+                                              className="overflow-x-auto overflow-y-auto h-full"
+                                              style={{
+                                                maskImage: "linear-gradient(transparent 0px, black 0.75rem, black calc(100% - 0.75rem), transparent 100%)",
+                                                maxHeight: "180px",
+                                              }}
+                                            >
+                                              <div className="py-2">
+                                                {isPending ? (
+                                                  <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground px-3">
+                                                    {revealedContent && revealedContent.length > 0 ? (
+                                                      <>
+                                                        {revealedContent.slice(0, 4000)}
+                                                        <span className="inline-block w-1 h-3 bg-muted-foreground/40 ml-0.5 align-middle animate-pulse" />
+                                                      </>
+                                                    ) : (
+                                                      <span className="text-muted-foreground/40 italic">Running…</span>
+                                                    )}
+                                                  </pre>
+                                                ) : isError ? (
+                                                  <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-red-500 px-3">
+                                                    {t.error ?? "Command failed"}
+                                                  </pre>
+                                                ) : (
+                                                  <>
+                                                    {displayOutput ? (
+                                                      <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80 px-3">
+                                                        {displayOutput}
+                                                      </pre>
+                                                    ) : (
+                                                      <div className="px-3">
+                                                        {revealedContent !== null ? (
+                                                          <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80">
+                                                            {revealedContent}
+                                                          </pre>
+                                                        ) : (
+                                                          <span className="text-xs text-muted-foreground/40 italic">(no output)</span>
+                                                        )}
+                                                      </div>
+                                                    )}
+                                                    {parsedResult?.stderr && (
+                                                      <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-red-500/80 px-3 mt-1 border-t border-border/10 pt-1">
+                                                        {parsedResult.stderr}
+                                                      </pre>
+                                                    )}
+                                                  </>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            // --- END TERMINAL WIDGET ---
+
                             return (
                               <div key={t.id} className="w-full min-w-0 space-y-0.5">
                                 <div data-state={isOpen ? "open" : "closed"} data-slot="collapsible">
@@ -679,7 +871,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                           </span>
                                           {displayCounts && (
                                             <span className="text-[10px] tabular-nums flex items-center gap-0.5">
-                                              {displayCounts.added > 0 && <span className="text-open-foreground">+{displayCounts.added}</span>}
+                                              {displayCounts.added > 0 && <span className="text-emerald-600">+{displayCounts.added}</span>}
                                               {displayCounts.removed > 0 && <span className="text-muted-foreground">-{displayCounts.removed}</span>}
                                             </span>
                                           )}
