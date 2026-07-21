@@ -676,11 +676,17 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                   stderr,
                                 };
                               })();
-                              // For sequential/parallel, separate results by "# [N] cmd" markers
-                              const execOutput = parsedResult?.stdout ?? revealedContent ?? "";
+                              const exitCode = parsedResult?.exitCode ?? null;
+                              // Clean raw revealedContent by stripping markers and exit lines
+                              const cleanContent = (revealedContent ?? "")
+                                .replace(/^exit=-?\d+.*\n?/gm, "")
+                                .replace(/^--- stdout ---\n?/gm, "")
+                                .replace(/^--- stderr ---\n?/gm, "")
+                                .replace(/--- stdout ---|--- stderr ---/g, "")
+                                .trim();
+                              const execOutput = parsedResult?.stdout ?? cleanContent ?? "";
                               // Truncate to keep it manageable
                               const displayOutput = execOutput.length > 5000 ? execOutput.slice(0, 5000) + "\n… (truncated)" : execOutput;
-                              const exitCode = parsedResult?.exitCode ?? null;
 
                               return (
                                 <div key={t.id} className="w-full min-w-0">
@@ -753,12 +759,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                               </span>
                                             </div>
                                             <div className="shrink-0 flex items-center gap-2">
-                                              {isPending && (
-                                                <span className="text-3xs px-1 py-0.5 rounded bg-amber-500/10 text-amber-600 font-mono">
-                                                  running
-                                                </span>
-                                              )}
-                                              {!isPending && !isError && parsedResult !== null && (
+                                              {parsedResult !== null && exitCode !== null && (
                                                 <span className={`text-3xs px-1 py-0.5 rounded border font-mono ${
                                                   exitCode === 0
                                                     ? "border-emerald-500/30 text-emerald-600 bg-emerald-500/5"
@@ -767,9 +768,9 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                                   exit {exitCode}
                                                 </span>
                                               )}
-                                              {isError && (
-                                                <span className="text-3xs px-1 py-0.5 rounded border border-red-500/30 text-red-600 bg-red-500/5 font-mono">
-                                                  error
+                                              {parsedResult === null && selfHostedOutput && !isPending && !isError && (
+                                                <span className="text-3xs px-1 py-0.5 rounded border border-emerald-500/30 text-emerald-600 bg-emerald-500/5 font-mono">
+                                                  done
                                                 </span>
                                               )}
                                             </div>
@@ -807,7 +808,11 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                                       </pre>
                                                     ) : (
                                                       <div className="px-3">
-                                                        {revealedContent !== null ? (
+                                                        {cleanContent !== null && cleanContent.length > 0 ? (
+                                                          <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80">
+                                                            {cleanContent}
+                                                          </pre>
+                                                        ) : revealedContent !== null ? (
                                                           <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80">
                                                             {revealedContent}
                                                           </pre>
