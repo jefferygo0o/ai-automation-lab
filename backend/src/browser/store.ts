@@ -1,103 +1,121 @@
 import { nanoid } from "nanoid";
-import { db } from "../db/index.ts";
-import { Audit } from "../audit/index.ts";
+import { db } from "../db/pg.ts";
 
-export type BrowserSessionStatus = "starting" | "active" | "closed" | "lost";
+export type BrowserSessionStatus = "stopped" | "starting" | "active" | "closed";
 
 export interface BrowserSession {
   id: string;
   ownerId: string;
-  agentId: string | null;
-  label: string;
+  agentId: string;
+  name: string;
   status: BrowserSessionStatus;
   currentUrl: string;
-  title: string;
-  profilePath: string;
-  downloadPath: string;
+  storageStateJson: string;
   createdAt: number;
-  lastUsedAt: number;
-  closedAt: number | null;
+  updatedAt: number;
+  lastStartedAt: number | null;
+  lastStoppedAt: number | null;
 }
 
-interface BrowserSessionRow {
+interface Row {
   id: string;
   owner_id: string;
-  agent_id: string | null;
-  label: string;
+  agent_id: string;
+  name: string;
   status: string;
   current_url: string;
-  title: string;
-  profile_path: string;
-  download_path: string;
+  storage_state_json: string;
   created_at: number;
-  last_used_at: number;
-  closed_at: number | null;
+  updated_at: number;
+  last_started_at: number | null;
+  last_stopped_at: number | null;
 }
 
-function rowToSession(row: BrowserSessionRow): BrowserSession {
+function rowToSession(r: Row): BrowserSession {
   return {
-    id: row.id,
-    ownerId: row.owner_id,
-    agentId: row.agent_id,
-    label: row.label,
-    status: row.status as BrowserSessionStatus,
-    currentUrl: row.current_url,
-    title: row.title,
-    profilePath: row.profile_path,
-    downloadPath: row.download_path,
-    createdAt: row.created_at,
-    lastUsedAt: row.last_used_at,
-    closedAt: row.closed_at,
+    id: r.id,
+    ownerId: r.owner_id,
+    agentId: r.agent_id,
+    name: r.name,
+    status: r.status as BrowserSessionStatus,
+    currentUrl: r.current_url,
+    storageStateJson: r.storage_state_json,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    lastStartedAt: r.last_started_at,
+    lastStoppedAt: r.last_stopped_at,
   };
 }
 
 export const BrowserSessionStore = {
-  async create(ownerId: string, input: { agentId?: string; label?: string; profilePath?: string; downloadPath?: string }): Promise<BrowserSession> {
+  async create(ownerId: string, opts: { agentId?: string; name?: string } = {}): Promise<BrowserSession> {
     const id = `bs_${nanoid(12)}`;
     const now = Date.now();
     await db.prepare(
-      `INSERT INTO browser_sessions (id, owner_id, agent_id, label, status, current_url, title, profile_path, download_path, created_at, last_used_at, closed_at)
-       VALUES (?, ?, ?, ?, 'starting', '', '', ?, ?, ?, ?, NULL)`,
-    ).run(id, ownerId, input.agentId ?? null, input.label ?? "Browser session", input.profilePath ?? "", input.downloadPath ?? "", now, now);
+      `INSERT INTO browser_sessions (id, owner_id, agent_id, name, status, current_url, storage_state_json, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'stopped', '', '{}', $5, $5)`
+    ).run(id, ownerId, opts.agentId ?? "", opts.name ?? "Browser session", now);
     const session = await this.get(id, ownerId);
-    if (!session) throw new Error("failed to create browser session");
-    await Audit.record({ ownerId, actor: "user", action: "browser.session_create", targetId: id, targetType: "browser_session" });
+    if (!session) throw new Error("Failed to create browser session");
     return session;
   },
 
   async get(id: string, ownerId: string): Promise<BrowserSession | null> {
-    const row = await db.prepare("SELECT * FROM browser_sessions WHERE id = ? AND owner_id = ?").get(id, ownerId) as BrowserSessionRow | undefined;
-    return row ? rowToSession(row) : null;
+    return db.prepare<Row>(
+      "SELECT * FROM browser_sessions WHERE id = $1 AND owner_id = $2"
+    ).get(id, ownerId).then(r => r ? rowToSession(r) : null);
   },
 
   async list(ownerId: string): Promise<BrowserSession[]> {
-    const rows = await db.prepare("SELECT * FROM browser_sessions WHERE owner_id = ? ORDER BY last_used_at DESC").all(ownerId) as BrowserSessionRow[];
+    const rows = await db.prepare<Row>(
+      "SELECT * FROM browser_sessions WHERE owner_id = $1 ORDER BY updated_at DESC"
+    ).all(ownerId);
     return rows.map(rowToSession);
   },
 
-  async touch(id: string, ownerId: string, patch: Partial<{ status: BrowserSessionStatus; currentUrl: string; title: string }>): Promise<BrowserSession | null> {
-    const sets = ["last_used_at = ?"];
+  async update(id: string, ownerId: string, patch: Partial<{
+    status: BrowserSessionStatus;
+    currentUrl: string;
+    name: string;
+    storageStateJson: string;
+    lastStartedAt: number;
+    lastStoppedAt: number;
+  }>): Promise<BrowserSession | null> {
+    const sets: string[] = ["updated_at = $1"];
     const values: unknown[] = [Date.now()];
-    if (patch.status !== undefined) { sets.push("status = ?"); values.push(patch.status); }
-    if (patch.currentUrl !== undefined) { sets.push("current_url = ?"); values.push(patch.currentUrl); }
-    if (patch.title !== undefined) { sets.push("title = ?"); values.push(patch.title); }
+    let idx = 2;
+    const fields: [string, keyof typeof patch][] = [
+      ["status", "status"],
+      ["current_url", "currentUrl"],
+      ["name", "name"],
+      ["storage_state_json", "storageStateJson"],
+      ["last_started_at", "lastStartedAt"],
+      ["last_stopped_at", "lastStoppedAt"],
+    ];
+    for (const [col, key] of fields) {
+      if (patch[key] !== undefined) {
+        sets.push(`${col} = $${idx++}`);
+        values.push(patch[key]);
+      }
+    }
     values.push(id, ownerId);
-    await db.prepare(`UPDATE browser_sessions SET ${sets.join(", ")} WHERE id = ? AND owner_id = ?`).run(...values);
+    await db.prepare(
+      `UPDATE browser_sessions SET ${sets.join(", ")} WHERE id = $${idx++} AND owner_id = $${idx}`
+    ).run(...values);
     return this.get(id, ownerId);
   },
 
   async close(id: string, ownerId: string): Promise<boolean> {
     const now = Date.now();
-    const result = await db.prepare("UPDATE browser_sessions SET status = 'closed', closed_at = ?, last_used_at = ? WHERE id = ? AND owner_id = ?").run(now, now, id, ownerId);
-    if (result.changes) await Audit.record({ ownerId, actor: "user", action: "browser.session_close", targetId: id, targetType: "browser_session" });
+    const result = await db.prepare(
+      "UPDATE browser_sessions SET status = 'closed', last_stopped_at = $1, updated_at = $1 WHERE id = $2 AND owner_id = $3"
+    ).run(now, id, ownerId);
     return result.changes > 0;
   },
 
   async markLostOnBoot(): Promise<void> {
-    await db.prepare("UPDATE browser_sessions SET status = 'lost' WHERE status IN ('starting', 'active')").run();
+    await db.prepare(
+      "UPDATE browser_sessions SET status = 'closed' WHERE status IN ('starting', 'active')"
+    ).run();
   },
 };
-
-export function browserSessionRow(session: BrowserSession): Record<string, unknown> {
-  return { ...session };
-}
