@@ -108,18 +108,54 @@ function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Desktop: two/three-column layout — [LeftRail 44px | Page Tab(s) | Chat Tab(s)]
+  // Desktop: two/three-column layout — [LeftRail 44px | Page Tab(s) | splitter | Chat Tab(s)]
   // When no page tabs open, chat column takes full width up to the left rail.
   const hasPageTabs = pageTabs.length > 0;
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [splitRatio, setSplitRatio] = useState(0.5);
+  const [isDragging, setIsDragging] = useState(false);
+
+  function handleMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  useEffect(() => {
+    if (!isDragging) return;
+    function onMove(e: MouseEvent) {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      // LeftRail is 44px; available width = total - 44
+      const available = rect.width - 44;
+      if (available <= 0) return;
+      // LeftRail offset
+      const railOffset = 44;
+      const ratio = Math.max(0.15, Math.min(0.85, (e.clientX - rect.left - railOffset) / available));
+      setSplitRatio(ratio);
+    }
+    function onUp() {
+      setIsDragging(false);
+    }
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+  }, [isDragging]);
 
   return (
-    <div className="flex h-screen w-full">
+    <div
+      ref={containerRef}
+      className="flex h-screen w-full select-none"
+      style={isDragging ? { cursor: 'col-resize', userSelect: 'none' } : undefined}
+    >
       {/* Left Rail — always-visible icon nav (44px) */}
       <LeftRail />
 
       {/* Page Tabs Column — only rendered when there are page tabs */}
       {hasPageTabs && (
-        <div className="flex flex-col min-w-0 border-r border-border bg-background" style={{ flex: "1 1 0" }}>
+        <div className="flex flex-col min-w-0 border-r border-border bg-background" style={{ flex: `0 0 calc((100% - 44px) * ${splitRatio})`, minWidth: 120 }}>
           <TabBar
             tabs={pageTabs}
             activeId={activePageTabId}
@@ -133,8 +169,25 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
       )}
 
+      {/* Resize Handle — only when page tabs are open */}
+      {hasPageTabs && (
+        <div
+          onMouseDown={handleMouseDown}
+          className="flex-shrink-0 w-1.5 cursor-col-resize bg-transparent hover:bg-primary/20 active:bg-primary/30 transition-colors relative z-10"
+          style={isDragging ? { backgroundColor: 'rgb(59 130 246 / 0.4)' } : undefined}
+        >
+          <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-0.5 bg-border/60" />
+        </div>
+      )}
+
       {/* Chat Tabs Column — always visible, fills remaining space */}
-      <div className="flex flex-col min-w-0 bg-background" style={{ flex: hasPageTabs ? "1 1 0" : "1 1 100%" }}>
+      <div
+        className="flex flex-col min-w-0 bg-background"
+        style={{
+          flex: hasPageTabs ? `1 1 calc((100% - 44px) * ${1 - splitRatio})` : '1 1 100%',
+          minWidth: hasPageTabs ? 240 : 0,
+        }}
+      >
         <TabBar
           tabs={chatTabs}
           activeId={activeChatTabId}
