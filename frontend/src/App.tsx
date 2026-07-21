@@ -83,25 +83,30 @@ function Shell({ children }: { children: React.ReactNode }) {
           />
         </div>
 
-        {/* Resizable panel group: main content | chat panel */}
-        <Group direction="horizontal" className="h-full w-full">
-          <Panel defaultSize={58} minSize={30} id="main-content">
-            <div className="flex flex-col h-full min-h-0">
-              <Topbar onToggleSidebar={() => setSidebarCollapsed(v => !v)} />
-              <main className="flex-1 min-h-0 overflow-auto bg-background">
-                {children}
-              </main>
-            </div>
-          </Panel>
-          <Separator className="group/resizer relative flex items-center justify-center w-[7px] cursor-col-resize">
-            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border/40 transition-colors group-hover/resizer:bg-border/80" />
-          </Separator>
-          <Panel defaultSize={42} minSize={25} maxSize={55} id="chat-sidebar">
-            <div className="h-full flex flex-col min-h-0 border-l border-border">
-              <ChatPanel />
-            </div>
-          </Panel>
-        </Group>
+        {/* Main content — offset to the right of sidebar, Zo-style */}
+        <div
+          className="absolute top-0 bottom-0 right-0 h-full"
+          style={{ left: sidebarW }}
+        >
+          <Group direction="horizontal" className="h-full w-full">
+            <Panel defaultSize={58} minSize={30} id="main-content">
+              <div className="flex flex-col h-full min-h-0">
+                <Topbar onToggleSidebar={() => setSidebarCollapsed(v => !v)} />
+                <main className="flex-1 min-h-0 overflow-auto bg-background">
+                  {children}
+                </main>
+              </div>
+            </Panel>
+            <Separator className="group/resizer relative flex items-center justify-center w-[7px] cursor-col-resize">
+              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border/40 transition-colors group-hover/resizer:bg-border/80" />
+            </Separator>
+            <Panel defaultSize={42} minSize={25} maxSize={55} id="chat-sidebar">
+              <div className="h-full flex flex-col min-h-0 border-l border-border">
+                <ChatPanel />
+              </div>
+            </Panel>
+          </Group>
+        </div>
       </div>
     </div>
   );
