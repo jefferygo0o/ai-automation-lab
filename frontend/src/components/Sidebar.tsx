@@ -27,11 +27,13 @@ export default function Sidebar({
   onClose,
   collapsed = false,
   onToggleCollapse,
+  contextPanel = false,
 }: {
   mobileOpen?: boolean;
   onClose?: () => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  contextPanel?: boolean;
 } = {}) {
   const { email, logout } = useAuth();
   const navigate = useNavigate();
@@ -58,6 +60,8 @@ export default function Sidebar({
     return () => { document.body.style.overflow = prev; };
   }, [mobileOpen]);
 
+  // When used as context panel on desktop, navigate on click
+  // When used as drawer on mobile, close drawer on click
   function handleNav(to: string) {
     navigate(to);
     onClose?.();
@@ -79,11 +83,10 @@ export default function Sidebar({
 
   const displayChats = showAllChats ? chats : chats.slice(0, 5);
 
-  // Collapsed icon-only mode (desktop only) — parent controls state
-  if (collapsed && !mobileOpen) {
+  // Collapsed icon-only mode (desktop, non-panel mode) — same as before
+  if (collapsed && !mobileOpen && !contextPanel) {
     return (
       <aside className="w-[44px] shrink-0 border-r border-border bg-sidebar flex flex-col items-center max-lg:hidden h-full">
-        {/* Logo */}
         <div className="h-8 flex items-center justify-center w-full mt-1">
           <div
             className="w-7 h-7 grid place-items-center bg-foreground text-background font-serif text-sm font-bold cursor-pointer rounded-md"
@@ -92,8 +95,6 @@ export default function Sidebar({
             L
           </div>
         </div>
-
-        {/* Nav items (icon only) */}
         <nav className="flex-1 flex flex-col items-center gap-0.5 w-full px-1 mt-2">
           {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
             <NavLink
@@ -113,8 +114,6 @@ export default function Sidebar({
             </NavLink>
           ))}
         </nav>
-
-        {/* Active persona indicator */}
         {activePersona && (
           <div
             className="w-2 h-2 rounded-full mb-1"
@@ -125,8 +124,6 @@ export default function Sidebar({
             }}
           />
         )}
-
-        {/* Expand button */}
         <button
           onClick={() => onToggleCollapse?.()}
           className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-accent-foreground hover:bg-accent/50 mb-2"
@@ -138,9 +135,13 @@ export default function Sidebar({
     );
   }
 
+  // Determine if this is a mobile drawer or desktop context panel
+  const isDrawer = mobileOpen;
+  const isPanel = contextPanel && !mobileOpen;
+
   return (
     <>
-      {mobileOpen && (
+      {isDrawer && (
         <div
           className="lg:hidden fixed inset-0 bg-black/20 backdrop-blur-sm z-30"
           onClick={onClose}
@@ -149,51 +150,40 @@ export default function Sidebar({
       )}
       <aside
         className={
-          mobileOpen
-            ? "fixed inset-y-0 left-0 z-40 w-[280px] max-w-[85vw] shrink-0 border-r border-border bg-sidebar flex flex-col shadow-xl transition-transform lg:relative lg:translate-x-0"
+          isDrawer
+            ? "fixed inset-y-0 left-0 z-40 w-[280px] max-w-[85vw] shrink-0 border-r border-border bg-sidebar flex flex-col shadow-xl"
             : "w-full shrink-0 border-r border-border bg-sidebar flex flex-col h-full"
         }
       >
-        {/* Header */}
-        <div className="h-10 flex items-center justify-between px-3 border-b border-border shrink-0">
-          <div
-            className="flex items-center gap-2 cursor-pointer"
-            onClick={() => handleNav("/")}
-          >
-            <div className="w-7 h-7 grid place-items-center bg-foreground text-background font-serif text-sm font-bold rounded-md">
-              L
+        {/* Header — only show in drawer mode */}
+        {isDrawer && (
+          <div className="h-10 flex items-center justify-between px-3 border-b border-border shrink-0">
+            <div
+              className="flex items-center gap-2 cursor-pointer"
+              onClick={() => handleNav("/")}
+            >
+              <div className="w-7 h-7 grid place-items-center bg-foreground text-background font-serif text-sm font-bold rounded-md">
+                L
+              </div>
+              <div className="leading-tight">
+                <div className="text-sm font-semibold text-foreground tracking-tight">Lab</div>
+                <div className="text-[9px] text-muted-foreground uppercase tracking-[0.15em] leading-none">Automation</div>
+              </div>
             </div>
-            <div className="leading-tight">
-              <div className="text-sm font-semibold text-foreground tracking-tight">Lab</div>
-              <div className="text-[9px] text-muted-foreground uppercase tracking-[0.15em] leading-none">Automation</div>
-            </div>
+            <button
+              onClick={onClose}
+              className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-accent-foreground hover:bg-accent/50"
+              title="Close menu"
+            >
+              <X className="w-[16px] h-[16px] stroke-[1.5]" />
+            </button>
           </div>
-          <div className="flex items-center gap-0.5">
-            {!mobileOpen && (
-              <button
-                onClick={() => onToggleCollapse?.()}
-                className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-accent-foreground hover:bg-accent/50"
-                title="Collapse sidebar"
-              >
-                <PanelRightOpen className="w-[16px] h-[16px] stroke-[1.5]" />
-              </button>
-            )}
-            {mobileOpen && (
-              <button
-                onClick={onClose}
-                className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-accent-foreground hover:bg-accent/50"
-                title="Close menu"
-              >
-                <X className="w-[16px] h-[16px] stroke-[1.5]" />
-              </button>
-            )}
-          </div>
-        </div>
+        )}
 
-        {/* Navigation */}
-        <nav className="px-2 py-1.5 space-y-0.5">
-          {NAV_ITEMS.map(({ to, label, icon: Icon }) =>
-            mobileOpen ? (
+        {/* Navigation — only in drawer mode (desktop panel uses LeftRail) */}
+        {isDrawer && (
+          <nav className="px-2 py-1.5 space-y-0.5">
+            {NAV_ITEMS.map(({ to, label, icon: Icon }) => (
               <button
                 key={to}
                 onClick={() => handleNav(to)}
@@ -206,32 +196,31 @@ export default function Sidebar({
                 <Icon className="w-[16px] h-[16px] stroke-[1.5]" />
                 <span>{label}</span>
               </button>
-            ) : (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === "/"}
-                className={({ isActive }) =>
-                  `flex items-center gap-2.5 h-8 px-2.5 rounded-md text-sm transition-colors duration-75 ${
-                    isActive
-                      ? "bg-accent text-accent-foreground font-medium"
-                      : "text-muted-foreground hover:text-accent-foreground hover:bg-accent/50"
-                  }`
-                }
-              >
-                <Icon className="w-[16px] h-[16px] stroke-[1.5]" />
-                <span>{label}</span>
-              </NavLink>
-            )
-          )}
-        </nav>
+            ))}
+          </nav>
+        )}
+
+        {/* Panel title for context panel mode */}
+        {isPanel && (
+          <div className="h-10 flex items-center gap-2 px-3 border-b border-border shrink-0">
+            <LayoutDashboard className="w-[16px] h-[16px] stroke-[1.5] text-muted-foreground" />
+            <span className="text-sm font-medium text-foreground">Home</span>
+            <button
+              onClick={() => onToggleCollapse?.()}
+              className="ml-auto flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-accent-foreground hover:bg-accent/50"
+              title="Collapse side panel"
+            >
+              <PanelRightOpen className="w-[16px] h-[16px] stroke-[1.5]" />
+            </button>
+          </div>
+        )}
 
         {/* Chat search */}
         <div className="px-2 pt-2">
           <div className="relative">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground/50 stroke-[1.5]" />
             <input
-              placeholder="Search chats…"
+              placeholder="Search chats\u2026"
               className="w-full h-7 pl-7 pr-2 text-xs bg-background border border-border rounded-md text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:border-ring/50"
             />
           </div>
@@ -276,7 +265,7 @@ export default function Sidebar({
           </div>
         </div>
 
-        {/* Footer — email + settings + logout */}
+        {/* Footer — user info + logout */}
         <div className="border-t border-border px-2 py-2 space-y-1 shrink-0">
           <div className="flex items-center gap-2 px-2 py-1">
             {activePersona && (
