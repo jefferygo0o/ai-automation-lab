@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, Plus, X } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, Plus, Terminal, X } from "lucide-react";
 import { useChatPanel } from "../contexts/ChatPanelContext";
 import { Chats, Agents } from "../api";
 import type { Chat, Message } from "../api";
@@ -703,7 +703,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                           className="flex min-w-0 items-center gap-1.5 overflow-hidden w-full min-h-7 px-2 py-0.5 cursor-pointer rounded-md hover:bg-muted/30 text-left"
                                           onClick={() => {}}
                                         >
-                                          <TerminalIcon size={16} className="shrink-0 text-muted-foreground/50" />
+                                          <Terminal size={16} className="shrink-0 text-muted-foreground/50" />
                                           <span className="flex items-center gap-1.5 min-w-(--tool-min-width) flex-shrink-0">
                                             <span
                                               className={`text-xs font-medium ${isPending ? "text-transparent bg-clip-text relative inline-block" : "text-muted-foreground"}`}
