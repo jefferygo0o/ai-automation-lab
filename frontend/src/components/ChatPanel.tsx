@@ -804,7 +804,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                   <span className="font-medium text-amber-900 dark:text-amber-200 text-xs uppercase tracking-wide">Approval Required</span>
                                   {toolMeta && (
                                     <span className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-200/60 dark:bg-amber-800/40 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-300">
-                                      {toolMeta.icon}
+                                      <toolMeta.icon size={12} />
                                       {block.toolName}
                                     </span>
                                   )}
