@@ -1,5 +1,6 @@
-import { Menu, PanelLeft, Globe, LayoutDashboard, FolderTree, Timer, Puzzle, Wrench, Wand2, Compass, Server } from "lucide-react";
+import { Menu, PanelLeft, X, Globe, LayoutDashboard, FolderTree, Timer, Puzzle, Wrench, Wand2, Compass, Server, MessageSquare } from "lucide-react";
 import { useLocation } from "react-router-dom";
+import { useChatPanel } from "../contexts/ChatPanelContext";
 
 const pageTitles: Record<string, { label: string; icon: typeof Globe }> = {
   "/chats": { label: "Home", icon: LayoutDashboard },
@@ -21,6 +22,7 @@ export default function Topbar({
   onToggleSidebar?: () => void;
 } = {}) {
   const loc = useLocation();
+  const { chatId, closeChat } = useChatPanel();
   const current = Object.entries(pageTitles).find(([path]) =>
     path === "/"
       ? loc.pathname === "/"
@@ -46,10 +48,28 @@ export default function Topbar({
       >
         <PanelLeft className="w-[18px] h-[18px] stroke-[1.5]" />
       </button>
-      <div className="flex items-center gap-2 text-sm font-medium text-foreground ml-1">
-        <Icon className="w-[16px] h-[16px] stroke-[1.5] text-muted-foreground" />
-        <span>{current.label}</span>
-      </div>
+
+      {/* Page title or chat tab */}
+      {chatId ? (
+        <div className="flex items-center gap-1 min-w-0 flex-1">
+          <div className="inline-flex items-center gap-1.5 h-7 rounded-md bg-accent/60 border border-border/60 px-2.5 text-xs font-medium text-foreground">
+            <MessageSquare className="w-3.5 h-3.5 stroke-[1.5] text-muted-foreground" />
+            <span className="truncate max-w-[180px]">Chat</span>
+            <button
+              onClick={closeChat}
+              className="ml-1 flex items-center justify-center h-4 w-4 rounded-sm text-muted-foreground/60 hover:text-foreground hover:bg-accent transition-colors"
+              aria-label="Close chat"
+            >
+              <X className="w-3 h-3 stroke-[1.5]" />
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground ml-1 min-w-0 flex-1">
+          <Icon className="w-[16px] h-[16px] stroke-[1.5] text-muted-foreground shrink-0" />
+          <span className="truncate">{current.label}</span>
+        </div>
+      )}
     </header>
   );
 }

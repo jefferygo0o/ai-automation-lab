@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useState, useEffect } from "react";
-import { Panel, Group, Separator } from "react-resizable-panels";
 import { useAuth } from "./state/auth";
+import LeftRail from "./components/LeftRail";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
 import ChatPanel from "./components/ChatPanel";
@@ -26,9 +26,9 @@ import SitesPage from "./pages/SitesPage";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
-  const { chatId } = useChatPanel();
+  const { chatId, closeChat } = useChatPanel();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [contextCollapsed, setContextCollapsed] = useState(false);
   const bp = useBreakpoint();
   const isMobile = bp === "mobile";
 
@@ -37,27 +37,18 @@ function Shell({ children }: { children: React.ReactNode }) {
     setMobileNavOpen(false);
   }, [loc.pathname]);
 
-  /** Sidebar width in px */
-  const sidebarW = sidebarCollapsed ? 44 : 260;
-
-  // Mobile: single column, sidebar as drawer
+  // Mobile: single column with drawer
   if (isMobile) {
     return (
       <div className="flex h-full min-h-0">
         <div className="flex flex-col h-full min-h-0 flex-1 overflow-hidden">
-          <Topbar onOpenMobileNav={() => setMobileNavOpen(true)} />
+          <Topbar
+            onOpenMobileNav={() => setMobileNavOpen(true)}
+            onToggleSidebar={() => setContextCollapsed(v => !v)}
+          />
           <main className="flex-1 min-h-0 overflow-auto bg-background">
-            {children}
+            {chatId ? <ChatPanel /> : children}
           </main>
-          {/* Mobile chat sheet */}
-          {chatId && (
-            <div className="fixed inset-0 z-50 flex">
-              <div className="flex-1 bg-foreground/20" />
-              <div className="w-full max-w-md bg-background h-full shadow-2xl flex flex-col min-h-0 overflow-hidden">
-                <ChatPanel />
-              </div>
-            </div>
-          )}
         </div>
         <Sidebar
           mobileOpen={mobileNavOpen}
@@ -68,45 +59,35 @@ function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Desktop: Zo-style layout — sidebar overlay + panel group
+  // Desktop: Zo-style three-column layout
   return (
     <div className="flex h-screen w-full">
-      <div className="relative flex-1 min-h-0 overflow-hidden">
-        {/* Left sidebar — absolutely positioned overlay, Zo-style */}
-        <div
-          className="absolute left-0 top-0 bottom-0 z-30 flex flex-col"
-          style={{ width: sidebarW }}
-        >
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            onToggleCollapse={() => setSidebarCollapsed(v => !v)}
-          />
-        </div>
+      {/* Left Rail — always-visible icon nav (44px) */}
+      <LeftRail
+        onExpandPanel={() => setContextCollapsed(false)}
+      />
 
-        {/* Main content — offset to the right of sidebar, Zo-style */}
-        <div
-          className="absolute top-0 bottom-0 right-0 h-full"
-          style={{ left: sidebarW }}
-        >
-          <Group direction="horizontal" className="h-full w-full">
-            <Panel defaultSize={58} minSize={30} id="main-content">
-              <div className="flex flex-col h-full min-h-0">
-                <Topbar onToggleSidebar={() => setSidebarCollapsed(v => !v)} />
-                <main className="flex-1 min-h-0 overflow-auto bg-background">
-                  {children}
-                </main>
-              </div>
-            </Panel>
-            <Separator className="group/resizer relative flex items-center justify-center w-[7px] cursor-col-resize">
-              <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border/40 transition-colors group-hover/resizer:bg-border/80" />
-            </Separator>
-            <Panel defaultSize={42} minSize={25} maxSize={55} id="chat-sidebar">
-              <div className="h-full flex flex-col min-h-0 border-l border-border">
-                <ChatPanel />
-              </div>
-            </Panel>
-          </Group>
-        </div>
+      {/* Context Panel — collapsible side panel with chat list (260px) */}
+      <div
+        className={`shrink-0 border-r border-border bg-sidebar flex flex-col transition-all duration-150 overflow-hidden ${
+          contextCollapsed ? "w-0 border-transparent" : "w-[260px]"
+        }`}
+      >
+        <Sidebar
+          contextPanel
+          collapsed={false}
+          onToggleCollapse={() => setContextCollapsed(v => !v)}
+        />
+      </div>
+
+      {/* Main Content — pages + chat tabs */}
+      <div className="flex flex-col flex-1 min-h-0">
+        <Topbar
+          onToggleSidebar={() => setContextCollapsed(v => !v)}
+        />
+        <main className="flex-1 min-h-0 overflow-auto bg-background">
+          {chatId ? <ChatPanel /> : children}
+        </main>
       </div>
     </div>
   );
