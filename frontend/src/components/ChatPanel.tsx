@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, FileText, Plus, Terminal, X } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, FileText, Plus, Shield, ShieldCheck, Terminal, X } from "lucide-react";
 import { useChatPanel } from "../contexts/ChatPanelContext";
 import { Chats, Agents } from "../api";
 import type { Chat, Message } from "../api";
@@ -57,7 +57,7 @@ type Block =
   | { type: "thinking"; content: string; done: boolean }
   | { type: "tool_call"; tool: ToolCallInfo }
   | { type: "tool_result"; tool: ToolCallInfo }
-  | { type: "approval"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired"; toolName?: string }
+  | { type: "approval"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired" | "auto-approved"; toolName?: string }
   | { type: "text"; content: string };
 
 interface MessageBlocks {
@@ -65,7 +65,7 @@ interface MessageBlocks {
 }
 
 export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = {}) {
-  const { isOpen, chatId, closeChat, openChat } = useChatPanel();
+  const { chatId, closeChat, openChat } = useChatPanel();
 
   const [chat, setChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -442,7 +442,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
     return n;
   }
 
-  if (!isOpen) return null;
+  if (!chatId) return null;
 
   return (
     <>
@@ -1077,61 +1077,85 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                               }
                             };
                             const toolMeta = block.toolName ? getToolMeta(block.toolName) : null;
+                            const toolKind = toolMeta?.kind ?? "";
+                            const categoryLabel = toolKind ? toolKind.charAt(0).toUpperCase() + toolKind.slice(1) : "";
                             return (
-                              <div key={`approval_${block.approvalId}`} className="border border-line rounded-lg overflow-hidden text-sm">
+                              <div key={`approval_${block.approvalId}`} className="border border-amber-200 dark:border-amber-800/40 rounded-xl overflow-hidden text-sm shadow-sm">
                                 {/* Header */}
-                                <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 border-b border-amber-200 dark:border-amber-800/50">
-                                  <span className="size-2 shrink-0 rounded-full bg-amber-500" />
-                                  <span className="font-medium text-amber-900 dark:text-amber-200 text-xs uppercase tracking-wide">Approval Required</span>
+                                <div className="flex items-center gap-2 bg-gradient-to-r from-amber-50 to-amber-50/60 dark:from-amber-950/30 dark:to-amber-950/15 px-4 py-2.5 border-b border-amber-200 dark:border-amber-800/40">
+                                  <span className="size-2 shrink-0 rounded-full bg-amber-500 shadow-[0_0_6px_rgba(217,119,6,0.4)]" />
+                                  <span className="font-semibold text-amber-800 dark:text-amber-200 text-[11px] uppercase tracking-wider">Approval Required</span>
                                   {toolMeta && (
-                                    <span className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-200/60 dark:bg-amber-800/40 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-300">
-                                      <toolMeta.icon size={12} />
+                                    <span className="ml-auto inline-flex items-center gap-1.5 rounded-lg bg-amber-100/80 dark:bg-amber-800/40 px-2.5 py-1 text-[10px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-200/50 dark:border-amber-700/30">
+                                      <toolMeta.icon size={11} />
                                       {block.toolName}
                                     </span>
                                   )}
                                 </div>
                                 {/* Body */}
-                                <div className="bg-paper-100 dark:bg-paper-800/50 px-3 py-2.5">
-                                  <div className="text-xs font-medium text-ink-600 dark:text-ink-400 mb-1">{block.title}</div>
-                                  <div className="whitespace-pre-wrap text-xs text-ink-700 dark:text-ink-300 leading-relaxed">{block.body}</div>
+                                <div className="bg-white dark:bg-amber-950/10 px-4 py-3">
+                                  <div className="text-[13px] font-semibold text-ink-800 dark:text-ink-200 mb-1.5">{block.title}</div>
+                                  <div className="whitespace-pre-wrap text-xs text-ink-600 dark:text-ink-400 leading-relaxed">{block.body}</div>
                                 </div>
                                 {/* Actions */}
                                 {pending ? (
-                                  <div className="flex items-center gap-1.5 px-3 py-2 bg-paper-200/50 dark:bg-paper-800/30 border-t border-line">
+                                  <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50/50 dark:bg-amber-950/5 border-t border-amber-100 dark:border-amber-800/30">
                                     <button
-                                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                                      className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 px-3.5 py-2 text-xs font-semibold text-white transition-all duration-150 shadow-sm hover:shadow-emerald-200/50"
                                       onClick={() => resolveApproval("approve")}
                                     >
-                                      <Check className="size-3" />
+                                      <Check className="size-3.5" />
                                       Approve
                                     </button>
+                                    <div className="relative group">
+                                      <button
+                                        className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 px-3.5 py-2 text-xs font-semibold text-white transition-all duration-150 shadow-sm hover:shadow-indigo-200/50"
+                                        onClick={resolveAlwaysAllow}
+                                      >
+                                        <ShieldCheck className="size-3.5" />
+                                        Always Allow
+                                        {toolKind && <span className="text-[10px] font-medium text-indigo-200 border-l border-indigo-400/50 pl-2 ml-0.5">{categoryLabel}</span>}
+                                      </button>
+                                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block z-10">
+                                        <div className="bg-ink-800 text-white text-[10px] px-2.5 py-1.5 rounded-lg whitespace-nowrap shadow-lg">
+                                          Auto-approve all <strong>{toolKind}</strong> actions from now on
+                                          <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-ink-800" />
+                                        </div>
+                                      </div>
+                                    </div>
                                     <button
-                                      className="inline-flex items-center gap-1 rounded-md bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 text-xs font-medium text-white transition-colors"
-                                      onClick={resolveAlwaysAllow}
-                                    >
-                                      <Check className="size-3" />
-                                      Always Allow
-                                    </button>
-                                    <button
-                                      className="inline-flex items-center gap-1 rounded-md border border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 transition-colors ml-auto"
+                                      className="inline-flex items-center gap-1.5 rounded-lg border border-red-300 dark:border-red-700/50 bg-white dark:bg-transparent hover:bg-red-50 dark:hover:bg-red-950/20 active:bg-red-100 dark:active:bg-red-950/40 px-3.5 py-2 text-xs font-semibold text-red-600 dark:text-red-400 transition-all duration-150 ml-auto"
                                       onClick={() => resolveApproval("reject")}
                                     >
-                                      <X className="size-3" />
+                                      <X className="size-3.5" />
                                       Reject
                                     </button>
                                   </div>
                                 ) : (
-                                  <div className="flex items-center gap-2 px-3 py-2 bg-paper-200/50 dark:bg-paper-800/30 border-t border-line">
-                                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                                      block.status === "approved"
-                                        ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
-                                        : block.status === "rejected"
-                                        ? "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
-                                        : "bg-ink-100 dark:bg-ink-800 text-ink-600 dark:text-ink-400"
-                                    }`}>
-                                      {block.status === "approved" ? <Check className="size-2.5" /> : block.status === "rejected" ? <X className="size-2.5" /> : null}
-                                      {block.status === "approved" ? "Approved" : block.status === "rejected" ? "Rejected" : block.status}
-                                    </span>
+                                  <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50/50 dark:bg-amber-950/5 border-t border-amber-100 dark:border-amber-800/30">
+                                    {block.status === "approved" && (
+                                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 px-3 py-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 border border-emerald-200/60 dark:border-emerald-700/30">
+                                        <Check className="size-3" />
+                                        Approved
+                                      </span>
+                                    )}
+                                    {block.status === "rejected" && (
+                                      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 dark:bg-red-900/40 px-3 py-1 text-[11px] font-semibold text-red-700 dark:text-red-300 border border-red-200/60 dark:border-red-700/30">
+                                        <X className="size-3" />
+                                        Rejected
+                                      </span>
+                                    )}
+                                    {block.status === "expired" && (
+                                      <span className="inline-flex items-center gap-1.5 rounded-full bg-ink-100 dark:bg-ink-800 px-3 py-1 text-[11px] font-semibold text-ink-600 dark:text-ink-400">
+                                        Expired
+                                      </span>
+                                    )}
+                                    {block.status === "auto-approved" && (
+                                      <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 dark:bg-indigo-900/40 px-3 py-1 text-[11px] font-semibold text-indigo-700 dark:text-indigo-300 border border-indigo-200/60 dark:border-indigo-700/30">
+                                        <ShieldCheck className="size-3" />
+                                        Auto-Approved
+                                      </span>
+                                    )}
                                   </div>
                                 )}
                               </div>
