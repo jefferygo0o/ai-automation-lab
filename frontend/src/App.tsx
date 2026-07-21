@@ -108,42 +108,33 @@ function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Desktop: three-column layout — [LeftRail 44px | Page Tab(s) | Chat Tab(s)]
-  // Page tab column is always present (shows empty state placeholder when no tabs)
-  const pageTabShown = pageTabs.length > 0;
+  // Desktop: two/three-column layout — [LeftRail 44px | Page Tab(s) | Chat Tab(s)]
+  // When no page tabs open, chat column takes full width up to the left rail.
+  const hasPageTabs = pageTabs.length > 0;
 
   return (
     <div className="flex h-screen w-full">
       {/* Left Rail — always-visible icon nav (44px) */}
       <LeftRail />
 
-      {/* Page Tabs Column — always present */}
-      <div className="flex flex-col min-w-0 border-r border-border bg-background" style={{ flex: "1 1 0" }}>
-        <TabBar
-          tabs={pageTabs}
-          activeId={activePageTabId}
-          onSelect={handlePageTabSelect}
-          onClose={handlePageTabClose}
-          label="Pages"
-        />
-        <main className="flex-1 min-h-0 overflow-auto bg-background">
-          {pageTabShown ? children : (
-            <div className="flex items-center justify-center h-full text-center px-6">
-              <div className="max-w-xs">
-                <div className="text-muted-foreground text-sm">
-                  Select a page from the left rail
-                </div>
-                <p className="text-muted-foreground/50 text-xs mt-1">
-                  Click any icon to open it in this panel
-                </p>
-              </div>
-            </div>
-          )}
-        </main>
-      </div>
+      {/* Page Tabs Column — only rendered when there are page tabs */}
+      {hasPageTabs && (
+        <div className="flex flex-col min-w-0 border-r border-border bg-background" style={{ flex: "1 1 0" }}>
+          <TabBar
+            tabs={pageTabs}
+            activeId={activePageTabId}
+            onSelect={handlePageTabSelect}
+            onClose={handlePageTabClose}
+            label="Pages"
+          />
+          <main className="flex-1 min-h-0 overflow-auto bg-background">
+            {children}
+          </main>
+        </div>
+      )}
 
-      {/* Chat Tabs Column — always visible */}
-      <div className="flex flex-col min-w-0 bg-background" style={{ flex: "1 1 0" }}>
+      {/* Chat Tabs Column — always visible, fills remaining space */}
+      <div className="flex flex-col min-w-0 bg-background" style={{ flex: hasPageTabs ? "1 1 0" : "1 1 100%" }}>
         <TabBar
           tabs={chatTabs}
           activeId={activeChatTabId}
