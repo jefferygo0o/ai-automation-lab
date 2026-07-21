@@ -57,7 +57,7 @@ type Block =
   | { type: "thinking"; content: string; done: boolean }
   | { type: "tool_call"; tool: ToolCallInfo }
   | { type: "tool_result"; tool: ToolCallInfo }
-  | { type: "approval"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired" }
+  | { type: "approval"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired"; toolName?: string }
   | { type: "text"; content: string };
 
 interface MessageBlocks {
@@ -387,7 +387,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
             setExpandedTool((ps) => { const n = new Set(ps); n.delete(updated.id); return n; });
           } else if (type === "approval_requested") {
             closeThinking(aid);
-            pushBlock(aid, { type: "approval", approvalId: payload.approvalId, title: payload.title ?? "Approval required", body: payload.body ?? "", status: payload.status ?? "pending" });
+            pushBlock(aid, { type: "approval", approvalId: payload.approvalId, title: payload.title ?? "Approval required", body: payload.body ?? "", status: payload.status ?? "pending", toolName: payload.toolName });
           } else if (type === "run_started") {
             currentRunIdRef.current = payload.runId;
           } else if (type === "message") {
@@ -785,12 +785,74 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                 setBlocksByMessage((p) => ({ ...p }));
                               }
                             };
+                            const resolveAlwaysAllow = async () => {
+                              const path = `/api/approvals/${encodeURIComponent(block.approvalId)}/always-allow`;
+                              const token = getToken();
+                              const res = await fetch(path, { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" });
+                              if (res.ok) {
+                                const json = await res.json();
+                                block.status = json.approval?.status ?? "approved";
+                                setBlocksByMessage((p) => ({ ...p }));
+                              }
+                            };
+                            const toolMeta = block.toolName ? getToolMeta(block.toolName) : null;
                             return (
-                              <div key={`approval_${block.approvalId}`} className="border border-amber-300 bg-amber-50 rounded-lg p-3 text-sm">
-                                <div className="font-medium text-amber-900">{block.title || "Approval required"}</div>
-                                <div className="mt-1 whitespace-pre-wrap text-amber-800">{block.body}</div>
-                                {pending && <div className="mt-3 flex gap-2"><button className="btn btn-primary btn-xs" onClick={() => resolveApproval("approve")}>Approve</button><button className="btn btn-xs" onClick={() => resolveApproval("reject")}>Reject</button></div>}
-                                {!pending && <div className="mt-2 text-xs text-amber-700">Status: {block.status}</div>}
+                              <div key={`approval_${block.approvalId}`} className="border border-line rounded-lg overflow-hidden text-sm">
+                                {/* Header */}
+                                <div className="flex items-center gap-2 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 border-b border-amber-200 dark:border-amber-800/50">
+                                  <span className="size-2 shrink-0 rounded-full bg-amber-500" />
+                                  <span className="font-medium text-amber-900 dark:text-amber-200 text-xs uppercase tracking-wide">Approval Required</span>
+                                  {toolMeta && (
+                                    <span className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-200/60 dark:bg-amber-800/40 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:text-amber-300">
+                                      {toolMeta.icon}
+                                      {block.toolName}
+                                    </span>
+                                  )}
+                                </div>
+                                {/* Body */}
+                                <div className="bg-paper-100 dark:bg-paper-800/50 px-3 py-2.5">
+                                  <div className="text-xs font-medium text-ink-600 dark:text-ink-400 mb-1">{block.title}</div>
+                                  <div className="whitespace-pre-wrap text-xs text-ink-700 dark:text-ink-300 leading-relaxed">{block.body}</div>
+                                </div>
+                                {/* Actions */}
+                                {pending ? (
+                                  <div className="flex items-center gap-1.5 px-3 py-2 bg-paper-200/50 dark:bg-paper-800/30 border-t border-line">
+                                    <button
+                                      className="inline-flex items-center gap-1 rounded-md bg-emerald-600 hover:bg-emerald-700 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                                      onClick={() => resolveApproval("approve")}
+                                    >
+                                      <Check className="size-3" />
+                                      Approve
+                                    </button>
+                                    <button
+                                      className="inline-flex items-center gap-1 rounded-md bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 text-xs font-medium text-white transition-colors"
+                                      onClick={resolveAlwaysAllow}
+                                    >
+                                      <Check className="size-3" />
+                                      Always Allow
+                                    </button>
+                                    <button
+                                      className="inline-flex items-center gap-1 rounded-md border border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950/30 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-400 transition-colors ml-auto"
+                                      onClick={() => resolveApproval("reject")}
+                                    >
+                                      <X className="size-3" />
+                                      Reject
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 px-3 py-2 bg-paper-200/50 dark:bg-paper-800/30 border-t border-line">
+                                    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                      block.status === "approved"
+                                        ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
+                                        : block.status === "rejected"
+                                        ? "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300"
+                                        : "bg-ink-100 dark:bg-ink-800 text-ink-600 dark:text-ink-400"
+                                    }`}>
+                                      {block.status === "approved" ? <Check className="size-2.5" /> : block.status === "rejected" ? <X className="size-2.5" /> : null}
+                                      {block.status === "approved" ? "Approved" : block.status === "rejected" ? "Rejected" : block.status}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             );
                           }

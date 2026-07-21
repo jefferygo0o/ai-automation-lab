@@ -30,13 +30,15 @@ import { RuleStore } from "../rules/store.ts";
 import { recordHistory } from "./history.ts";
 import { RunStore } from "../runs/index.ts";
 import { Approvals } from "../approvals/index.ts";
+import { AlwaysAllowStore } from "../approvals/always_allow.ts";
+import { getToolCategory } from "../approvals/tool_categories.ts";
 
 export type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "thinking"; delta: string }
   | { type: "tool_call"; name: string; args: any; toolCallId?: string }
   | { type: "tool_result"; name: string; result: any; ok: boolean; durationMs: number; error?: string; toolCallId?: string }
-  | { type: "approval_requested"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired" | "auto-approved" }
+  | { type: "approval_requested"; approvalId: string; title: string; body: string; status: "pending" | "approved" | "rejected" | "expired" | "auto-approved"; toolName?: string }
   | { type: "message"; content: string; messageId?: string }
   | { type: "run_started"; runId: string }
   | { type: "error"; message: string }
@@ -395,28 +397,40 @@ export async function runAgentTurn(
           ok = false;
           await RunStore.recordToolFinish(inv.id, "denied", result, "denied by permission policy");
         } else if (perm === "ask") {
-          const approval = await Approvals.create({
-            ownerId,
-            chatId,
-            runId: run.id,
-            agentId: agent.id,
-            kind: "tool",
-            title: `Approve tool: ${tc.name}`,
-            body: `The agent requested **${tc.name}** with these arguments:\n\n\`\`\`json\n${JSON.stringify(fnArgs, null, 2)}\n\`\`\``,
-            payload: { tool: tc.name, args: fnArgs },
-          });
-          await emit({ type: "approval_requested", approvalId: approval.id, title: approval.title, body: approval.body, status: approval.status });
-          const decision = await Approvals.waitFor(approval.id, abort);
-          if (decision.status !== "approved" && decision.status !== "auto-approved") {
-            result = { error: `tool ${tc.name} was not approved`, approvalId: approval.id, status: decision.status };
-            ok = false;
-            await RunStore.recordToolFinish(inv.id, "denied", result, decision.response ?? decision.status);
-          } else {
+          // Check if this tool's action category has been always-allowed
+          const actionCategory = getToolCategory(tc.name);
+          const alwaysAllowed = actionCategory ? await AlwaysAllowStore.check(ownerId, actionCategory) : false;
+          if (alwaysAllowed) {
+            // Auto-approved — execute directly without prompting user
             const brokered = await toolRegistry.execute(tc.name, fnArgs, toolCtx);
             result = brokered.result;
             ok = brokered.ok;
             if (ok && result && typeof result === "object" && result.isError === true) ok = false;
             await RunStore.recordToolFinish(inv.id, ok ? "ok" : "error", result, ok ? null : String(result?.error ?? ""));
+          } else {
+            const approval = await Approvals.create({
+              ownerId,
+              chatId,
+              runId: run.id,
+              agentId: agent.id,
+              kind: "tool",
+              title: `Approve tool: ${tc.name}`,
+              body: `The agent requested **${tc.name}** with these arguments:\n\n\`\`\`json\n${JSON.stringify(fnArgs, null, 2)}\n\`\`\``,
+              payload: { tool: tc.name, args: fnArgs },
+            });
+            await emit({ type: "approval_requested", approvalId: approval.id, title: approval.title, body: approval.body, status: approval.status, toolName: tc.name });
+            const decision = await Approvals.waitFor(approval.id, abort);
+            if (decision.status !== "approved" && decision.status !== "auto-approved") {
+              result = { error: `tool ${tc.name} was not approved`, approvalId: approval.id, status: decision.status };
+              ok = false;
+              await RunStore.recordToolFinish(inv.id, "denied", result, decision.response ?? decision.status);
+            } else {
+              const brokered = await toolRegistry.execute(tc.name, fnArgs, toolCtx);
+              result = brokered.result;
+              ok = brokered.ok;
+              if (ok && result && typeof result === "object" && result.isError === true) ok = false;
+              await RunStore.recordToolFinish(inv.id, ok ? "ok" : "error", result, ok ? null : String(result?.error ?? ""));
+            }
           }
         } else {
           const brokered = await toolRegistry.execute(tc.name, fnArgs, toolCtx);
