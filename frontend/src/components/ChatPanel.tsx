@@ -65,7 +65,7 @@ interface MessageBlocks {
 }
 
 export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = {}) {
-  const { chatId, closeChat, openChat } = useChatPanel();
+  const { chatId, closeChat, openChat, updateChatTabTitle } = useChatPanel();
 
   const [chat, setChat] = useState<Chat | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -133,6 +133,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
     if (!chatId) return;
     const { chat: c, messages: msgs } = await Chats.get(chatId);
     setChat(c);
+    if (c.title) updateChatTabTitle(chatId, c.title);
     setMessages(msgs);
     const { agents } = await Agents.list();
     setAgentsList(agents);
