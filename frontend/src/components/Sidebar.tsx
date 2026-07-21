@@ -1,6 +1,6 @@
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
-  Globe, FolderTree, Timer,
+  Globe, FolderTree, Timer, LayoutDashboard,
   Wand2, Wrench, Compass, Puzzle,
   PanelRightOpen, PanelRightClose, Plus, X,
   Settings, Server, Search, Trash2, MessageSquare,
