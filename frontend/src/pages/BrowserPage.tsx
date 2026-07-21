@@ -135,8 +135,11 @@ export default function BrowserPage() {
   const isBlank = !currentUrl || currentUrl === "about:blank";
   const age = aiTimestamp ? Math.floor((Date.now() - aiTimestamp) / 1000) : 0;
 
-  // Proxy URL for iframe — serve through the backend to avoid XFO blocking
-  const proxyUrl = showAiPreview ? "/api/browser/active/content" : (currentUrl || defaultUrl);
+  // Proxy URL for iframe with auth token query param
+  const token = getToken();
+  const proxyUrl = showAiPreview
+    ? `/api/browser/active/content${token ? `?token=${encodeURIComponent(token)}` : ""}`
+    : (currentUrl || defaultUrl);
 
   return (
     <div className="h-full flex flex-col bg-white">
