@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "./state/auth";
 import LeftRail from "./components/LeftRail";
 import Sidebar from "./components/Sidebar";
@@ -9,6 +9,7 @@ import TabBar from "./components/TabBar";
 import { ChatPanelProvider, useChatPanel } from "./contexts/ChatPanelContext";
 import { useTabStore } from "./stores/tabStore";
 import { useBreakpoint } from "./hooks/useBreakpoint";
+import { Chats } from "./api";
 import LoginPage from "./pages/LoginPage";
 import AgentsPage from "./pages/AgentsPage";
 import AgentEditPage from "./pages/AgentEditPage";
@@ -37,6 +38,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   const activeChatTabId = useTabStore((s) => s.activeChatTabId);
   const setActiveChatTab = useTabStore((s) => s.setActiveChatTab);
   const closeChatTabAction = useTabStore((s) => s.closeChatTab);
+  const openChatTab = useTabStore((s) => s.openChatTab);
 
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const bp = useBreakpoint();
@@ -46,6 +48,28 @@ function Shell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setMobileNavOpen(false);
   }, [loc.pathname]);
+
+  // Auto-open the most recent chat tab on first load
+  const hasAutoOpened = useRef(false);
+  useEffect(() => {
+    if (hasAutoOpened.current) return;
+    if (chatTabs.length > 0 || activeChatTabId) {
+      hasAutoOpened.current = true;
+      return;
+    }
+    hasAutoOpened.current = true;
+    (async () => {
+      try {
+        const { chats } = await Chats.list();
+        if (chats.length > 0) {
+          const sorted = chats.sort((a, b) => b.updatedAt - a.updatedAt);
+          openChatTab(sorted[0].id, sorted[0].title || "Chat");
+        }
+      } catch {
+        // Not logged in or no chats yet
+      }
+    })();
+  }, []);
 
   function handlePageTabSelect(id: string) {
     setActivePageTab(id);
@@ -72,7 +96,7 @@ function Shell({ children }: { children: React.ReactNode }) {
             onOpenMobileNav={() => setMobileNavOpen(true)}
           />
           <main className="flex-1 min-h-0 overflow-auto bg-background">
-            {activeChatTabId ? <ChatPanel /> : children}
+            <ChatPanel />
           </main>
         </div>
         <Sidebar
@@ -84,32 +108,42 @@ function Shell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  // Desktop: tabbed three-column layout
-  const hasPageTabs = pageTabs.length > 0;
+  // Desktop: three-column layout — [LeftRail 44px | Page Tab(s) | Chat Tab(s)]
+  // Page tab column is always present (shows empty state placeholder when no tabs)
+  const pageTabShown = pageTabs.length > 0;
 
   return (
     <div className="flex h-screen w-full">
       {/* Left Rail — always-visible icon nav (44px) */}
       <LeftRail />
 
-      {/* Page Tabs Area — shows when at least one page tab is open */}
-      {hasPageTabs && (
-        <div className="flex flex-col min-w-0 border-r border-border" style={{ flex: "1 1 0" }}>
-          <TabBar
-            tabs={pageTabs}
-            activeId={activePageTabId}
-            onSelect={handlePageTabSelect}
-            onClose={handlePageTabClose}
-            label="Pages"
-          />
-          <main className="flex-1 min-h-0 overflow-auto bg-background">
-            {children}
-          </main>
-        </div>
-      )}
+      {/* Page Tabs Column — always present */}
+      <div className="flex flex-col min-w-0 border-r border-border bg-background" style={{ flex: "1 1 0" }}>
+        <TabBar
+          tabs={pageTabs}
+          activeId={activePageTabId}
+          onSelect={handlePageTabSelect}
+          onClose={handlePageTabClose}
+          label="Pages"
+        />
+        <main className="flex-1 min-h-0 overflow-auto bg-background">
+          {pageTabShown ? children : (
+            <div className="flex items-center justify-center h-full text-center px-6">
+              <div className="max-w-xs">
+                <div className="text-muted-foreground text-sm">
+                  Select a page from the left rail
+                </div>
+                <p className="text-muted-foreground/50 text-xs mt-1">
+                  Click any icon to open it in this panel
+                </p>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
 
-      {/* Chat Tabs Area — always visible */}
-      <div className="flex flex-col min-w-0 bg-background" style={{ flex: hasPageTabs ? "1 1 0" : "1 1 0" }}>
+      {/* Chat Tabs Column — always visible */}
+      <div className="flex flex-col min-w-0 bg-background" style={{ flex: "1 1 0" }}>
         <TabBar
           tabs={chatTabs}
           activeId={activeChatTabId}
@@ -118,24 +152,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           label="Chats"
         />
         <div className="flex-1 min-h-0 overflow-hidden bg-background">
-          {activeChatTabId ? (
-            <ChatPanel key={activeChatTabId} />
-          ) : hasPageTabs ? (
-            <div className="flex items-center justify-center h-full text-center px-6">
-              <div>
-                <div className="text-muted-foreground text-sm">
-                  Select a chat to begin
-                </div>
-                <p className="text-muted-foreground/50 text-xs mt-1">
-                  Open a chat from the Home tab or create a new one
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="h-full overflow-auto">
-              {children}
-            </div>
-          )}
+          <ChatPanel />
         </div>
       </div>
     </div>
