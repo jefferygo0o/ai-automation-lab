@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useState, useEffect } from "react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useAuth } from "./state/auth";
 import Sidebar from "./components/Sidebar";
 import Topbar from "./components/Topbar";
@@ -25,51 +26,21 @@ import SitesPage from "./pages/SitesPage";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
-  const { isOpen, panelWidth, setPanelWidth, closeChat } = useChatPanel();
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const { chatId } = useChatPanel();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const bp = useBreakpoint();
   const isMobile = bp === "mobile";
-  const isTablet = bp === "tablet";
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Auto-close mobile drawer on route change
   useEffect(() => {
     setMobileNavOpen(false);
   }, [loc.pathname]);
 
-  useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
-      if (!dragRef.current) return;
-      const dx = e.clientX - dragRef.current.startX;
-      setPanelWidth(dragRef.current.startWidth - dx);
-    }
-    function onMouseUp() {
-      dragRef.current = null;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    }
-    if (dragRef.current) {
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", onMouseUp);
-    }
-    return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-  }, [setPanelWidth]);
-
-  const startDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragRef.current = { startX: e.clientX, startWidth: panelWidth };
-    document.body.style.cursor = "ew-resize";
-    document.body.style.userSelect = "none";
-  }, [panelWidth]);
-
-  /** Sidebar dimensions */
+  /** Sidebar width in px */
   const sidebarW = sidebarCollapsed ? 44 : 260;
 
-  // Mobile: single column, sidebar as drawer, chat as full-width sheet
+  // Mobile: single column, sidebar as drawer
   if (isMobile) {
     return (
       <div className="flex h-full min-h-0">
@@ -78,54 +49,60 @@ function Shell({ children }: { children: React.ReactNode }) {
           <main className="flex-1 min-h-0 overflow-auto bg-background">
             {children}
           </main>
-        </div>
-        <Sidebar mobileOpen={mobileNavOpen} onClose={() => setMobileNavOpen(false)} collapsed={false} />
-        {isOpen && (
-          <div className="fixed inset-0 z-50 flex">
-            <div className="flex-1 h-full bg-foreground/20" onClick={closeChat} />
-            <div className="w-full max-w-md bg-background h-full shadow-2xl flex flex-col min-h-0 overflow-hidden">
-              <ChatPanel />
+          {/* Mobile chat sheet */}
+          {chatId && (
+            <div className="fixed inset-0 z-50 flex">
+              <div className="flex-1 bg-foreground/20" />
+              <div className="w-full max-w-md bg-background h-full shadow-2xl flex flex-col min-h-0 overflow-hidden">
+                <ChatPanel />
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+        <Sidebar
+          mobileOpen={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          collapsed={false}
+        />
       </div>
     );
   }
 
-  // Desktop: Zo-style 3-column layout
+  // Desktop: Zo-style layout — sidebar overlay + panel group
   return (
-    <div className="flex h-full min-h-0">
-      {/* Left sidebar - nav + chat list */}
-      <aside
-        className="h-full flex-shrink-0 border-r border-border flex flex-col bg-background min-h-0 overflow-hidden"
-        style={{ width: sidebarW }}
-      >
-        <Sidebar collapsed={sidebarCollapsed} onToggleCollapse={() => setSidebarCollapsed(v => !v)} />
-      </aside>
-
-      {/* Main content area */}
-      <div className="flex flex-1 flex-col h-full min-h-0 overflow-hidden">
-        <Topbar onToggleSidebar={() => setSidebarCollapsed(v => !v)} />
-        <main className="flex-1 min-h-0 overflow-auto bg-background">
-          {children}
-        </main>
-      </div>
-
-      {/* Right chat panel (optional, resizable) */}
-      {isOpen && (
-        <div className="flex h-full min-h-0">
-          <div
-            className="w-[3px] cursor-ew-resize shrink-0 bg-transparent hover:bg-border active:bg-ring transition-colors relative"
-            onMouseDown={startDrag}
+    <div className="flex h-screen w-full">
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        {/* Left sidebar — absolutely positioned overlay, Zo-style */}
+        <div
+          className="absolute left-0 top-0 bottom-0 z-30 flex flex-col"
+          style={{ width: sidebarW }}
+        >
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            onToggleCollapse={() => setSidebarCollapsed(v => !v)}
           />
-          <aside
-            className="h-full flex-shrink-0 border-l border-border bg-background flex flex-col min-h-0 overflow-hidden"
-            style={{ width: Math.min(panelWidth, typeof window !== "undefined" ? window.innerWidth * 0.45 : 420) }}
-          >
-            <ChatPanel />
-          </aside>
         </div>
-      )}
+
+        {/* Resizable panel group: main content | chat panel */}
+        <PanelGroup direction="horizontal" className="h-full w-full">
+          <Panel defaultSize={58} minSize={30} id="main-content">
+            <div className="flex flex-col h-full min-h-0">
+              <Topbar onToggleSidebar={() => setSidebarCollapsed(v => !v)} />
+              <main className="flex-1 min-h-0 overflow-auto bg-background">
+                {children}
+              </main>
+            </div>
+          </Panel>
+          <PanelResizeHandle className="group/resizer relative flex items-center justify-center w-[7px] cursor-col-resize">
+            <div className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-border/40 transition-colors group-hover/resizer:bg-border/80" />
+          </PanelResizeHandle>
+          <Panel defaultSize={42} minSize={25} maxSize={55} id="chat-sidebar">
+            <div className="h-full flex flex-col min-h-0 border-l border-border">
+              <ChatPanel />
+            </div>
+          </Panel>
+        </PanelGroup>
+      </div>
     </div>
   );
 }

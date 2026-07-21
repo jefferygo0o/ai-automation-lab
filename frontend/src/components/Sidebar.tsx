@@ -1,10 +1,9 @@
 import { NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
-  Bot, MessagesSquare, Globe, FolderTree, Timer,
-  Wand2, Wrench, KeyRound, History, Compass, Puzzle,
-  PanelRightOpen, PanelRightClose, Plus, X, Sparkles, Clock,
-  LayoutDashboard, Scale, Server, Search, Trash2, MessageSquare,
-  ChevronRight,
+  Globe, FolderTree, Timer,
+  Wand2, Wrench, Compass, Puzzle,
+  PanelRightOpen, PanelRightClose, Plus, X,
+  LayoutDashboard, Settings, Server, Search, Trash2, MessageSquare,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "../state/auth";
@@ -12,33 +11,35 @@ import { Personas as PersonasApi, type Persona, Chats, type Chat } from "../api"
 import { useChatPanel } from "../contexts/ChatPanelContext";
 
 const NAV_ITEMS = [
-  { to: "/chats", label: "Chat", icon: MessagesSquare },
-  { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/agents", label: "Agents", icon: Bot },
-  { to: "/skills", label: "Skills", icon: Wand2 },
-  { to: "/integrations", label: "Integrations", icon: Puzzle },
-  { to: "/automations", label: "Automations", icon: Timer },
-  { to: "/mcp", label: "MCP", icon: Wrench },
+  { to: "/chats", label: "Home", icon: LayoutDashboard },
   { to: "/web-space", label: "Web Space", icon: Globe },
-  { to: "/secrets", label: "Secrets", icon: KeyRound },
   { to: "/files", label: "Files", icon: FolderTree },
-  { to: "/runs", label: "Runs", icon: History },
+  { to: "/automations", label: "Automations", icon: Timer },
+  { to: "/integrations", label: "Integrations", icon: Puzzle },
+  { to: "/mcp", label: "MCP", icon: Wrench },
+  { to: "/skills", label: "Skills", icon: Wand2 },
   { to: "/browser", label: "Browser", icon: Compass },
-  { to: "/settings", label: "Settings", icon: Scale },
+  { to: "/sites", label: "Hosting", icon: Server },
 ];
 
 export default function Sidebar({
   mobileOpen = false,
   onClose,
-}: { mobileOpen?: boolean; onClose?: () => void } = {}) {
+  collapsed = false,
+  onToggleCollapse,
+}: {
+  mobileOpen?: boolean;
+  onClose?: () => void;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+} = {}) {
   const { email, logout } = useAuth();
   const navigate = useNavigate();
   const loc = useLocation();
-  const [collapsed, setCollapsed] = useState(false);
   const [activePersona, setActivePersona] = useState<Persona | null>(null);
   const [chats, setChats] = useState<Chat[]>([]);
   const [showAllChats, setShowAllChats] = useState(false);
-  const { openChat, isOpen: chatPanelOpen } = useChatPanel();
+  const { openChat } = useChatPanel();
 
   useEffect(() => {
     PersonasApi.list().then(({ personas }) => {
@@ -78,10 +79,10 @@ export default function Sidebar({
 
   const displayChats = showAllChats ? chats : chats.slice(0, 5);
 
-  // Collapsed icon-only mode (desktop only)
+  // Collapsed icon-only mode (desktop only) — parent controls state
   if (collapsed && !mobileOpen) {
     return (
-      <aside className="w-[44px] shrink-0 border-r border-border bg-sidebar flex flex-col items-center max-lg:hidden">
+      <aside className="w-[44px] shrink-0 border-r border-border bg-sidebar flex flex-col items-center max-lg:hidden h-full">
         {/* Logo */}
         <div className="h-8 flex items-center justify-center w-full mt-1">
           <div
@@ -127,7 +128,7 @@ export default function Sidebar({
 
         {/* Expand button */}
         <button
-          onClick={() => setCollapsed(false)}
+          onClick={() => onToggleCollapse?.()}
           className="flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-accent-foreground hover:bg-accent/50 mb-2"
           title="Expand sidebar"
         >
@@ -150,7 +151,7 @@ export default function Sidebar({
         className={
           mobileOpen
             ? "fixed inset-y-0 left-0 z-40 w-[280px] max-w-[85vw] shrink-0 border-r border-border bg-sidebar flex flex-col shadow-xl transition-transform lg:relative lg:translate-x-0"
-            : "w-[220px] shrink-0 border-r border-border bg-sidebar flex flex-col max-lg:hidden"
+            : "w-full shrink-0 border-r border-border bg-sidebar flex flex-col h-full"
         }
       >
         {/* Header */}
@@ -170,7 +171,7 @@ export default function Sidebar({
           <div className="flex items-center gap-0.5">
             {!mobileOpen && (
               <button
-                onClick={() => setCollapsed(true)}
+                onClick={() => onToggleCollapse?.()}
                 className="flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-accent-foreground hover:bg-accent/50"
                 title="Collapse sidebar"
               >
@@ -275,7 +276,7 @@ export default function Sidebar({
           </div>
         </div>
 
-        {/* Footer */}
+        {/* Footer — email + settings + logout */}
         <div className="border-t border-border px-2 py-2 space-y-1 shrink-0">
           <div className="flex items-center gap-2 px-2 py-1">
             {activePersona && (
@@ -288,6 +289,13 @@ export default function Sidebar({
                 }}
               />
             )}
+            <NavLink
+              to="/settings"
+              className="flex items-center justify-center h-6 w-6 rounded text-muted-foreground/40 hover:text-foreground hover:bg-accent/50"
+              title="Settings"
+            >
+              <Settings className="w-3.5 h-3.5 stroke-[1.5]" />
+            </NavLink>
             <span className="text-2xs text-muted-foreground font-mono truncate flex-1">{email}</span>
             <button
               onClick={() => { logout(); onClose?.(); }}
@@ -301,13 +309,6 @@ export default function Sidebar({
               </svg>
             </button>
           </div>
-          <button
-            onClick={() => handleNav("/agents?new=1")}
-            className="flex items-center gap-2 w-full h-7 px-2.5 rounded-md text-xs text-muted-foreground hover:text-accent-foreground hover:bg-accent/50 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5 stroke-[1.5]" />
-            <span>New Agent</span>
-          </button>
         </div>
       </aside>
     </>
