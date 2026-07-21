@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
-import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, Plus, Terminal, X } from "lucide-react";
+import { ArrowRight, Bot, Check, ChevronDown, ChevronRight, FileText, Plus, Terminal, X } from "lucide-react";
 import { useChatPanel } from "../contexts/ChatPanelContext";
 import { Chats, Agents } from "../api";
 import type { Chat, Message } from "../api";
@@ -768,7 +768,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                                   exit {exitCode}
                                                 </span>
                                               )}
-                                              {parsedResult === null && selfHostedOutput && !isPending && !isError && (
+                                              {parsedResult === null && revealedContent && !isPending && !isError && (
                                                 <span className="text-3xs px-1 py-0.5 rounded border border-emerald-500/30 text-emerald-600 bg-emerald-500/5 font-mono">
                                                   done
                                                 </span>
@@ -793,11 +793,11 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                                         <span className="inline-block w-1 h-3 bg-muted-foreground/40 ml-0.5 align-middle animate-pulse" />
                                                       </>
                                                     ) : (
-                                                      <span className="text-muted-foreground/40 italic">Running…</span>
+                                                      <span className="inline-block w-1 h-3 bg-muted-foreground/40 ml-0.5 align-middle animate-pulse" />
                                                     )}
                                                   </pre>
                                                 ) : isError ? (
-                                                  <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-red-500 px-3">
+                                                  <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground px-3">
                                                     {t.error ?? "Command failed"}
                                                   </pre>
                                                 ) : (
@@ -923,12 +923,81 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                         );
                                       })()}
                                       {/* Content preview — live stream while pending */}
-                                      {revealedContent !== null && (
+                                      {(meta.kind === "write" || meta.kind === "edit") ? (
+                                        <div className="min-w-0 overflow-hidden">
+                                          <div
+                                            className="grid overflow-hidden w-full min-w-0 rounded-sm border border-border/20"
+                                            style={{ maxHeight: "240px", gridTemplateRows: "auto minmax(0px, 1fr)" }}
+                                          >
+                                            {/* File header bar */}
+                                            <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border/20 bg-muted/10 min-w-0">
+                                              <div className="min-w-0 truncate">
+                                                <span
+                                                  className="text-xs font-mono font-medium tracking-tight truncate text-muted-foreground"
+                                                  title={livePath || (typeof t.args?.target_file === "string" ? t.args.target_file : "")}
+                                                >
+                                                  {livePath || (typeof t.args?.target_file === "string" ? t.args.target_file : "file")}
+                                                </span>
+                                              </div>
+                                            </div>
+                                            {/* Content area - diff for edit, code for write */}
+                                            <div
+                                              className="overflow-x-auto overflow-y-auto h-full"
+                                              style={{
+                                                maskImage: "linear-gradient(transparent 0px, black 0.75rem, black calc(100% - 0.75rem), transparent 100%)",
+                                                maxHeight: "200px",
+                                              }}
+                                            >
+                                              <div className="py-2">
+                                                {isPending && revealedContent !== null ? (
+                                                  <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80 px-3">
+                                                    {revealedContent.slice(0, 4000)}{revealedContent.length > 4000 ? "\n…" : ""}
+                                                    <span className="inline-block w-1 h-3 bg-muted-foreground/40 ml-0.5 align-middle animate-pulse" />
+                                                  </pre>
+                                                ) : !isPending && !isError && meta.kind === "edit" && t.args && Array.isArray(t.args.operations) && t.args.operations.length > 0 ? (
+                                                  <div className="px-2 space-y-1">
+                                                    {(t.args.operations as Array<{old_text?: string; new_text?: string}>).map((op: {old_text?: string; new_text?: string}, oi: number) => (
+                                                      <div key={oi} className="border border-border/50 rounded-md py-1.5 px-2 space-y-1 min-w-0 max-w-full overflow-hidden">
+                                                        <div className="flex items-center gap-1 text-muted-foreground mb-1">
+                                                          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" color="currentColor" className="w-3 h-3 text-primary/50">
+                                                            <path d="M9.66294 20.1111C10 19.6067 10 18.9045 10 17.5C10 16.0955 10 15.3933 9.66294 14.8889C9.51702 14.6705 9.32952 14.483 9.11114 14.3371C8.60669 14 7.90446 14 6.5 14C5.09554 14 4.39331 14 3.88886 14.3371C3.67048 14.483 3.48298 14.6705 3.33706 14.8889C3 15.3933 3 16.0955 3 17.5C3 18.9045 3 19.6067 3.33706 20.1111C3.48298 20.3295 3.67048 20.517 3.88886 20.6629C4.39331 21 5.09554 21 6.5 21C7.90446 21 8.60669 21 9.11114 20.6629C9.32952 20.517 9.51702 20.3295 9.66294 20.1111Z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+                                                            <path d="M19.5559 3C19.8034 3.05129 20.0058 3.12947 20.1841 3.24863C20.4086 3.39863 20.6014 3.59137 20.7514 3.81586C20.8705 3.99419 20.9487 4.19657 21 4.44408M19.5559 10C19.8034 9.94871 20.0058 9.87053 20.1841 9.75137C20.4086 9.60137 20.6014 9.40863 20.7514 9.18414C20.8705 9.00581 20.9487 8.80343 21 8.55592M14 4.44408C14.0513 4.19657 14.1295 3.99419 14.2486 3.81586C14.3986 3.59137 14.5914 3.39863 14.8159 3.24863C14.9942 3.12947 15.1966 3.05129 15.4441 3M15.4441 10C15.1966 9.94871 14.9942 9.87053 14.8159 9.75137C14.5914 9.60137 14.3986 9.40863 14.2486 9.18414C14.1295 9.00581 14.0513 8.80343 14 8.55592" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+                                                            <path d="M4 7.5C4 7.5 5.84122 9.99998 6.50002 9.99998C7.15882 9.99999 9 7.49998 9 7.49998M6.50002 8.5V6.49998C6.50002 6.03558 6.50002 5.80338 6.52568 5.60843C6.70291 4.26222 7.76224 3.20289 9.10845 3.02566C9.3034 3 9.5356 3 10 3" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/>
+                                                          </svg>
+                                                          <span className="text-3xs font-medium">Replace</span>
+                                                        </div>
+                                                        {op.old_text && (
+                                                          <div className="text-xs text-muted-foreground px-1 py-0.5 break-all whitespace-pre-wrap overflow-hidden max-w-full bg-destructive/10 text-destructive rounded-sm">
+                                                            {op.old_text}
+                                                          </div>
+                                                        )}
+                                                        {op.new_text && (
+                                                          <div className="text-xs text-muted-foreground px-1 py-0.5 break-all whitespace-pre-wrap overflow-hidden max-w-full bg-emerald-500/10 text-emerald-600 rounded-sm mt-1">
+                                                            {op.new_text}
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                ) : revealedContent !== null ? (
+                                                  <pre className="m-0 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-foreground/80 px-3">
+                                                    {revealedContent.slice(0, 4000)}{revealedContent.length > 4000 ? "\n…" : ""}
+                                                  </pre>
+                                                ) : (
+                                                  <div className="px-3">
+                                                    <span className="text-xs text-muted-foreground/40 italic">(no content)</span>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ) : revealedContent !== null ? (
                                         <pre className="m-0 font-mono text-2xs whitespace-pre-wrap break-words text-ink-600 bg-paper-100 border border-line-soft rounded-sm px-2 py-1.5 overflow-x-auto max-h-80 overflow-y-auto">
                                           {revealedContent.slice(0, 4000)}{revealedContent.length > 4000 ? "\n…" : ""}
                                           {isPending && <span className="inline-block w-1 h-3.5 bg-ink-400 ml-0.5 align-middle animate-pulse" />}
                                         </pre>
-                                      )}
+                                      ) : null}
                                       {/* Fallback result display when no spanContent */}
                                       {revealedContent === null && !isPending && !isError && t.result !== undefined && (
                                         (() => {
