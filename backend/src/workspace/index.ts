@@ -36,7 +36,7 @@ function migrateDirectory(source: string | undefined, target: string): void {
     for (const entry of sourceEntries) {
       const sourceEntry = join(sourceAbs, entry);
       const targetEntry = join(targetAbs, entry);
-      if (!existsSync(targetEntry)) renameSync(sourceEntry, targetEntry);
+      if (!existsSync(targetEntry)) { try { renameSync(sourceEntry, targetEntry); } catch (e2) { cpSync(sourceEntry, targetEntry, { recursive: true }); try { rmSync(sourceEntry, { recursive: true, force: true }); } catch {} } }
     }
     try { rmSync(sourceAbs, { recursive: true, force: true }); } catch {}
     return;
@@ -50,6 +50,7 @@ function migrateDirectory(source: string | undefined, target: string): void {
       renameSync(from, to);
     } catch {
       cpSync(from, to, { recursive: true });
+      try { rmSync(from, { recursive: true, force: true }); } catch {}
     }
   }
 }
