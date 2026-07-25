@@ -22,3 +22,6 @@ frontend/dist/
 backend/server
 deploy/oracle/lab-ssh-key
 **/__pycache__/
+
+# Build cache
+**/dist-spa/

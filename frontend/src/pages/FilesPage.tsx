@@ -128,6 +128,110 @@ interface OpenTab {
 
 function makeTabId(p: string) { return p; }
 
+/* ---------- media detection ---------- */
+const MEDIA_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "avif", "tiff", "tif"]);
+const MEDIA_VIDEO_EXTS = new Set(["mp4", "webm", "avi", "mov", "mkv", "ogv", "m4v"]);
+const MEDIA_AUDIO_EXTS = new Set(["mp3", "wav", "ogg", "m4a", "aac", "flac", "opus", "wma"]);
+
+function getMediaKind(filename: string): "image" | "video" | "audio" | null {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  if (!ext) return null;
+  if (MEDIA_IMAGE_EXTS.has(ext)) return "image";
+  if (MEDIA_VIDEO_EXTS.has(ext)) return "video";
+  if (MEDIA_AUDIO_EXTS.has(ext)) return "audio";
+  return null;
+}
+
+const MIME_MAP: Record<string, string> = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  webp: "image/webp", svg: "image/svg+xml", bmp: "image/bmp", ico: "image/x-icon",
+  avif: "image/avif", tiff: "image/tiff", tif: "image/tiff",
+  mp4: "video/mp4", webm: "video/webm", avi: "video/x-msvideo",
+  mov: "video/quicktime", mkv: "video/x-matroska", ogv: "video/ogg", m4v: "video/x-m4v",
+  mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4",
+  aac: "audio/aac", flac: "audio/flac", opus: "audio/opus", wma: "audio/x-ms-wma",
+};
+
+function getMime(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase() || "";
+  return MIME_MAP[ext] || "application/octet-stream";
+}
+
+function base64ToBlobUrl(base64: string, mime: string): string {
+  const byteChars = atob(base64);
+  const byteArray = new Uint8Array(byteChars.length);
+  for (let i = 0; i < byteChars.length; i++) byteArray[i] = byteChars.charCodeAt(i);
+  const blob = new Blob([byteArray], { type: mime });
+  return URL.createObjectURL(blob);
+}
+
+/* ---------- media preview renderer ---------- */
+function MediaPreview({ content, filename }: { content: string; filename: string }) {
+  const kind = getMediaKind(filename);
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!content || !kind) return;
+    const blobUrl = base64ToBlobUrl(content, getMime(filename));
+    setUrl(blobUrl);
+    return () => URL.revokeObjectURL(blobUrl);
+  }, [content, filename, kind]);
+
+  if (!kind || !url) {
+    return (
+      <div className="flex items-center justify-center h-full text-xs text-ink-400">
+        <div className="text-center">
+          <Image className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p>Binary file — cannot preview.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (kind === "image") {
+    return (
+      <div className="flex-1 overflow-auto flex items-center justify-center p-4">
+        <img
+          src={url}
+          alt={filename}
+          className="max-w-full max-h-full object-contain rounded"
+          style={{ cursor: "zoom-in" }}
+          onClick={() => window.open(url, "_blank")}
+        />
+      </div>
+    );
+  }
+
+  if (kind === "video") {
+    return (
+      <div className="flex-1 flex items-center justify-center p-4">
+        <video
+          src={url}
+          controls
+          className="max-w-full max-h-full rounded"
+          style={{ maxHeight: "80vh" }}
+        >
+          Your browser does not support video playback.
+        </video>
+      </div>
+    );
+  }
+
+  if (kind === "audio") {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4">
+        <div className="w-16 h-16 rounded-full bg-ink-100 flex items-center justify-center">
+          <FileText className="w-8 h-8 text-ink-400" />
+        </div>
+        <p className="text-xs text-ink-500">{filename}</p>
+        <audio src={url} controls className="w-full max-w-md" />
+      </div>
+    );
+  }
+
+  return null;
+}
+
 /* ---------- highlighted code renderer ---------- */
 function HighlightedCode({ content, language, fontSize, wordWrap }: { content: string; language: string; fontSize: number; wordWrap: boolean }) {
   const ref = useRef<HTMLPreElement>(null);
@@ -592,12 +696,16 @@ export default function FilesPage() {
               {activeTab && (
                 <div className="flex-1 overflow-hidden min-h-0 flex flex-col" style={{ background: "hsl(40 15% 97%)" }}>
                   {activeTab.encoding === "base64" ? (
-                    <div className="flex items-center justify-center h-full text-xs text-ink-400">
-                      <div className="text-center">
-                        <Image className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                        <p>Binary file — cannot preview text.</p>
+                    getMediaKind(activeTab.name) ? (
+                      <MediaPreview content={activeTab.content} filename={activeTab.name} />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-xs text-ink-400">
+                        <div className="text-center">
+                          <Image className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                          <p>Binary file — cannot preview text.</p>
+                        </div>
                       </div>
-                    </div>
+                    )
                   ) : activeTab.content === "" ? (
                     <div className="flex items-center justify-center h-full text-xs text-ink-400">
                       <p className="italic">Empty file</p>
