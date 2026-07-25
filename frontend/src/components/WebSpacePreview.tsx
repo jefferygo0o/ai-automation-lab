@@ -21,62 +21,11 @@ export function WebSpacePreview({
 }: Props) {
   const [viewport, setViewport] = useState<Viewport>("desktop");
 
-  const srcDoc = useMemo(() => {
+  const iframeSrc = useMemo(() => {
     const p = routePath.startsWith("/") ? routePath : `/${routePath}`;
     const url = `/ws/${ownerId}${p === "" ? "/" : p}`;
     const token = getToken() || "";
-    return `<!doctype html><html><head><meta charset="utf-8">
-<style>
-html,body{margin:0;padding:0;height:100%;background:#0b0d10;color:#e6e6e6;font:13px ui-sans-serif,system-ui,-apple-system,sans-serif}
-#spinner{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;gap:8px}
-#err{position:fixed;inset:0;display:none;align-items:center;justify-content:center;padding:32px;text-align:left;white-space:pre-wrap;overflow:auto;background:#1a0d10;color:#ffb4b4;font:12px ui-monospace,SFMono-Regular,Menlo,monospace}
-#err.show{display:flex}
-.dot{width:6px;height:6px;border-radius:50%;background:#888;animation:p 1.2s infinite}
-.dot:nth-child(2){animation-delay:.15s}.dot:nth-child(3){animation-delay:.3s}
-@keyframes p{0%,80%,100%{opacity:.25}40%{opacity:1}}
-</style>
-</head><body>
-<div id="spinner"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-<pre id="err"></pre>
-<script>
-(async () => {
-  const url = ${JSON.stringify(url)};
-  const token = ${JSON.stringify(token)};
-  const err = document.getElementById("err");
-  const sp = document.getElementById("spinner");
-  try {
-    const res = await fetch(url, {
-      credentials: "include",
-      headers: { "authorization": "Bearer " + token, "accept": "text/html, application/json" }
-    });
-    const ct = res.headers.get("content-type") || "";
-    if (!res.ok) {
-      const t = await res.text();
-      err.textContent = "Preview failed (HTTP " + res.status + "):\\n\\n" + t.slice(0, 2000);
-      err.classList.add("show");
-      sp.style.display = "none";
-      return;
-    }
-    if (ct.includes("application/json")) {
-      const j = await res.text();
-      err.textContent = "API routes don't render visually. Response:\\n\\n" + j.slice(0, 4000);
-      err.classList.add("show");
-      sp.style.display = "none";
-      return;
-    }
-    const html = await res.text();
-    sp.style.display = "none";
-    document.open();
-    document.write(html);
-    document.close();
-  } catch (e) {
-    err.textContent = "Preview error: " + (e && e.message ? e.message : String(e));
-    err.classList.add("show");
-    sp.style.display = "none";
-  }
-})();
-</script>
-</body></html>`;
+    return token ? `${url}?token=${encodeURIComponent(token)}` : url;
   }, [ownerId, routePath, previewKey]);
 
   const width = VIEWPORT_WIDTHS[viewport];
@@ -98,7 +47,7 @@ html,body{margin:0;padding:0;height:100%;background:#0b0d10;color:#e6e6e6;font:1
         </div>
         <div className="flex items-center gap-1">
           <a
-            href={`/ws/${ownerId}${routePath.startsWith("/") ? routePath : "/" + routePath}`}
+            href={`/ws/${ownerId}${routePath.startsWith("/") ? routePath : "/" + routePath}?token=${encodeURIComponent(getToken() || "")}`}
             target="_blank"
             rel="noopener noreferrer"
             className="btn btn-ghost btn-icon"
@@ -130,9 +79,9 @@ html,body{margin:0;padding:0;height:100%;background:#0b0d10;color:#e6e6e6;font:1
           <iframe
             key={previewKey}
             title="Lab Space preview"
-            srcDoc={srcDoc}
+            src={iframeSrc}
             className="w-full h-full block"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            sandbox="allow-scripts allow-forms allow-popups"
           />
         </div>
       </div>
