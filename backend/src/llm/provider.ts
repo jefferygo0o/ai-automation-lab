@@ -87,6 +87,7 @@ export interface StreamHandle {
 interface SseProcessCtx {
   content: string;
   reasoning: string;
+  sseError: string;
   toolCallAcc: Map<number, { id: string; name: string; args: string }>;
   finishReason: LLMResponse["finishReason"];
   usage: LLMResponse["usage"] | undefined;
@@ -115,6 +116,23 @@ function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
   if (payload === "[DONE]") return;
   try {
     const json = JSON.parse(payload);
+
+    // Detect SSE-level errors: { error: { message } } or finish_reason === "error"
+    if (json.error) {
+      const msg = typeof json.error === "string" ? json.error : json.error.message ?? JSON.stringify(json.error);
+      ctx.sseError = msg;
+      ctx.finishReason = "error";
+      ctx.onChunk({ type: "error", error: msg });
+      return;
+    }
+    if (json.choices?.[0]?.finish_reason === "error") {
+      const msg = json.choices[0].error?.message ?? "Stream returned finish_reason=error";
+      ctx.sseError = msg;
+      ctx.finishReason = "error";
+      ctx.onChunk({ type: "error", error: msg });
+      return;
+    }
+
     const delta = parseDelta(json);
     if (delta.reasoning) {
       // The opencode.ai API sends the FULL accumulated reasoning
@@ -204,6 +222,7 @@ export async function streamChat(
     set content(v: string) { content = v; },
     get reasoning() { return reasoning; },
     set reasoning(v: string) { reasoning = v; },
+    sseError: "",
     toolCallAcc,
     get finishReason() { return finishReason; },
     set finishReason(v: LLMResponse["finishReason"]) { finishReason = v; },
@@ -244,7 +263,7 @@ export async function streamChat(
   }
 
   onChunk({ type: "done", finishReason, usage });
-  return { content, reasoning: reasoning || undefined, toolCalls, finishReason, usage };
+  return { content, reasoning: reasoning || undefined, toolCalls, finishReason, usage, raw: sseError || undefined };
 }
 
 /** Non-streaming call — convenience for non-interactive uses. */
