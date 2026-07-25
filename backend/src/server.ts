@@ -105,7 +105,7 @@ Bun.serve({
         if (tokenParam) user = await authenticateBearer(`Bearer ${tokenParam}`);
       }
       if (!user) return new Response("Unauthorized", { status: 401 });
-      const upgraded = server.upgrade(req, { data: { userId: user.id } });
+      const upgraded = server.upgrade(req, { data: { userId: user.userId } });
       if (!upgraded) return new Response("WebSocket upgrade failed", { status: 500 });
       return undefined as any;
     }

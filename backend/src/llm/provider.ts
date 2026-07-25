@@ -177,14 +177,16 @@ export async function streamChat(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    onChunk({ type: "error", error: `${res.status} ${res.statusText}: ${text.slice(0, 800)}` });
-    return { content: "", toolCalls: [], finishReason: "error" };
+    const errMsg = `${res.status} ${res.statusText}: ${text.slice(0, 800)}`;
+    onChunk({ type: "error", error: errMsg });
+    return { content: "", toolCalls: [], finishReason: "error", raw: errMsg };
   }
 
   const reader = res.body?.getReader();
   if (!reader) {
-    onChunk({ type: "error", error: "no response body" });
-    return { content: "", toolCalls: [], finishReason: "error" };
+    const errMsg = "no response body";
+    onChunk({ type: "error", error: errMsg });
+    return { content: "", toolCalls: [], finishReason: "error", raw: errMsg };
   }
 
   const decoder = new TextDecoder();
