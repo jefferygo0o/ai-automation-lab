@@ -112,16 +112,27 @@ function wrapHonoDefault(
  * Render a page route to an HTML Response.
  *
  * The `code` field may be:
- *   1. Raw HTML — returned inside a minimal shell
- *   2. JSON-shaped structured doc: `{"title":"x","body":"<h1>hi</h1>","style":"..."}`
- *
- * This is intentionally simple — agents that need dynamic UI should
- * create API routes and build a real frontend, or use raw HTML.
+ *   1. A full HTML document (starts with <!DOCTYPE or <html) — served as-is
+ *   2. JSON-shaped structured doc: {"title":"x","body":"<h1>hi</h1>","style":"..."}
+ *   3. Partial HTML fragment — wrapped in a minimal shell
  */
 export function renderPage(route: SpaceRouteRow): Response {
   const code = route.code ?? "";
-  // Try JSON structured doc first.
-  if (code.trim().startsWith("{")) {
+  const trimmed = code.trim();
+
+  // Detect full HTML documents — serve as-is without wrapping.
+  if (
+    trimmed.startsWith("<!DOCTYPE") ||
+    trimmed.startsWith("<!doctype") ||
+    trimmed.startsWith("<html")
+  ) {
+    return new Response(code, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  // Try JSON structured doc: {"title":"x","body":"<h1>hi</h1>","style":"..."}
+  if (trimmed.startsWith("{")) {
     try {
       const doc = JSON.parse(code);
       if (doc && typeof doc === "object" && "body" in doc) {
@@ -130,10 +141,11 @@ export function renderPage(route: SpaceRouteRow): Response {
         });
       }
     } catch {
-      // fall through to raw HTML
+      // fall through to partial HTML
     }
   }
-  // Treat as raw HTML body.
+
+  // Partial HTML — wrap in a minimal shell.
   return new Response(
     htmlShell(route.path, code, "", ""),
     { headers: { "Content-Type": "text/html; charset=utf-8" } }
@@ -148,7 +160,7 @@ function htmlShell(title: string, body: string, style: string, script: string): 
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>${escapeHtml(title)}</title>
 <style>
-  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; margin: 2rem auto; max-width: 720px; padding: 0 1rem; line-height: 1.55; color: #1a1a1a; }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; margin: 0; padding: 0; line-height: 1.55; color: #1a1a1a; min-height: 100vh; }
   ${style}
 </style>
 </head>
