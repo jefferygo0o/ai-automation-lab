@@ -28,7 +28,7 @@
  */
 
 import { toolRegistry, type ToolContext } from "./registry.ts";
-import { existsSync, mkdirSync, readFileSync, statSync, readdirSync, unlinkSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync, unlinkSync, realpathSync } from "node:fs";
 import { join, resolve, isAbsolute, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -1113,6 +1113,7 @@ toolRegistry.register({
  */
 const browserSessions = new Map<string, {
   agentId: string;
+  ownerId: string;
   url: string;
   // We keep the playwright handle in a child process (so it doesn't block
   // the bun event loop) and talk to it over stdin/stdout JSON.
@@ -1120,6 +1121,7 @@ const browserSessions = new Map<string, {
   pending: Map<string, (v: any) => void>;
   lastText: string;
   lastTitle: string;
+  lastHtml: string;
   lastScreenshot: string; // base64 PNG, refreshed by view_webpage
   createdAt: number;
 }>();
@@ -1218,7 +1220,7 @@ agent-browser open "${url}" && sleep 2 && agent-browser screenshot /tmp/ab_scree
   }
 }
 
-function ensureSession(agentId: string) {
+function ensureSession(agentId: string, ownerId: string) {
   let s = browserSessions.get(agentId);
   if (s) return s;
   if (!chromiumAvailable()) {
@@ -1243,6 +1245,26 @@ async function snapshot() {
   const html = (await page.content()).slice(0, 500000);
   return { url: page.url(), title, text: text.slice(0, 50000), html };
 }
+async function emitProgress(id) {
+  try {
+    const result = await snapshot();
+    process.stdout.write(JSON.stringify({ id, type: "progress", result }) + "\\n");
+  } catch {}
+}
+async function withProgress(id, operation) {
+  let snapshotting = false;
+  const timer = setInterval(async () => {
+    if (snapshotting) return;
+    snapshotting = true;
+    try { await emitProgress(id); } finally { snapshotting = false; }
+  }, 1000);
+  try {
+    await operation();
+    await emitProgress(id);
+  } finally {
+    clearInterval(timer);
+  }
+}
 const rl = readline.createInterface({ input: process.stdin });
 rl.on("line", async (line) => {
   let msg;
@@ -1250,8 +1272,12 @@ rl.on("line", async (line) => {
   try {
     let result;
     if (msg.cmd === "open") {
-      await page.goto(msg.url, { waitUntil: "networkidle", timeout: 30000 });
-      await page.waitForTimeout(500);
+      await withProgress(msg.id, async () => {
+        await page.goto(msg.url, { waitUntil: "domcontentloaded", timeout: 60000 });
+        currentUrl = page.url();
+        await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+        await page.waitForTimeout(500);
+      });
       currentUrl = page.url();
       result = await snapshot();
     } else if (msg.cmd === "view") {
@@ -1259,24 +1285,40 @@ rl.on("line", async (line) => {
     } else if (msg.cmd === "act") {
       const { action, selector, text, value, url } = msg;
       if (action === "click") {
-        if (selector) await page.click(selector, { timeout: 10000 });
-        else throw new Error("click requires selector");
+        await withProgress(msg.id, async () => {
+          if (selector) await page.click(selector, { timeout: 10000 });
+          else throw new Error("click requires selector");
+        });
       } else if (action === "fill") {
-        if (!selector) throw new Error("fill requires selector");
-        await page.fill(selector, text ?? "");
+        await withProgress(msg.id, async () => {
+          if (!selector) throw new Error("fill requires selector");
+          await page.fill(selector, text ?? "");
+        });
       } else if (action === "type") {
-        if (!selector) throw new Error("type requires selector");
-        await page.type(selector, text ?? "", { delay: 30 });
+        await withProgress(msg.id, async () => {
+          if (!selector) throw new Error("type requires selector");
+          await page.type(selector, text ?? "", { delay: 30 });
+        });
       } else if (action === "press") {
-        await page.keyboard.press(text ?? "Enter");
+        await withProgress(msg.id, async () => {
+          await page.keyboard.press(text ?? "Enter");
+        });
       } else if (action === "scroll") {
-        await page.evaluate((dy) => window.scrollBy(0, dy), value ?? 600);
+        await withProgress(msg.id, async () => {
+          await page.evaluate((dy) => window.scrollBy(0, dy), value ?? 600);
+        });
       } else if (action === "goto") {
-        await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+        await withProgress(msg.id, async () => {
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+          currentUrl = page.url();
+          await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+        });
         currentUrl = page.url();
       } else if (action === "wait") {
-        if (selector) await page.waitForSelector(selector, { timeout: 15000 });
-        else await page.waitForTimeout(value ?? 1000);
+        await withProgress(msg.id, async () => {
+          if (selector) await page.waitForSelector(selector, { timeout: 15000 });
+          else await page.waitForTimeout(value ?? 1000);
+        });
       } else if (action === "screenshot") {
         const buf = await page.screenshot({ type: "png", fullPage: !!msg.fullPage });
         result = { dataUri: "data:image/png;base64," + buf.toString("base64") };
@@ -1304,33 +1346,58 @@ process.stdin.on("close", async () => { try { await browser.close(); } catch {} 
   const proc = spawn("bun", ["run", script], { stdio: ["pipe", "pipe", "pipe"] });
   s = {
     agentId,
+    ownerId,
     url: "",
     proc,
     pending: new Map(),
     lastText: "",
     lastTitle: "",
     lastScreenshot: "",
+    lastHtml: "",
     createdAt: Date.now(),
   };
   const rl = require("node:readline").createInterface({ input: proc.stdout });
   rl.on("line", (line: string) => {
-    try {
-      const m = JSON.parse(line);
-      const cb = s!.pending.get(m.id);
-      if (cb) {
-        s!.pending.delete(m.id);
-        cb(m);
-      }
-    } catch {}
+    let msg;
+    try { msg = JSON.parse(line); } catch { return; }
+    if (msg.type === "progress") {
+      const active = s!;
+      active.url = msg.result?.url ?? active.url;
+      active.lastText = msg.result?.text ?? active.lastText;
+      active.lastTitle = msg.result?.title ?? active.lastTitle;
+      if (msg.result?.html) active.lastHtml = msg.result.html;
+      publishBrowserProgress(active);
+      return;
+    }
+    const handler = s!.pending.get(String(msg.id));
+    if (!handler) return;
+    s!.pending.delete(String(msg.id));
+    handler(msg);
   });
   proc.on("exit", () => browserSessions.delete(agentId));
   browserSessions.set(agentId, s);
   return s;
 }
 
+function publishBrowserProgress(session: {
+  ownerId: string;
+  agentId: string;
+  url: string;
+  lastTitle: string;
+  lastHtml: string;
+}) {
+  if (!session.lastHtml) return;
+  setActiveView(session.ownerId, {
+    url: session.url,
+    title: session.lastTitle,
+    html: session.lastHtml,
+    agentId: session.agentId,
+  });
+}
+
 let browserReqSeq = 0;
-function browserCall(agentId: string, cmd: any, timeoutMs = 30_000): Promise<any> {
-  const s = ensureSession(agentId);
+function browserCall(agentId: string, ownerId: string, cmd: any, timeoutMs = 90_000): Promise<any> {
+  const s = ensureSession(agentId, ownerId);
   const id = String(++browserReqSeq);
   return new Promise((resolveP, rejectP) => {
     const t = setTimeout(() => {
@@ -1366,7 +1433,7 @@ toolRegistry.register({
   async execute(args, ctx) {
     if (!args.url) return err("url is required");
     try {
-      const r = await browserCall(ctx.agentId, { cmd: "open", url: args.url });
+      const r = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "open", url: args.url });
       setActiveView(ctx.ownerId, { url: r.url, title: r.title, html: r.html ?? "", agentId: ctx.agentId });
       return ok(`# ${r.title || args.url}\n\nURL: ${r.url}\n\n${r.text}`);
     } catch (e: any) {
@@ -1382,7 +1449,7 @@ toolRegistry.register({
   defaultPermission: "always",
   async execute(_args, ctx) {
     try {
-      const r = await browserCall(ctx.agentId, { cmd: "view" });
+      const r = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "view" });
       setActiveView(ctx.ownerId, { url: r.url, title: r.title, html: r.html ?? "", agentId: ctx.agentId });
       return ok(`# ${r.title || r.url}\n\nURL: ${r.url}\n\n${r.text}`);
     } catch (e: any) {
@@ -1410,10 +1477,10 @@ toolRegistry.register({
     if (!args.action) return err("action is required");
     try {
       if (args.action === "screenshot") {
-        const r = await browserCall(ctx.agentId, { cmd: "act", action: "screenshot", fullPage: args.fullPage !== false });
+        const r = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "act", action: "screenshot", fullPage: args.fullPage !== false });
         return ok(`![screenshot](${r.dataUri})\n\n---\nFull-page: ${args.fullPage !== false}`);
       }
-      const r = await browserCall(ctx.agentId, { cmd: "act", action: args.action, selector: args.selector, text: args.text, value: args.value, url: args.url });
+      const r = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "act", action: args.action, selector: args.selector, text: args.text, value: args.value, url: args.url });
       setActiveView(ctx.ownerId, { url: r.url, title: r.title, html: r.html ?? "", agentId: ctx.agentId });
       return ok(`# After ${args.action}\n\n## ${r.title || r.url}\n\nURL: ${r.url}\n\n${r.text}`);
     } catch (e: any) {

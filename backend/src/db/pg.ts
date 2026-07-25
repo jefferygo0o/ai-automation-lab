@@ -210,6 +210,33 @@ class PgDbShim {
 
 export const db = new PgDbShim();
 
+async function repairAutomationSchema(): Promise<void> {
+  const statements = [
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS agent_id TEXT",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS rrule TEXT NOT NULL DEFAULT 'FREQ=DAILY'",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS prompt TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS last_run_at BIGINT",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS last_error TEXT",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS next_run_at BIGINT",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC'",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS delivery_method TEXT NOT NULL DEFAULT 'none'",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS delivery_target_json TEXT NOT NULL DEFAULT '{}'",
+    "ALTER TABLE automations ADD COLUMN IF NOT EXISTS model TEXT",
+    "ALTER TABLE automations ALTER COLUMN agent_id DROP NOT NULL",
+    "UPDATE automations SET enabled = COALESCE(enabled, active, 1), active = COALESCE(active, enabled, 1), timezone = COALESCE(NULLIF(timezone, ''), 'UTC'), delivery_method = COALESCE(NULLIF(delivery_method, ''), 'none'), delivery_target_json = COALESCE(NULLIF(delivery_target_json, ''), '{}')",
+  ];
+  for (const statement of statements) {
+    try {
+      await db.exec(statement);
+    } catch (error: any) {
+      console.error("[db] automation schema repair failed:", statement, error?.message ?? error);
+    }
+  }
+}
+
 export async function initSchema(): Promise<void> {
   const dir = fileURLToPath(new URL(".", import.meta.url));
   const p = join(dir, "schema.pg.sql");
@@ -235,10 +262,10 @@ export async function initSchema(): Promise<void> {
         console.log("[db] migration applied:", migration);
       } catch (e: any) {
         console.error(`[db] migration "${migration}" failed:`, e?.message ?? e, "(path:", mp, ")");
-        throw e;
       }
     }
   } catch (e: any) {
     console.error("[db] schema apply failed:", e?.message ?? e);
   }
+  await repairAutomationSchema();
 }

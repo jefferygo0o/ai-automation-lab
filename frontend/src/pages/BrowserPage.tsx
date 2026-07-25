@@ -23,6 +23,7 @@ export default function BrowserPage() {
   const [aiUrl, setAiUrl] = useState("");
   const [aiTitle, setAiTitle] = useState("");
   const [aiTimestamp, setAiTimestamp] = useState(0);
+  const [aiRevision, setAiRevision] = useState(0);
   const [showAiPreview, setShowAiPreview] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -30,10 +31,12 @@ export default function BrowserPage() {
   useEffect(() => {
     const apiBase = import.meta.env.VITE_API_BASE || "";
     const token = getToken();
+    let lastTimestamp = 0;
 
     async function checkAiBrowser() {
       try {
-        const res = await fetch(`${apiBase}/api/browser/active`, {
+        const res = await fetch(`${apiBase}/api/browser/active?_=${Date.now()}`, {
+          cache: "no-store",
           headers: token ? { authorization: `Bearer ${token}` } : {},
         });
         if (!res.ok) return;
@@ -43,6 +46,10 @@ export default function BrowserPage() {
           setAiUrl(data.url || "");
           setAiTitle(data.title || "");
           setAiTimestamp(data.timestamp || 0);
+          if (data.timestamp && data.timestamp !== lastTimestamp) {
+            lastTimestamp = data.timestamp;
+            setAiRevision((revision) => revision + 1);
+          }
         } else {
           setAiActive(false);
         }
@@ -138,7 +145,7 @@ export default function BrowserPage() {
   // Proxy URL for iframe with auth token query param
   const token = getToken();
   const proxyUrl = showAiPreview
-    ? `/api/browser/active/content${token ? `?token=${encodeURIComponent(token)}` : ""}`
+    ? `/api/browser/active/content?token=${token ? encodeURIComponent(token) : ""}&_=${aiTimestamp}-${aiRevision}`
     : (currentUrl || defaultUrl);
 
   return (
@@ -241,7 +248,8 @@ export default function BrowserPage() {
       {showAiPreview && aiActive && aiUrl ? (
         <div className="flex-1 relative bg-white">
           <iframe
-            src={proxyUrl}
+            key={`${aiTimestamp}-${aiRevision}`}
+            src={`${proxyUrl}&revision=${aiRevision}`}
             className="w-full h-full border-0"
             sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
             title="AI Browser Preview"

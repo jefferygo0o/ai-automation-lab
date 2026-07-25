@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "./state/auth";
 import LeftRail from "./components/LeftRail";
@@ -29,7 +29,9 @@ import SitesPage from "./pages/SitesPage";
 
 function Shell({ children }: { children: React.ReactNode }) {
   const loc = useLocation();
+  const navigate = useNavigate();
   const { closeChatTab } = useChatPanel();
+  const openPageTab = useTabStore((s) => s.openPageTab);
   const pageTabs = useTabStore((s) => s.pageTabs);
   const activePageTabId = useTabStore((s) => s.activePageTabId);
   const closePageTab = useTabStore((s) => s.closePageTab);
@@ -43,11 +45,23 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const bp = useBreakpoint();
   const isMobile = bp === "mobile";
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [splitRatio, setSplitRatio] = useState(0.5);
+  const [isDragging, setIsDragging] = useState(false);
 
   // Auto-close mobile drawer on route change
   useEffect(() => {
     setMobileNavOpen(false);
   }, [loc.pathname]);
+
+  useEffect(() => {
+    function openBrowserForAi() {
+      openPageTab("/browser", "Browser");
+      navigate("/browser");
+    }
+    window.addEventListener("lab:browser-tool-used", openBrowserForAi);
+    return () => window.removeEventListener("lab:browser-tool-used", openBrowserForAi);
+  }, [navigate, openPageTab]);
 
   // Auto-open the most recent chat tab on first load
   const hasAutoOpened = useRef(false);
@@ -87,6 +101,35 @@ function Shell({ children }: { children: React.ReactNode }) {
     closeChatTabAction(id);
   }
 
+
+  function handleMouseDown(e: React.MouseEvent) {
+    e.preventDefault();
+    setIsDragging(true);
+  }
+
+  useEffect(() => {
+    if (!isDragging) return;
+    function onMove(e: MouseEvent) {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const available = rect.width - 44;
+      if (available <= 0) return;
+      const ratio = Math.max(0.15, Math.min(0.85, (e.clientX - rect.left - 44) / available));
+      setSplitRatio(ratio);
+    }
+    function onUp() {
+      setIsDragging(false);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [isDragging]);
+
+  const hasPageTabs = pageTabs.length > 0;
+
   // Mobile: single column with drawer
   if (isMobile) {
     return (
@@ -107,42 +150,6 @@ function Shell({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-
-  // Desktop: two/three-column layout — [LeftRail 44px | Page Tab(s) | splitter | Chat Tab(s)]
-  // When no page tabs open, chat column takes full width up to the left rail.
-  const hasPageTabs = pageTabs.length > 0;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [splitRatio, setSplitRatio] = useState(0.5);
-  const [isDragging, setIsDragging] = useState(false);
-
-  function handleMouseDown(e: React.MouseEvent) {
-    e.preventDefault();
-    setIsDragging(true);
-  }
-
-  useEffect(() => {
-    if (!isDragging) return;
-    function onMove(e: MouseEvent) {
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      // LeftRail is 44px; available width = total - 44
-      const available = rect.width - 44;
-      if (available <= 0) return;
-      // LeftRail offset
-      const railOffset = 44;
-      const ratio = Math.max(0.15, Math.min(0.85, (e.clientX - rect.left - railOffset) / available));
-      setSplitRatio(ratio);
-    }
-    function onUp() {
-      setIsDragging(false);
-    }
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [isDragging]);
 
   return (
     <div

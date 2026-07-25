@@ -144,14 +144,14 @@ browserApi.delete("/sessions/:id", async (c) => {
 browserApi.get("/active", async (c) => {
   const userId = c.get("userId");
   const view = getActiveView(userId);
-  if (!view) return c.json({ active: false, url: null, title: null });
+  if (!view) return c.json({ active: false, url: null, title: null }, 200, { "Cache-Control": "no-store" });
   return c.json({
     active: true,
     url: view.url,
     title: view.title,
     agentId: view.agentId,
     timestamp: view.timestamp,
-  });
+  }, 200, { "Cache-Control": "no-store" });
 });
 
 // GET /api/browser/active/content — return cached HTML for iframe proxy
@@ -178,5 +178,5 @@ browserApi.get("/active/content", async (c) => {
   } catch {
     // If URL parsing fails, serve raw
   }
-  return c.html(html);
+  return c.html(html, 200, { "Cache-Control": "no-store", "Content-Security-Policy": "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;" });
 });

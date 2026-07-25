@@ -176,6 +176,11 @@ CREATE TABLE IF NOT EXISTS automations (
   rrule TEXT NOT NULL,           -- RRULE or simple interval string
   prompt TEXT NOT NULL,
   active INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  timezone TEXT NOT NULL DEFAULT 'UTC',
+  delivery_method TEXT NOT NULL DEFAULT 'none',
+  delivery_target_json TEXT NOT NULL DEFAULT '{}',
+  model TEXT,
   last_run_at INTEGER,
   last_error TEXT,
   created_at INTEGER NOT NULL,

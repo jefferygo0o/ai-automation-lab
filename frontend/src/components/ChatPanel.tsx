@@ -380,6 +380,9 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                 startedAt: Date.now(),
               };
               pushBlock(aid, { type: "tool_call", tool });
+              if (tool.name.startsWith("browser_") || (tool.name.startsWith("lab_") && tool.name.includes("webpage"))) {
+                window.dispatchEvent(new CustomEvent("lab:browser-tool-used"));
+              }
               // Expand immediately — stream live to the chat like thinking blocks
               setExpandedTool((p) => new Set([...p, tool.id]));
             }
