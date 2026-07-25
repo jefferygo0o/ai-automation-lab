@@ -1568,10 +1568,7 @@ toolRegistry.register({
       : resolve(userZoRoot(ctx.ownerId) + `/Images/${safeName}.${ext}`);
 
     try {
-      const body: Record<string, any> = {
-        model: "agnes-image-2.0-flash",
-        prompt: args.prompt,
-        size: `${width}x${height}`,
+      const extraBody: Record<string, any> = {
         response_format: "url",
       };
 
@@ -1582,8 +1579,15 @@ toolRegistry.register({
         const srcBuf = readFileSync(srcAbs);
         const srcB64 = srcBuf.toString("base64");
         const mime = srcAbs.endsWith(".png") ? "image/png" : "image/jpeg";
-        body.extra_body = { image: [`data:${mime};base64,${srcB64}`] };
+        extraBody.image = [`data:${mime};base64,${srcB64}`];
       }
+
+      const body: Record<string, any> = {
+        model: "agnes-image-2.0-flash",
+        prompt: args.prompt,
+        size: `${width}x${height}`,
+        extra_body: extraBody,
+      };
 
       const res = await fetch(`${AGNES_BASE}/v1/images/generations`, {
         method: "POST",
@@ -1680,8 +1684,10 @@ toolRegistry.register({
           model: "agnes-image-2.0-flash",
           prompt: args.prompt,
           size: `${width}x${height}`,
-          response_format: "url",
-          extra_body: { image: imageUrls },
+          extra_body: {
+            response_format: "url",
+            image: imageUrls,
+          },
         }),
       });
 
@@ -1724,9 +1730,10 @@ toolRegistry.register({
     instruction: { type: "string", description: "describe the video to generate", required: true },
     filepath: { type: "string", description: "optional source image to base the video on", required: false },
     file_stem: { type: "string", description: "output filename without extension", required: true },
-    width: { type: "number", description: "video width in pixels (default 848)", required: false },
-    height: { type: "number", description: "video height in pixels (default 480)", required: false },
-    duration: { type: "number", description: "video duration in seconds (default 5)", required: false },
+    width: { type: "number", description: "video width in pixels (default 1152)", required: false },
+    height: { type: "number", description: "video height in pixels (default 768)", required: false },
+    num_frames: { type: "number", description: "number of frames: 81 (~3s), 121 (~5s), 241 (~10s), 441 (~18s). Must follow 8n+1 rule. Default 121.", required: false },
+    frame_rate: { type: "number", description: "frames per second (1-60, default 24). Higher = smoother but shorter video.", required: false },
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
@@ -1741,8 +1748,10 @@ toolRegistry.register({
     const outAbs = ctx.sandbox.resolveSafe(outRel);
     try { mkdirSync(dirname(outAbs), { recursive: true }); } catch {}
 
-    const width = args.width ?? 848;
-    const height = args.height ?? 480;
+    const width = args.width ?? 1152;
+    const height = args.height ?? 768;
+    const frameRate = Math.min(60, Math.max(1, args.frame_rate ?? 24));
+    const numFrames = args.num_frames ?? 121; // Default ~5 seconds
 
     try {
       // Build the create request
@@ -1751,6 +1760,8 @@ toolRegistry.register({
         prompt: args.instruction,
         width,
         height,
+        num_frames: numFrames,
+        frame_rate: frameRate,
       };
 
       // Optional source image — convert to data URL
@@ -1819,8 +1830,10 @@ toolRegistry.register({
       writeFileSync(outAbs, videoBuf);
 
       const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+      const durationSec = (numFrames / frameRate).toFixed(1);
       return ok(
         `# Generated video\n\nModel: agnes-video-v2.0\nSize: ${width}x${height}\n` +
+        `Frames: ${numFrames} @ ${frameRate}fps (~${durationSec}s)\n` +
         `Saved: ${outAbs}\nTime: ${elapsed}s\n\nPrompt: ${args.instruction}`,
         [{ path: outRel, mime: "video/mp4", kind: "video", alt: args.instruction }]
       );
