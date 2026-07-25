@@ -12,6 +12,7 @@ import "./tools/integration_tools.ts";
 import "./tools/lab_tools_extra.ts";
 import "./tools/lab_space_tools.ts";
 import "./tools/webspace_tools.ts";
+import "./automations/tools.ts";
 import { Skills } from "./skills/index.ts";
 import api from "./api/server.ts";
 import { mcpManager } from "./mcp/client.ts";

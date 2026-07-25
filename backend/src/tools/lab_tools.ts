@@ -335,7 +335,11 @@ toolRegistry.register({
           if (args.rrule !== undefined) { sets.push("rrule = ?"); vals.push(args.rrule); }
           if (args.instruction !== undefined) { sets.push("prompt = ?"); vals.push(args.instruction); }
           if (args.agentId !== undefined) { sets.push("agent_id = ?"); vals.push(args.agentId); }
-          if (args.active !== undefined) { sets.push("active = ?"); vals.push(args.active ? 1 : 0); }
+          if (args.active !== undefined) {
+            const active = args.active ? 1 : 0;
+            sets.push("active = ?", "enabled = ?");
+            vals.push(active, active);
+          }
           if (sets.length === 0) return err("nothing to update");
           sets.push("updated_at = ?");
           vals.push(Date.now(), args.id, userId);
@@ -352,7 +356,7 @@ toolRegistry.register({
           const row = await db.query("SELECT active FROM automations WHERE id = ? AND owner_id = ?").get(args.id, userId) as any;
           if (!row) return err("automation not found");
           const newActive = args.active !== undefined ? (args.active ? 1 : 0) : row.active ? 0 : 1;
-          await db.query("UPDATE automations SET active = ?, updated_at = ? WHERE id = ?").run(newActive, Date.now(), args.id);
+          await db.query("UPDATE automations SET active = ?, enabled = ?, updated_at = ? WHERE id = ? AND owner_id = ?").run(newActive, newActive, Date.now(), args.id, userId);
           return text(`Toggled automation ${args.id}: ${newActive ? "ACTIVE" : "PAUSED"}`);
         }
         default:

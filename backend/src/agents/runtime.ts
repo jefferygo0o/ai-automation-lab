@@ -49,6 +49,7 @@ export interface RunOptions {
   onLog?: (entry: { tool: string; args: unknown; result: string; ok: boolean; durationMs: number; at: number }) => void;
   /** Hard cap on total tool invocations across all steps. 0 = unlimited. */
   maxToolCalls?: number;
+  modelOverride?: string;
 }
 
 export async function runAgentTurn(
@@ -216,7 +217,7 @@ export async function runAgentTurn(
     provider: cfg.provider,
     baseUrl: cfg.baseUrl,
     apiKey,
-    model: activePersona?.model || cfg.model,
+    model: opts.modelOverride || activePersona?.model || cfg.model,
     temperature: cfg.temperature,
     maxTokens: cfg.maxTokens,
   };
