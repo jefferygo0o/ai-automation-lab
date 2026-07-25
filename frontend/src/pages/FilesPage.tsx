@@ -162,7 +162,7 @@ function HighlightedCode({ content, language, fontSize, wordWrap }: { content: s
   };
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden" style={{ fontSize }}>
+    <div className="flex flex-1 min-h-0" style={{ fontSize }}>
       {/* Line numbers */}
       <div
         ref={gutterRef}
@@ -603,7 +603,7 @@ export default function FilesPage() {
                       <p className="italic">Empty file</p>
                     </div>
                   ) : (
-                    <div style={{ overflow: wordWrap ? "auto" : "hidden" }}>
+                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                       <HighlightedCode
                         content={activeTab.content}
                         language={detectLanguage(activeTab.name)}

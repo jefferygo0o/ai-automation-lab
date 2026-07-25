@@ -1,7 +1,12 @@
 import { resolve } from "node:path";
 
 /**
- * Per-agent sandbox option resolution from config.json.
+ * Sandbox option resolution from config.json.
+ *
+ * All agents within a single user share ONE workspace directory so every
+ * agent can see and modify the same files.  The shared path lives under
+ * the lab data root at "workspace/" — isolated per Zo Computer instance
+ * (i.e. per user) so no agent from a different user can reach these files.
  */
 
 import { readAgentConfig } from "./files.ts";
@@ -9,16 +14,13 @@ import type { AgentRecord } from "./registry.ts";
 import type { SandboxOptions } from "../sandbox/index.ts";
 import { WorkspaceService } from "../workspace/index.ts";
 
-// Allow operators to relocate the data directory (Render ephemeral disk,
-// persistent volume mounts, etc.). Default keeps the historical layout
-// under the backend project root.
-const DATA_DIR = WorkspaceService.zoRoot();
-const BACKEND_ROOT = DATA_DIR;
+/** Shared workspace root — every agent for this user shares this directory. */
+const SHARED_WORKSPACE = WorkspaceService.root();
 
 export function resolveSandboxOptions(agent: AgentRecord): SandboxOptions {
   const cfg = readAgentConfig(agent.id);
   const sb = cfg.sandbox ?? {};
-  const workdir = WorkspaceService.sandboxRoot(agent.id) + "/workspace";
+  const workdir = SHARED_WORKSPACE;
   return {
     workdir: workdir,
     timeoutMs: sb.timeoutMs ?? 60_000,

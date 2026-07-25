@@ -66,7 +66,8 @@ export async function sandboxExec(
   const o = timeoutMs ? { ...opts, timeoutMs } : opts;
   const s = createSandbox(o);
   const r = await s.run(command, args);
-  try { s.cleanup(); } catch {}
+  // NOTE: cleanup() is intentionally skipped — the sandbox workdir is now a
+  // shared per-user workspace that must persist across runs.
   return r;
 }
 
