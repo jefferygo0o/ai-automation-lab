@@ -55,6 +55,10 @@ export interface Tool {
   parameters: ToolParameters;
   defaultPermission: ToolPermission;
   execute(args: any, ctx: ToolContext): Promise<unknown>;
+  /** Optional rich documentation metadata for tool_docs lookup. */
+  usage_patterns?: string[];
+  best_practices?: string[];
+  related_tools?: string[];
 }
 
 export interface ToolExecutionPolicy {
@@ -86,6 +90,41 @@ class Registry {
 
   all(): Tool[] {
     return Array.from(this.tools.values());
+  }
+
+  /** Return formatted markdown docs for a registered tool. */
+  getDocs(name: string): string | null {
+    const tool = this.tools.get(name);
+    if (!tool) return null;
+    const lines: string[] = [
+      `## ${tool.name}`,
+      tool.description,
+      '',
+      '**Parameters:**',
+    ];
+    const params = tool.parameters ?? {};
+    for (const [k, v] of Object.entries(params)) {
+      const req = v.required ? 'Required' : 'Optional';
+      const enumPart = v.enum ? `, enum: [${v.enum.join(', ')}]` : '';
+      lines.push(`- \`${k}\` (${v.type}${enumPart}, ${req}): ${v.description ?? ''}`);
+    }
+    if (tool.usage_patterns?.length) {
+      lines.push('', '**Usage patterns:**', ...tool.usage_patterns.map(p => `- ${p}`));
+    }
+    if (tool.best_practices?.length) {
+      lines.push('', '**Best practices:**', ...tool.best_practices.map(p => `- ${p}`));
+    }
+    if (tool.related_tools?.length) {
+      lines.push('', '**Related tools:**', tool.related_tools.join(', '));
+    }
+    return lines.join('\n');
+  }
+
+  /** List all registered tool names + one-line descriptions. */
+  listDocs(): string {
+    return this.all()
+      .map((t) => `- \`${t.name}\`: ${t.description}`)
+      .join('\n');
   }
 
   toOpenAI(includeNames?: Set<string>) {
