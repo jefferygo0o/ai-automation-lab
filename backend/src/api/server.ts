@@ -472,6 +472,59 @@ api.post("/api/chats/:id/active-agent", async (c) => {
   return c.json({ ok: await ChatStore.setActiveAgent(c.req.param("id"), userId, agentId) });
 });
 
+// Auto-title: ask the LLM to generate a 5-word summary title for a chat
+api.post("/api/chats/:id/auto-title", async (c) => {
+  const userId = c.get("userId") as string;
+  const chat = await ChatStore.get(c.req.param("id"), userId);
+  if (!chat) return c.json({ error: "chat not found" }, 404);
+  const activeAgentId = chat.activeAgentId ?? chat.agentId;
+  const agent = await AgentStore.get(activeAgentId, userId);
+  if (!agent) return c.json({ error: "agent not found" }, 404);
+  const cfg = readAgentConfig(agent.id);
+  const apiKey: string = cfg.provider === "mock"
+    ? "mock-key"
+    : await (cfg.apiKeySecret
+        ? (await SecretStore.get(userId, cfg.apiKeySecret)) ?? process.env[cfg.apiKeySecret] ?? ""
+        : Promise.resolve(process.env[`${cfg.provider.toUpperCase()}_API_KEY`] ?? ""));
+  if (cfg.provider !== "mock" && !apiKey) {
+    return c.json({ error: "no API key configured" }, 500);
+  }
+  const messages = await ChatStore.listMessages(chat.id, userId);
+  const convoSnippet = messages
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(0, 6)
+    .map((m) => `${m.role}: ${m.content.slice(0, 300)}`)
+    .join("\n");
+  if (!convoSnippet.trim()) return c.json({ title: chat.title });
+  try {
+    const { callLLM } = await import("../llm/provider.ts");
+    const resp = await callLLM(
+      {
+        provider: cfg.provider,
+        baseUrl: cfg.baseUrl,
+        apiKey,
+        model: cfg.model,
+        temperature: 0.3,
+        maxTokens: 20,
+      },
+      {
+        messages: [
+          { role: "system", content: "You generate concise chat titles. Reply with ONLY a short title of 5 words or fewer summarising the conversation. No quotes, no punctuation, no extra text." },
+          { role: "user", content: convoSnippet },
+        ],
+        temperature: 0.3,
+        maxTokens: 20,
+      }
+    );
+    const title = resp.content.trim().replace(/^["']+|["']+$/g, "").slice(0, 60) || chat.title;
+    await ChatStore.rename(chat.id, userId, title);
+    return c.json({ title });
+  } catch (err) {
+    console.warn("[auto-title] failed:", err);
+    return c.json({ title: chat.title });
+  }
+});
+
 // SSE chat streaming -- supports JSON ({ content }) and multipart/form-data (content + files[])
 api.post("/api/chats/:id/messages", async (c) => {
   const userId = c.get("userId") as string;

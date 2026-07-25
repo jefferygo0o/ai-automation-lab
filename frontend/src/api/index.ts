@@ -143,6 +143,8 @@ export const Chats = {
   remove: (id: string) => api<{ ok: boolean }>(`/api/chats/${id}`, { method: "DELETE" }),
   rename: (id: string, title: string) =>
     api<{ ok: boolean }>(`/api/chats/${id}/rename`, { method: "POST", body: JSON.stringify({ title }) }),
+  autoTitle: (id: string) =>
+    api<{ title: string }>(`/api/chats/${id}/auto-title`, { method: "POST" }),
   setActiveAgent: (id: string, agentId: string) =>
     api<{ ok: boolean }>(`/api/chats/${id}/active-agent`, { method: "POST", body: JSON.stringify({ agentId }) }),
   sendMessage: (id: string, content: string) =>

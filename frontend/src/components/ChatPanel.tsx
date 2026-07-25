@@ -81,6 +81,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
   const [agentDropdownOpen, setAgentDropdownOpen] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<Array<{preview: string; name: string; file: File}>>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const chatJustCreatedRef = useRef(false);
 
   const messagesEnd = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -152,6 +153,13 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
     load();
   }, [chatId]);
 
+  // Load agents list when no chat is selected (for the new-chat view)
+  useEffect(() => {
+    if (!chatId && agentsList.length === 0) {
+      Agents.list().then(({ agents }) => setAgentsList(agents)).catch(() => {});
+    }
+  }, [chatId]);
+
   useEffect(() => {
     messagesEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, blocksByMessage]);
@@ -199,16 +207,37 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
   }
 
   async function send() {
-    if ((!input.trim() && attachedFiles.length === 0) || streaming || !chatId) return;
+    if ((!input.trim() && attachedFiles.length === 0) || streaming) return;
     const text = input;
     setInput(""); setStreaming(true);
     // Ensure fresh state for this new message
     pendingAssistantId.current = null;
     msgCounterRef.current += 1;
 
+    // If no chat exists yet, create one on the fly
+    let activeChatId = chatId;
+    if (!activeChatId) {
+      try {
+        const agentToUse = selectedAgentId || agentsList[0]?.id;
+        if (!agentToUse) { setStreaming(false); return; }
+        const { chat: newChat } = await Chats.create(agentToUse);
+        activeChatId = newChat.id;
+        chatJustCreatedRef.current = true;
+        openChat(newChat.id, newChat.title);
+        // Load the new chat into the panel
+        setChat(newChat);
+        setMessages([]);
+        if (newChat.title) updateChatTabTitle(newChat.id, newChat.title);
+      } catch (err) {
+        console.warn("Failed to create chat:", err);
+        setStreaming(false);
+        return;
+      }
+    }
+
     const userMsgId = `user_${msgCounterRef.current}`;
     setMessages((m) => [...m, {
-      id: userMsgId, chatId, role: "user", content: text, createdAt: Date.now(),
+      id: userMsgId, chatId: activeChatId!, role: "user", content: text, createdAt: Date.now(),
     } as Message]);
 
     const controller = new AbortController();
@@ -220,14 +249,14 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
           if (text.trim()) fd.append("content", text);
           for (const af of attachedFiles) fd.append(af.name, af.file);
           setAttachedFiles([]);
-          return fetch(`/api/chats/${chatId}/messages`, {
+          return fetch(`/api/chats/${activeChatId}/messages`, {
             method: "POST",
             headers: { authorization: `Bearer ${getToken()}` },
             body: fd,
             signal: controller.signal,
           });
         })()
-      : await fetch(`/api/chats/${chatId}/messages`, {
+      : await fetch(`/api/chats/${activeChatId}/messages`, {
           method: "POST",
           headers: { "content-type": "application/json", authorization: `Bearer ${getToken()}` },
           body: JSON.stringify({ content: text }),
@@ -243,7 +272,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
         msgCounterRef.current += 1; const tid = `assist_${msgCounterRef.current}`;
         pendingAssistantId.current = tid;
         setMessages((m) => [...m, {
-          id: tid, chatId, role: "assistant", content: "", createdAt: Date.now(),
+          id: tid, chatId: activeChatId!, role: "assistant", content: "", createdAt: Date.now(),
         } as Message]);
         blocksRef.current[tid] = [];
       }
@@ -430,6 +459,17 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
             }
             pendingAssistantId.current = null;
             setStreaming(false);
+            // Auto-title new chats after first response
+            if (chatJustCreatedRef.current && activeChatId) {
+              chatJustCreatedRef.current = false;
+              const chatIdForTitle = activeChatId;
+              Chats.autoTitle(chatIdForTitle).then(({ title }) => {
+                if (title) {
+                  updateChatTabTitle(chatIdForTitle, title);
+                  setChat((prev) => prev && prev.id === chatIdForTitle ? { ...prev, title } : prev);
+                }
+              }).catch(() => {});
+            }
           }
         }
       }
@@ -442,8 +482,6 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
     n.has(key) ? n.delete(key) : n.add(key);
     return n;
   }
-
-  if (!chatId) return null;
 
   return (
     <>
@@ -1387,12 +1425,118 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
         ) : (
           <>
             <div className="h-10 shrink-0 border-b border-line flex items-center gap-2 px-3">
-              <span className="text-xs font-medium text-ink-700 flex-1">Chat</span>
+              <span className="text-xs font-medium text-ink-700 flex-1">New chat</span>
               {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
               <button onClick={closeChat} className="text-xs text-ink-400 hover:text-ink-900">✕</button>
               {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
             </div>
-            <div className="flex-1 min-h-0 flex items-center justify-center text-xs text-ink-400">No chat selected</div>
+            <div className="flex-1 min-h-0 flex flex-col">
+              <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+                <div className="w-12 h-12 rounded-full bg-paper-200 border border-line grid place-items-center mb-3">
+                  <Bot className="w-6 h-6 stroke-[1.5] text-ink-400" />
+                </div>
+                <div className="text-sm font-medium text-ink-700 mb-1">Start a conversation</div>
+                <div className="text-xs text-ink-400 max-w-[200px]">Send a message to begin chatting with an agent.</div>
+              </div>
+              {/* Input area for no-chat state */}
+              <div className="border-t border-line px-3 py-2">
+                <div className="bg-paper-100 border border-line rounded-xl overflow-hidden">
+                  {attachedFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-2 px-3 pt-3">
+                      {attachedFiles.map((af, i) => (
+                        <div key={i} className="relative group">
+                          {af.file.type.startsWith("image/") ? (
+                            <img src={af.preview} alt={af.name} className="w-16 h-16 object-cover rounded-lg border border-line" />
+                          ) : (
+                            <div className="w-16 h-16 flex items-center justify-center rounded-lg border border-line bg-paper-200 text-[10px] text-ink-500 truncate px-1 text-center">{af.name}</div>
+                          )}
+                          <button type="button" onClick={() => { URL.revokeObjectURL(af.preview); setAttachedFiles((prev) => prev.filter((_, j) => j !== i)); }} className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-ink-800 text-paper-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"><X size={10} /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="overflow-y-auto" style={{ maxHeight: "400px" }}>
+                    <textarea
+                      ref={inputRef}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+                      onPaste={(e) => {
+                        const items = e.clipboardData?.items;
+                        if (!items) return;
+                        const newFiles: Array<{preview: string; name: string; file: File}> = [];
+                        for (let i = 0; i < items.length; i++) {
+                          const item = items[i];
+                          if (item.type.startsWith("image/")) {
+                            const file = item.getAsFile();
+                            if (file) {
+                              const ext = file.name.split('.').pop() || 'png';
+                              newFiles.push({ preview: URL.createObjectURL(file), name: `pasted-image-${Date.now()}.${ext}`, file });
+                            }
+                          }
+                        }
+                        if (newFiles.length > 0) { e.preventDefault(); setAttachedFiles((prev) => [...prev, ...newFiles]); }
+                      }}
+                      disabled={streaming}
+                      placeholder={streaming ? "…" : "Type a message to start a new chat…"}
+                      className="w-full bg-transparent px-4 py-3 text-sm text-ink-900 placeholder:text-ink-400 resize-none outline-none font-sans min-h-[72px]"
+                      style={{ height: "auto" }}
+                      rows={2}
+                    />
+                  </div>
+                  <div className="h-12 bg-paper-100 rounded-b-xl flex items-center px-3">
+                    <div className="w-full flex items-center justify-between">
+                      <div className="flex items-center gap-1">
+                        <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt,.csv,.json,.md" className="hidden"
+                          onChange={(e) => {
+                            const files = e.target.files;
+                            if (!files) return;
+                            const newFiles: Array<{preview: string; name: string; file: File}> = [];
+                            for (let i = 0; i < files.length; i++) {
+                              const f = files[i];
+                              newFiles.push({ preview: f.type.startsWith("image/") ? URL.createObjectURL(f) : "", name: f.name, file: f });
+                            }
+                            setAttachedFiles((prev) => [...prev, ...newFiles]);
+                            e.target.value = "";
+                          }}
+                        />
+                        {hasRunningTools && (<div className="flex items-center justify-center h-8 w-6" title="AI agent running"><AnimatedDots size={20} /></div>)}
+                        <DropdownMenu open={agentDropdownOpen} onOpenChange={setAgentDropdownOpen}>
+                          <DropdownMenuTrigger asChild>
+                            <button type="button" className="flex items-center gap-1 h-8 pl-1.5 pr-2 text-xs rounded-md text-ink-500 hover:bg-paper-200 transition-colors">
+                              <Bot size={13} className="shrink-0 text-ink-400" />
+                              <span className="max-w-[70px] truncate">{agentsList.find((a) => a.id === (selectedAgentId || agentsList[0]?.id))?.name ?? "Select agent…"}</span>
+                              <ChevronDown size={11} className="shrink-0 text-ink-400 opacity-40" />
+                            </button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="start" side="top" sideOffset={6} className="min-w-[10rem]">
+                            {agentsList.map((a) => (
+                              <DropdownMenuItem key={a.id} onSelect={() => setSelectedAgentId(a.id)} className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2"><Bot size={14} className="shrink-0 text-ink-400" /><span>{a.name}</span></div>
+                                {(selectedAgentId || agentsList[0]?.id) === a.id && (<Check size={14} className="text-ink-700" />)}
+                              </DropdownMenuItem>
+                            ))}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                        <div className="h-4 w-px bg-line ml-1" />
+                        <button type="button" onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 hover:bg-paper-200 text-ink-400 hover:text-ink-700 transition-colors" aria-label="Attach files" title="Attach files or images"><Plus size={18} /></button>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={hasRunningTools ? () => streamAbortRef.current?.abort() : send}
+                        disabled={!hasRunningTools && !input.trim() && attachedFiles.length === 0}
+                        className={cn("rounded-lg p-2 hover:bg-paper-200 transition-colors", "disabled:opacity-30 disabled:hover:bg-transparent")}
+                        aria-label="Send message"
+                      >
+                        {hasRunningTools ? (<span className="text-xs font-medium text-err">■</span>) : (
+                          <ArrowRight size={18} className={cn("text-ink-700 transition-opacity duration-200", input.trim() || attachedFiles.length > 0 ? "opacity-100" : "opacity-30")} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </>
         )}
       </aside>
