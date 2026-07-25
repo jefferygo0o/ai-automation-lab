@@ -1568,9 +1568,8 @@ toolRegistry.register({
       : resolve(userZoRoot(ctx.ownerId) + `/Images/${safeName}.${ext}`);
 
     try {
-      const extraBody: Record<string, any> = {
-        response_format: "url",
-      };
+      // Agnes Image 2.0 Flash returns URL by default — no response_format needed.
+      const extraBody: Record<string, any> = {};
 
       // Image-to-image: read source, base64-encode, pass in extra_body
       if (args.filepath && typeof args.filepath === "string") {
@@ -1586,8 +1585,8 @@ toolRegistry.register({
         model: "agnes-image-2.0-flash",
         prompt: args.prompt,
         size: `${width}x${height}`,
-        extra_body: extraBody,
       };
+      if (Object.keys(extraBody).length > 0) body.extra_body = extraBody;
 
       const res = await fetch(`${AGNES_BASE}/v1/images/generations`, {
         method: "POST",
@@ -1685,7 +1684,6 @@ toolRegistry.register({
           prompt: args.prompt,
           size: `${width}x${height}`,
           extra_body: {
-            response_format: "url",
             image: imageUrls,
           },
         }),
