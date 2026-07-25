@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Agents, Workspace, type Agent, type FileEntry, type SandboxEntry, type WorkspaceEntry } from "../api";
+import { Workspace, type WorkspaceEntry } from "../api";
 import {
   Folder, FolderOpen, File, FileText, Image, FileCode,
   ChevronRight, Search, ArrowUp, FolderTree,
-  Trash2, AlertCircle, RefreshCw, Bot, Home, FilePlus2,
+  Trash2, AlertCircle, RefreshCw, Home, FilePlus2,
 } from "lucide-react";
 
 function fileIcon(name: string, type: string) {
@@ -19,13 +18,6 @@ function fileIcon(name: string, type: string) {
   return <File className="w-3.5 h-3.5 text-ink-400" />;
 }
 
-function agentFileIcon(name: string) {
-  const ext = name.split(".").pop()?.toLowerCase();
-  if (ext === "md") return <FileText className="w-3.5 h-3.5 text-ink-600" />;
-  if (ext === "json") return <FileCode className="w-3.5 h-3.5 text-blue-500" />;
-  return <File className="w-3.5 h-3.5 text-ink-400" />;
-}
-
 function formatSize(bytes?: number): string {
   if (!bytes) return "";
   if (bytes < 1024) return `${bytes}B`;
@@ -33,125 +25,39 @@ function formatSize(bytes?: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-function formatTime(ms?: number): string {
-  if (!ms) return "";
-  const d = new Date(ms);
-  return d.toLocaleDateString("en-GB", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-}
-
 interface PreviewState {
-  source: "agent" | "sandbox" | "workspace";
   path: string;
   content: string;
+  encoding: string;
 }
 
 export default function FilesPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const agentIdParam = searchParams.get("agent") || "";
-
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [selectedAgentId, setSelectedAgentId] = useState(agentIdParam);
-  const [activeTab, setActiveTab] = useState<"agent" | "sandbox" | "workspace">(() => {
-    const t = searchParams.get("tab");
-    return t === "agent" || t === "sandbox" || t === "workspace" ? t : "workspace";
-  });
+  const [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [currentPath, setCurrentPath] = useState(".");
-  const [entries, setEntries] = useState<SandboxEntry[]>([]);
-  const [agentFiles, setAgentFiles] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [preview, setPreview] = useState<PreviewState | null>(null);
-  const [selectedEntry, setSelectedEntry] = useState<SandboxEntry | null>(null);
-  const [selectedAgentFile, setSelectedAgentFile] = useState<string | null>(null);
-  const [workspaceEntries, setWorkspaceEntries] = useState<WorkspaceEntry[]>([]);
-  const [workspacePath, setWorkspacePath] = useState(".");
+  const [selectedEntry, setSelectedEntry] = useState<string | null>(null);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [showNewFolder, setShowNewFolder] = useState(false);
 
-  useEffect(() => {
-    Agents.list().then((res) => setAgents(res.agents)).catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (agentIdParam && agentIdParam !== selectedAgentId) {
-      setSelectedAgentId(agentIdParam);
-      setCurrentPath(".");
-      setPreview(null);
-      setSelectedEntry(null);
-      setSelectedAgentFile(null);
-    }
-  }, [agentIdParam]);
-
-  const fetchSandboxEntries = useCallback(async (agentId: string, path: string) => {
+  const fetchEntries = useCallback(async (path: string) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await Agents.sandboxBrowse(agentId, path);
+      const res = await Workspace.tree(path);
       setEntries(res.entries);
     } catch (e: any) {
-      setError(e.message || "Failed to load sandbox files");
+      setError(e.message || "Failed to load files");
       setEntries([]);
     }
     setLoading(false);
   }, []);
 
-  const fetchAgentFiles = useCallback(async (agentId: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await Agents.files(agentId);
-      setAgentFiles(res.files);
-    } catch (e: any) {
-      setError(e.message || "Failed to load agent files");
-      setAgentFiles([]);
-    }
-    setLoading(false);
-  }, []);
-
-  const fetchWorkspaceEntries = useCallback(async (path: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await Workspace.tree(path);
-      setWorkspaceEntries(res.entries);
-    } catch (e: any) {
-      setError(e.message || "Failed to load workspace files");
-      setWorkspaceEntries([]);
-    }
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
-    if (!selectedAgentId) return;
-    if (activeTab === "sandbox") {
-      fetchSandboxEntries(selectedAgentId, currentPath);
-    } else if (activeTab === "agent") {
-      fetchAgentFiles(selectedAgentId);
-    } else {
-      fetchWorkspaceEntries(workspacePath);
-    }
-  }, [selectedAgentId, activeTab, currentPath, workspacePath, fetchSandboxEntries, fetchAgentFiles, fetchWorkspaceEntries]);
-
-  function handleAgentChange(agentId: string) {
-    setSelectedAgentId(agentId);
-    setCurrentPath(".");
-    setPreview(null);
-    setSelectedEntry(null);
-    setSelectedAgentFile(null);
-    setSearchParams(agentId ? { agent: agentId } : {}, { replace: true });
-  }
-
-  function handleTabChange(tab: "agent" | "sandbox" | "workspace") {
-    setActiveTab(tab);
-    setCurrentPath(".");
-    setPreview(null);
-    setSelectedEntry(null);
-    setSelectedAgentFile(null);
-    setSearchQuery("");
-    const next = new URLSearchParams(searchParams);
-    if (selectedAgentId) next.set("agent", selectedAgentId);
-    next.set("tab", tab);
-    setSearchParams(next, { replace: true });
-  }
+    fetchEntries(currentPath);
+  }, [currentPath, fetchEntries]);
 
   function navigateToDir(dirName: string) {
     const next = currentPath === "." ? dirName : `${currentPath}/${dirName}`;
@@ -184,170 +90,99 @@ export default function FilesPage() {
     setSelectedEntry(null);
   }
 
-  const handleSandboxClick = async (entry: SandboxEntry) => {
-    setSelectedEntry(entry);
-    setSelectedAgentFile(null);
+  const handleEntryClick = async (entry: WorkspaceEntry) => {
+    setSelectedEntry(entry.path);
     if (entry.type === "dir") {
       navigateToDir(entry.name);
     } else {
       try {
-        const relPath = currentPath === "." ? entry.name : `${currentPath}/${entry.name}`;
-        const res = await Agents.sandboxRead(selectedAgentId, relPath);
-        setPreview({ source: "sandbox", path: relPath, content: res.content });
+        const res = await Workspace.read(entry.path);
+        setPreview({ path: entry.path, content: res.content, encoding: res.encoding });
       } catch (e: any) {
         setError(e.message || "Failed to read file");
       }
     }
   };
 
-  const handleAgentFileClick = async (name: string) => {
-    setSelectedAgentFile(name);
-    setSelectedEntry(null);
-    try {
-      const res = await Agents.readFile(selectedAgentId, name);
-      setPreview({ source: "agent", path: name, content: res.content });
-    } catch (e: any) {
-      setError(e.message || "Failed to read file");
-    }
-  };
-
-  const handleDelete = async (entry: SandboxEntry) => {
+  const handleDelete = async (entry: WorkspaceEntry) => {
     if (!confirm(`Delete "${entry.name}"?`)) return;
     try {
-      const relPath = currentPath === "." ? entry.name : `${currentPath}/${entry.name}`;
-      await Agents.sandboxDelete(selectedAgentId, relPath);
-      await fetchSandboxEntries(selectedAgentId, currentPath);
-      if (preview?.source === "sandbox" && preview.path === relPath) setPreview(null);
+      await Workspace.delete(entry.path);
+      await fetchEntries(currentPath);
+      if (preview?.path === entry.path) setPreview(null);
     } catch (e: any) {
       setError(e.message || "Failed to delete");
     }
   };
 
+  const handleCreateFolder = async () => {
+    const name = newFolderName.trim();
+    if (!name) return;
+    const path = currentPath === "." ? name : `${currentPath}/${name}`;
+    try {
+      await Workspace.mkdir(path);
+      setNewFolderName("");
+      setShowNewFolder(false);
+      await fetchEntries(currentPath);
+    } catch (e: any) {
+      setError(e.message || "Failed to create folder");
+    }
+  };
+
+  const handleCreateFile = async () => {
+    const name = prompt("File name:");
+    if (!name?.trim()) return;
+    const path = currentPath === "." ? name.trim() : `${currentPath}/${name.trim()}`;
+    try {
+      await Workspace.write(path, "");
+      await fetchEntries(currentPath);
+    } catch (e: any) {
+      setError(e.message || "Failed to create file");
+    }
+  };
+
   const pathParts = currentPath === "." ? [] : currentPath.split("/");
-  const workspacePathParts = workspacePath === "." ? [] : workspacePath.split("/");
-  const selectedAgent = agents.find((a) => a.id === selectedAgentId);
 
   const filteredEntries = searchQuery
     ? entries.filter((e) => e.name.toLowerCase().includes(searchQuery.toLowerCase()))
     : entries;
 
-  const filteredAgentFiles = searchQuery
-    ? agentFiles.filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    : agentFiles;
-
-  if (!selectedAgentId) {
-    return (
-      <div className="h-full flex flex-col p-3 sm:p-6">
-        <div className="h-10 border-b border-line flex items-center px-4 shrink-0">
-          <span className="text-xs font-medium text-ink-400">Files</span>
-        </div>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center max-w-md">
-            <FolderTree className="w-12 h-12 mx-auto mb-4 text-ink-300" />
-            <h2 className="text-sm font-semibold text-ink-900 mb-2">Select an Agent</h2>
-            <p className="text-xs text-ink-400 mb-4">
-              Choose an agent below to browse its files. You'll see the agent's
-              config files (system, persona, skills, tools, memory) and its
-              sandbox workdir where generated media and tool outputs land.
-            </p>
-            {agents.length === 0 ? (
-              <p className="text-xs text-ink-400 italic">No agents found. Create one first.</p>
-            ) : (
-              <div className="flex flex-wrap justify-center gap-2">
-                {agents.map((a) => (
-                  <button
-                    key={a.id}
-                    onClick={() => handleAgentChange(a.id)}
-                    className="btn btn-sm flex items-center gap-2"
-                  >
-                    <Bot className="w-3.5 h-3.5" />
-                    {a.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="h-full flex flex-col p-3 sm:p-6">
+      {/* Header */}
       <div className="h-10 border-b border-line flex items-center justify-between px-4 shrink-0 gap-2">
         <div className="flex items-center gap-2 text-xs min-w-0">
-          <select
-            value={selectedAgentId}
-            onChange={(e) => handleAgentChange(e.target.value)}
-            className="input h-7 text-xs w-auto max-w-[160px]"
-          >
-            {agents.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
+          <FolderTree className="w-3.5 h-3.5 text-ink-400 shrink-0" />
+          <span className="text-xs font-medium text-ink-400">Files</span>
 
-          <div className="ml-2 flex items-center border border-line rounded-sm overflow-hidden">
+          <div className="ml-2 flex items-center gap-1 text-ink-400">
             <button
-              onClick={() => handleTabChange("agent")}
-              className={`px-2.5 h-7 text-xs ${activeTab === "agent" ? "bg-paper-200 text-ink-900" : "text-ink-500 hover:bg-paper-100"}`}
+              onClick={goToRoot}
+              className={`btn btn-ghost btn-icon shrink-0 ${currentPath === "." ? "text-ink-900" : "text-ink-400"}`}
+              title="Root"
             >
-              Agent files
+              <Home className="w-3.5 h-3.5" />
             </button>
-            <button
-              onClick={() => handleTabChange("sandbox")}
-              className={`px-2.5 h-7 text-xs border-l border-line ${activeTab === "sandbox" ? "bg-paper-200 text-ink-900" : "text-ink-500 hover:bg-paper-100"}`}
-            >
-              Sandbox
-            </button>
-            <button
-              onClick={() => handleTabChange("workspace")}
-              className={`px-2.5 h-7 text-xs border-l border-line ${activeTab === "workspace" ? "bg-paper-200 text-ink-900" : "text-ink-500 hover:bg-paper-100"}`}
-            >
-              Workspace
-            </button>
-          </div>
-
-          {activeTab === "sandbox" && (
-            <>
-              <button
-                onClick={goToRoot}
-                className={`btn btn-ghost btn-icon shrink-0 ${currentPath === "." ? "text-ink-900" : "text-ink-400"}`}
-                title="Sandbox root"
-              >
-                <Home className="w-3.5 h-3.5" />
+            {currentPath !== "." && (
+              <button onClick={navigateUp} className="btn btn-ghost btn-icon shrink-0" title="Parent directory">
+                <ArrowUp className="w-3.5 h-3.5" />
               </button>
-              {currentPath !== "." && (
-                <button onClick={navigateUp} className="btn btn-ghost btn-icon shrink-0" title="Parent directory">
-                  <ArrowUp className="w-3.5 h-3.5" />
-                </button>
-              )}
-              <span className="text-ink-400 font-medium shrink-0">
-                {selectedAgent?.name ?? selectedAgentId}
-              </span>
-              {pathParts.map((part, i) => (
-                <span key={i} className="flex items-center gap-1 min-w-0">
-                  <ChevronRight className="w-3 h-3 text-ink-300 shrink-0" />
-                  <button
-                    onClick={() => navigateBreadcrumb(i)}
-                    className={`truncate hover:text-ink-900 ${
-                      i === pathParts.length - 1 ? "text-ink-900 font-medium" : "text-ink-400"
-                    }`}
-                  >
-                    {part}
-                  </button>
-                </span>
-              ))}
-            </>
-          )}
+            )}
 
-          {activeTab === "agent" && (
-            <span className="text-ink-400 font-medium shrink-0 ml-2">
-              {selectedAgent?.name ?? selectedAgentId} / config
-            </span>
-          )}
-          {activeTab === "workspace" && (
-            <span className="text-ink-400 font-medium shrink-0 ml-2">Workspace / {workspacePath}</span>
-          )}
+            {pathParts.map((part, i) => (
+              <span key={i} className="flex items-center gap-1 min-w-0">
+                <ChevronRight className="w-3 h-3 text-ink-300 shrink-0" />
+                <button
+                  onClick={() => navigateBreadcrumb(i)}
+                  className={`truncate hover:text-ink-900 ${
+                    i === pathParts.length - 1 ? "text-ink-900 font-medium" : "text-ink-400"
+                  }`}
+                >
+                  {part}
+                </button>
+              </span>
+            ))}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -360,20 +195,38 @@ export default function FilesPage() {
               className="input h-7 w-36 pl-7 text-xs"
             />
           </div>
-          <button
-            onClick={() => {
-              if (activeTab === "sandbox") fetchSandboxEntries(selectedAgentId, currentPath);
-              else fetchAgentFiles(selectedAgentId);
-              if (activeTab === "workspace") fetchWorkspaceEntries(workspacePath);
-            }}
-            className="btn btn-ghost btn-icon"
-            title="Refresh"
-          >
+          <button onClick={() => setShowNewFolder(!showNewFolder)} className="btn btn-ghost btn-icon" title="New folder">
+            <FolderPlus className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={handleCreateFile} className="btn btn-ghost btn-icon" title="New file">
+            <FilePlus2 className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => fetchEntries(currentPath)} className="btn btn-ghost btn-icon" title="Refresh">
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
+      {/* New folder input */}
+      {showNewFolder && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-line">
+          <input
+            autoFocus
+            value={newFolderName}
+            onChange={(e) => setNewFolderName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleCreateFolder();
+              if (e.key === "Escape") { setShowNewFolder(false); setNewFolderName(""); }
+            }}
+            placeholder="Folder name..."
+            className="input h-7 text-xs flex-1"
+          />
+          <button onClick={handleCreateFolder} className="btn btn-sm">Create</button>
+          <button onClick={() => { setShowNewFolder(false); setNewFolderName(""); }} className="btn btn-ghost btn-sm">Cancel</button>
+        </div>
+      )}
+
+      {/* Error */}
       {error && (
         <div className="mx-4 mt-2 px-3 py-2 bg-err/5 border border-err/30 rounded-sm text-xs text-err flex items-center gap-2">
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
@@ -382,26 +235,16 @@ export default function FilesPage() {
         </div>
       )}
 
+      {/* Main content */}
       <div className="flex-1 flex overflow-hidden min-h-0">
+        {/* File list */}
         <div className={`${preview ? "w-80" : "flex-1"} border-r border-line overflow-y-auto`}>
-          {activeTab === "agent" ? (
-            <AgentFileList
-              files={filteredAgentFiles}
-              selected={selectedAgentFile}
-              onSelect={handleAgentFileClick}
-              loading={loading}
-              searchQuery={searchQuery}
-            />
-          ) : activeTab === "workspace" ? (
-            workspaceEntries.length === 0 ? <div className="p-4 text-xs text-ink-400 text-center">Workspace directory is empty.</div> : (
-              <div className="p-2 space-y-px">{workspaceEntries.map((entry) => <div key={entry.path} className="flex items-center gap-2 px-2.5 py-1.5 rounded-sm cursor-pointer text-xs text-ink-500 hover:text-ink-900 hover:bg-paper-200/40" onClick={async () => { if (entry.type === "dir") { const next = workspacePath === "." ? entry.name : `${workspacePath}/${entry.name}`; setWorkspacePath(next); const res = await Workspace.tree(next); setWorkspaceEntries(res.entries); } else { const res = await Workspace.read(entry.path); setPreview({ source: "workspace", path: entry.path, content: res.content }); } }}>{entry.type === "dir" ? <Folder className="w-4 h-4 text-amber-500" /> : fileIcon(entry.name, entry.type)}<span className="flex-1 truncate">{entry.name}</span></div>)}</div>
-            )
-          ) : loading ? (
+          {loading ? (
             <div className="p-4 text-xs text-ink-400">Loading files...</div>
           ) : filteredEntries.length === 0 ? (
             <div className="p-4 text-xs text-ink-400 text-center">
               <FolderOpen className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              {searchQuery ? "No files matching filter." : "This sandbox directory is empty."}
+              {searchQuery ? "No files matching filter." : "This directory is empty."}
             </div>
           ) : (
             <div className="p-2 space-y-px">
@@ -409,14 +252,14 @@ export default function FilesPage() {
                 <div
                   key={entry.path}
                   className={`group flex items-center gap-2 px-2.5 py-1.5 rounded-sm cursor-pointer text-xs transition-colors ${
-                    selectedEntry?.path === entry.path
+                    selectedEntry === entry.path
                       ? "bg-paper-200 text-ink-900"
                       : "text-ink-500 hover:text-ink-900 hover:bg-paper-200/40"
                   }`}
-                  onClick={() => handleSandboxClick(entry)}
+                  onClick={() => handleEntryClick(entry)}
                 >
                   {entry.type === "dir" ? (
-                    selectedEntry?.path === entry.path
+                    selectedEntry === entry.path
                       ? <FolderOpen className="w-4 h-4 text-amber-500 shrink-0" />
                       : <Folder className="w-4 h-4 text-amber-500 shrink-0" />
                   ) : (
@@ -439,23 +282,25 @@ export default function FilesPage() {
           )}
         </div>
 
+        {/* Preview pane */}
         {preview ? (
           <div className="flex-1 flex flex-col min-w-0 min-h-0">
             <div className="h-9 border-b border-line flex items-center justify-between px-4 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-2xs font-mono text-ink-400 shrink-0">
-                  {preview.source === "agent" ? "agent/" : preview.source === "workspace" ? "workspace/" : "sandbox/"}
-                </span>
                 <span className="text-xs font-mono font-medium truncate">{preview.path}</span>
               </div>
               <button onClick={() => setPreview(null)} className="btn btn-ghost btn-icon shrink-0">
-                <ArrowUp className="w-3 h-3" />
+                <span className="text-ink-400 text-xs">✕</span>
               </button>
             </div>
             <div className="flex-1 overflow-auto p-4 min-h-0">
-              <pre className="text-xs leading-relaxed text-ink-800 whitespace-pre-wrap font-mono">
-                {preview.content || <span className="text-ink-400 italic">(empty file)</span>}
-              </pre>
+              {preview.encoding === "base64" ? (
+                <div className="text-xs text-ink-400 italic">Binary file — cannot preview text.</div>
+              ) : (
+                <pre className="text-xs leading-relaxed text-ink-800 whitespace-pre-wrap font-mono">
+                  {preview.content || <span className="text-ink-400 italic">(empty file)</span>}
+                </pre>
+              )}
             </div>
           </div>
         ) : (
@@ -471,49 +316,12 @@ export default function FilesPage() {
   );
 }
 
-function AgentFileList({
-  files,
-  selected,
-  onSelect,
-  loading,
-  searchQuery,
-}: {
-  files: FileEntry[];
-  selected: string | null;
-  onSelect: (name: string) => void;
-  loading: boolean;
-  searchQuery: string;
-}) {
-  if (loading) {
-    return <div className="p-4 text-xs text-ink-400">Loading files...</div>;
-  }
-  if (files.length === 0) {
-    return (
-      <div className="p-4 text-xs text-ink-400 text-center">
-        <File className="w-8 h-8 mx-auto mb-2 opacity-30" />
-        {searchQuery ? "No files matching filter." : "No agent files yet."}
-      </div>
-    );
-  }
+function FolderPlus({ className }: { className?: string }) {
   return (
-    <div className="p-2 space-y-px">
-      {files.map((f) => (
-        <div
-          key={f.name}
-          className={`group flex items-center gap-2 px-2.5 py-1.5 rounded-sm cursor-pointer text-xs transition-colors ${
-            selected === f.name
-              ? "bg-paper-200 text-ink-900"
-              : "text-ink-500 hover:text-ink-900 hover:bg-paper-200/40"
-          }`}
-          onClick={() => onSelect(f.name)}
-        >
-          {agentFileIcon(f.name)}
-          <span className="flex-1 truncate font-mono">{f.name}</span>
-          <span className="text-2xs text-ink-400 hidden group-hover:block tabular-nums shrink-0">
-            {formatSize(f.size)}
-          </span>
-        </div>
-      ))}
-    </div>
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 10v6" />
+      <path d="M9 13h6" />
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+    </svg>
   );
 }
