@@ -445,17 +445,18 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
           } else if (type === "error") {
             pushBlock(aid, { type: "text", content: `\n[Error: ${payload.message}]\n` });
           } else if (type === "done") {
-            // Mark last thinking block as done
+            // Finalize all blocks: close thinking + finalize any orphaned pending tools
             const blocks = blocksRef.current[aid] ?? [];
             if (blocks.length > 0) {
-              const last = blocks[blocks.length - 1];
-              if (last.type === "thinking") {
-                const closed = blocks.map((b, i) =>
-                  i === blocks.length - 1 && b.type === "thinking" ? { ...b, done: true } : b
-                );
-                setBlocksByMessage((p) => ({ ...p, [aid]: closed }));
-                blocksRef.current[aid] = closed;
-              }
+              const finalized = blocks.map((b) => {
+                if (b.type === "thinking" && !b.done) return { ...b, done: true };
+                if (b.type === "tool_call" && b.tool.status === "pending") {
+                  return { ...b, tool: { ...b.tool, status: "ok" as const, durationMs: b.tool.durationMs ?? 0 } };
+                }
+                return b;
+              });
+              setBlocksByMessage((p) => ({ ...p, [aid]: finalized }));
+              blocksRef.current[aid] = finalized;
             }
             pendingAssistantId.current = null;
             setStreaming(false);
@@ -474,6 +475,19 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
         }
       }
     } catch { /* stream ended */ }
+    // Safety net: finalize any orphaned pending tools across ALL messages
+    // This covers the case where the stream closes before tool_result arrives
+    for (const [aid, arr] of Object.entries(blocksRef.current)) {
+      const updated = arr.map((b) => {
+        if (b.type === "tool_call" && b.tool.status === "pending") {
+          return { ...b, tool: { ...b.tool, status: "ok" as const, durationMs: b.tool.durationMs ?? 0 } };
+        }
+        if (b.type === "thinking" && !b.done) return { ...b, done: true };
+        return b;
+      });
+      setBlocksByMessage((p) => ({ ...p, [aid]: updated }));
+      blocksRef.current[aid] = updated;
+    }
     setStreaming(false);
   }
 
