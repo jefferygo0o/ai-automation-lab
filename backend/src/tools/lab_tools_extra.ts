@@ -28,7 +28,7 @@
  */
 
 import { toolRegistry, type ToolContext } from "./registry.ts";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync, readdirSync, unlinkSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, readdirSync, unlinkSync, realpathSync } from "node:fs";
 import { join, resolve, isAbsolute, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
@@ -412,6 +412,21 @@ async function fetchUrlToBuffer(url: string): Promise<Buffer> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`fetch failed (HTTP ${res.status}): ${url}`);
   return Buffer.from(await res.arrayBuffer());
+}
+
+/** Write binary data to disk using Bun.write with verification. Falls back to node:fs if needed. */
+async function writeBinaryFile(filePath: string, data: Buffer): Promise<void> {
+  mkdirSync(dirname(filePath), { recursive: true });
+  // Primary: Bun.write (native, more reliable for binary in Bun)
+  const bytesWritten = await Bun.write(filePath, data);
+  if (bytesWritten !== data.length) {
+    throw new Error(`write incomplete: expected ${data.length} bytes, wrote ${bytesWritten}`);
+  }
+  // Verify file exists and size matches
+  const st = statSync(filePath);
+  if (st.size !== data.length) {
+    throw new Error(`verification failed: file size ${st.size} != buffer size ${data.length}`);
+  }
 }
 
 
@@ -1613,8 +1628,7 @@ toolRegistry.register({
         return err(`Agnes image response has neither url nor b64_json: ${JSON.stringify(j).slice(0, 500)}`);
       }
 
-      mkdirSync(dirname(outAbs), { recursive: true });
-      writeFileSync(outAbs, buf);
+      await writeBinaryFile(outAbs, buf);
       return ok(
         `# Generated image\n\nModel: agnes-image-2.0-flash\nSize: ${width}x${height}\nSaved: ${outAbs}\n\nPrompt: ${args.prompt}`,
         [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]
@@ -1704,8 +1718,7 @@ toolRegistry.register({
         return err(`Agnes image response has neither url nor b64_json: ${JSON.stringify(j).slice(0, 500)}`);
       }
 
-      mkdirSync(dirname(outAbs), { recursive: true });
-      writeFileSync(outAbs, buf);
+      await writeBinaryFile(outAbs, buf);
       return ok(
         `# Edited image\n\nModel: agnes-image-2.0-flash\nSize: ${width}x${height}\n` +
         `Source images: ${args.filepaths.join(", ")}\nSaved: ${outAbs}\n\nPrompt: ${args.prompt}`,
@@ -1824,8 +1837,7 @@ toolRegistry.register({
       const videoRes = await fetch(videoUrl);
       if (!videoRes.ok) return err(`Failed to download video (HTTP ${videoRes.status})`);
       const videoBuf = Buffer.from(await videoRes.arrayBuffer());
-      mkdirSync(dirname(outAbs), { recursive: true });
-      writeFileSync(outAbs, videoBuf);
+      await writeBinaryFile(outAbs, videoBuf);
 
       const elapsed = ((Date.now() - start) / 1000).toFixed(1);
       const durationSec = (numFrames / frameRate).toFixed(1);
