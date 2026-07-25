@@ -19,6 +19,11 @@ const CWD = process.env.HOME || "/root";
 
 export function onTerminalOpen(ws: ServerWebSocket<TerminalData>) {
   const { userId } = ws.data;
+  if (!userId) {
+    console.error("[terminal] rejecting connection: userId is undefined");
+    ws.close(1008, "userId required");
+    return;
+  }
   // Create a per-user working directory
   const userDir = join(CWD, ".terminal-sessions", userId);
 

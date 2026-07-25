@@ -263,7 +263,7 @@ export async function streamChat(
   }
 
   onChunk({ type: "done", finishReason, usage });
-  return { content, reasoning: reasoning || undefined, toolCalls, finishReason, usage, raw: sseError || undefined };
+  return { content, reasoning: reasoning || undefined, toolCalls, finishReason, usage, raw: sseCtx.sseError || undefined };
 }
 
 /** Non-streaming call — convenience for non-interactive uses. */
