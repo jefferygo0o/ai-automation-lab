@@ -488,13 +488,6 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
       <aside className="w-full shrink-0 border-l border-line bg-paper-50 flex flex-col h-full min-h-0 overflow-hidden relative">
         {chatId && chat ? (
           <>
-            {/* Header */}
-            <div className="h-10 shrink-0 border-b border-line flex items-center gap-2 px-3">
-              <button onClick={closeChat} className="text-xs text-ink-400 hover:text-ink-900">✕</button>
-              {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
-              <span className="text-xs font-medium text-ink-900 truncate flex-1">{chat.title || "Chat"}</span>
-            </div>
-
             {/* Messages */}
             <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3">
               {messages.map((m) => {
@@ -748,7 +741,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                       >
                                         <button
                                           type="button"
-                                          className="flex min-w-0 items-center gap-1.5 overflow-hidden w-full min-h-7 px-2 py-0.5 cursor-pointer rounded-md hover:bg-muted/30 text-left"
+                                          className="flex items-center gap-1.5 w-full min-h-7 px-2 py-0.5 cursor-pointer rounded-md hover:bg-muted/30 text-left"
                                           onClick={() => {}}
                                         >
                                           <Terminal size={16} className="shrink-0 text-muted-foreground/50" />
@@ -764,14 +757,14 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                                 animation: "shimmer-sweep 1.5s linear infinite",
                                               } as React.CSSProperties : undefined}
                                             >
-                                              Ran command
+                                              {isPending ? "Running command" : "Ran command"}
                                             </span>
                                             <ChevronRight
                                               size={14}
                                               className={"shrink-0 text-muted-foreground/50 transition-transform duration-150 " + (isOpen ? "rotate-90" : "")}
                                             />
                                           </span>
-                                          <div className="flex items-center justify-end gap-1.5 pl-2 min-w-0 flex-1 [&_p]:my-0 [&_p]:whitespace-nowrap [&_p]:overflow-hidden [&_p]:text-ellipsis [&_code]:whitespace-nowrap">
+                                          <div className="flex items-center justify-start gap-1.5 pl-2 min-w-0 flex-1 [&_p]:my-0 [&_p]:whitespace-nowrap [&_p]:overflow-hidden [&_p]:text-ellipsis [&_code]:whitespace-nowrap">
                                             {label && (
                                               <span className="min-w-0 max-w-full truncate font-mono text-xs text-muted-foreground/50">
                                                 {label}
@@ -927,7 +920,7 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
                                             className={"shrink-0 text-muted-foreground/50 transition-transform duration-150 " + (isOpen ? "rotate-90" : "")}
                                           />
                                         </span>
-                                        <div className="flex items-center justify-end gap-1.5 pl-2 min-w-0 flex-1 [&_p]:my-0 [&_p]:whitespace-nowrap [&_p]:overflow-hidden [&_p]:text-ellipsis [&_code]:whitespace-nowrap">
+                                        <div className="flex items-center justify-start gap-1.5 pl-2 min-w-0 flex-1 [&_p]:my-0 [&_p]:whitespace-nowrap [&_p]:overflow-hidden [&_p]:text-ellipsis [&_code]:whitespace-nowrap">
                                           {(livePath || label) && (
                                             <span
                                               className="text-xs text-muted-foreground/50 font-mono truncate min-w-0 cursor-pointer hover:text-muted-foreground hover:underline transition-colors duration-150"
