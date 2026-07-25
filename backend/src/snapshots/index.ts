@@ -237,6 +237,8 @@ async function zipAgentDir(agentDir: string): Promise<{ zip: Uint8Array; count: 
 // Supabase Storage I/O
 // ---------------------------------------------------------------------------
 
+let bucketPoliciesApplied = false;
+
 async function ensureBucket(): Promise<boolean> {
   if (!supabaseAdmin) return false;
   try {
@@ -259,6 +261,36 @@ async function ensureBucket(): Promise<boolean> {
   }
 }
 
+/**
+ * Apply storage RLS policies via SQL RPC.
+ * Call once after ensureBucket if uploads fail with RLS errors.
+ * Requires a Supabase SQL function or direct query access.
+ */
+async function applyStoragePolicies(): Promise<void> {
+  if (bucketPoliciesApplied || !supabaseAdmin) return;
+  try {
+    const { error } = await supabaseAdmin.rpc('exec_sql', {
+      query: `
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'service_role_all_agent_snapshots' AND tablename = 'objects') THEN
+            CREATE POLICY "service_role_all_agent_snapshots"
+              ON storage.objects FOR ALL TO service_role
+              USING (bucket_id = '${BUCKET}') WITH CHECK (bucket_id = '${BUCKET}');
+          END IF;
+        END $$;
+      `
+    });
+    if (error) {
+      console.warn(`[snapshots] could not auto-apply storage policies (run migration 09_supabase_storage_policies.sql on Supabase):`, error.message);
+    } else {
+      bucketPoliciesApplied = true;
+      console.log(`[snapshots] applied storage RLS policies for bucket ${BUCKET}`);
+    }
+  } catch (e: any) {
+    console.warn(`[snapshots] auto-apply policies failed:`, e?.message ?? e);
+  }
+}
+
 async function uploadZip(storagePath: string, zip: Uint8Array): Promise<boolean> {
   if (!supabaseAdmin) return false;
   const blob = new Blob([new Uint8Array(zip)], { type: "application/zip" });
@@ -267,7 +299,11 @@ async function uploadZip(storagePath: string, zip: Uint8Array): Promise<boolean>
     upsert: true,
   });
   if (error) {
+    const isRls = /row-level security/i.test(error.message);
     console.error(`[snapshots] upload failed (${storagePath}):`, error.message);
+    if (isRls) {
+      console.error(`[snapshots] HINT: Run migration 09_supabase_storage_policies.sql on your Supabase database.`);
+    }
     return false;
   }
   return true;
@@ -335,6 +371,22 @@ export async function createSnapshot(opts: {
 
   const ok = await uploadZip(storagePath, zip);
   if (!ok) {
+    // First upload failed — try applying storage RLS policies and retry once
+    await applyStoragePolicies();
+    const retryOk = await uploadZip(storagePath, zip);
+    if (retryOk) {
+      // Retry succeeded, proceed as if first attempt worked
+      await db.prepare(
+        `INSERT INTO agent_snapshots (id, agent_id, run_id, trigger, status, byte_size, file_count, content_hash, storage_path, error_message, created_at, expires_at)
+         VALUES (?, ?, ?, ?, 'ready', ?, ?, ?, ?, NULL, ?, ?)
+         ON CONFLICT (id) DO NOTHING`
+      ).run(id, opts.agentId, opts.runId ?? null, opts.trigger, bytes, count, hash, storagePath, now, expiresAt);
+
+      console.log(`[snapshots] ${opts.agentId} → ${id} (${count} files, ${bytes} bytes, hash=${hash}, trigger=${opts.trigger})`);
+      pruneSnapshots(opts.agentId).catch((e) => console.warn(`[snapshots] prune error:`, e?.message ?? e));
+      return (await getSnapshot(id)) ?? null;
+    }
+
     await db.prepare(
       `INSERT INTO agent_snapshots (id, agent_id, run_id, trigger, status, byte_size, file_count, content_hash, storage_path, error_message, created_at, expires_at)
        VALUES (?, ?, ?, ?, 'failed', ?, ?, ?, ?, ?, ?, ?)`
