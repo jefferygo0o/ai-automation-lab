@@ -16,16 +16,13 @@
  */
 
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync, statSync, copyFileSync, rmSync } from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 
-/** Load default-system.md from backend/data/ at init. */
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const DEFAULT_SYSTEM_PROMPT = readFileSync(
-  join(__dirname, "../../data/default-system.md"),
-  "utf-8",
-);
+/** Load default-system.md from agents dir at init. */
+const _defaultSystemPath = join(import.meta.dir, "./default-system.md");
+const DEFAULT_SYSTEM_PROMPT = existsSync(_defaultSystemPath)
+  ? readFileSync(_defaultSystemPath, "utf-8")
+  : `# System\n\nYou are an AI agent defined by a filesystem, not by hardcoded prompts.`;
 import { workspaceFor } from "../workspace/index.ts";
 
 /** Get the agents root directory for a specific user. */
