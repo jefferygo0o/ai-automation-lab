@@ -193,6 +193,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           activeId={activeChatTabId}
           onSelect={handleChatTabSelect}
           onClose={handleChatTabClose}
+          onNewChat={() => setActiveChatTab(null)}
           label="Chats"
         />
         <div className="flex-1 min-h-0 overflow-hidden bg-background">

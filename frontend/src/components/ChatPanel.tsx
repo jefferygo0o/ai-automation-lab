@@ -1424,12 +1424,6 @@ export default function ChatPanel({ onCollapse }: { onCollapse?: () => void } = 
           </>
         ) : (
           <>
-            <div className="h-10 shrink-0 border-b border-line flex items-center gap-2 px-3">
-              <span className="text-xs font-medium text-ink-700 flex-1">New chat</span>
-              {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
-              <button onClick={closeChat} className="text-xs text-ink-400 hover:text-ink-900">✕</button>
-              {onCollapse && <button onClick={onCollapse} className="text-xs text-ink-400 hover:text-ink-900 ml-1" title="Collapse chat panel"><ChevronRight className="w-3 h-3" /></button>}
-            </div>
             <div className="flex-1 min-h-0 flex flex-col">
               <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
                 <div className="w-12 h-12 rounded-full bg-paper-200 border border-line grid place-items-center mb-3">

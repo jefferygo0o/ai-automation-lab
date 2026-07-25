@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 type AnyTab = { id: string; label?: string; title?: string };
 
@@ -7,24 +7,16 @@ export default function TabBar({
   activeId,
   onSelect,
   onClose,
+  onNewChat,
   label,
 }: {
   tabs: AnyTab[];
   activeId: string | null;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  onNewChat?: () => void;
   label: string;
 }) {
-  if (tabs.length === 0) {
-    return (
-      <div className="h-9 border-b border-border bg-sidebar flex items-center px-3 shrink-0">
-        <span className="text-2xs font-medium text-muted-foreground/40 uppercase tracking-wider">
-          {label}
-        </span>
-      </div>
-    );
-  }
-
   return (
     <div className="h-9 border-b border-border bg-sidebar flex items-center shrink-0 overflow-hidden">
       <div className="flex items-center gap-px h-full overflow-x-auto scrollbar-hide flex-1">
@@ -54,7 +46,21 @@ export default function TabBar({
             </div>
           );
         })}
+        {onNewChat && (
+          <button
+            onClick={onNewChat}
+            className="flex items-center justify-center h-full px-2.5 text-muted-foreground/50 hover:text-foreground hover:bg-accent/40 shrink-0 transition-colors"
+            title="New chat"
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
+      {tabs.length === 0 && (
+        <span className="text-2xs font-medium text-muted-foreground/40 uppercase tracking-wider px-3 shrink-0">
+          {label}
+        </span>
+      )}
     </div>
   );
 }
