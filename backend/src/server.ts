@@ -96,9 +96,14 @@ Bun.serve({
 
     // Terminal WebSocket upgrade
     if (url.pathname === "/api/terminal/ws") {
-      const authHeader = req.headers.get("authorization") || undefined;
       const { authenticateBearer } = await import("./security/auth.ts");
-      const user = await authenticateBearer(authHeader);
+      // Accept token from Authorization header OR query parameter
+      const authHeader = req.headers.get("authorization") || undefined;
+      let user = await authenticateBearer(authHeader);
+      if (!user) {
+        const tokenParam = url.searchParams.get("token");
+        if (tokenParam) user = await authenticateBearer(`Bearer ${tokenParam}`);
+      }
       if (!user) return new Response("Unauthorized", { status: 401 });
       const upgraded = server.upgrade(req, { data: { userId: user.id } });
       if (!upgraded) return new Response("WebSocket upgrade failed", { status: 500 });
