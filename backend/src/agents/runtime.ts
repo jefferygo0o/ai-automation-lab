@@ -47,6 +47,8 @@ export type StreamEvent =
 export interface RunOptions {
   signal?: AbortSignal;
   onLog?: (entry: { tool: string; args: unknown; result: string; ok: boolean; durationMs: number; at: number }) => void;
+  /** Hard cap on total tool invocations across all steps. 0 = unlimited. */
+  maxToolCalls?: number;
 }
 
 export async function runAgentTurn(
@@ -261,6 +263,8 @@ export async function runAgentTurn(
   const MAX_STEPS = 100;
   let runStatus: "completed" | "failed" | "cancelled" = "completed";
   let runError: string | undefined;
+  const maxToolCalls = opts.maxToolCalls ?? 0;
+  let totalToolCalls = 0;
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -354,6 +358,14 @@ export async function runAgentTurn(
         };
         // Emit tool_call events FIRST so the frontend sees the tool card
       // immediately, before the DB write.
+      // Enforce max tool call limit per turn (for automations)
+      if (maxToolCalls > 0 && totalToolCalls >= maxToolCalls) {
+        const msg = `Reached max tool calls limit (${maxToolCalls}). Stopping.`;
+        messages.push({ role: "assistant", content: msg });
+        await ChatStore.addMessage(chatId, { role: "assistant", content: msg, runId: run.id });
+        emit({ type: "token", delta: msg });
+        break;
+      }
       for (const tc of validToolCalls) {
         let fnArgs: any = {};
         try { fnArgs = typeof tc.arguments === "string" ? JSON.parse(tc.arguments) : (tc.arguments ?? {}); } catch { fnArgs = {}; }
@@ -445,6 +457,7 @@ export async function runAgentTurn(
         pushToolMessage(messages, chatId, tc, resultStr, run.id);
         onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: toolDuration, at: toolStart });
         recordHistory(agent.id, tc.name, resultStr);
+        totalToolCalls++;
         await new Promise(r => setTimeout(r, 0));
       }
 

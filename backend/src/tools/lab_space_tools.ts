@@ -29,7 +29,7 @@ function liveUrl(ownerId: string, path: string): string {
 // ============================================================
 
 toolRegistry.register({
-  name: "list_lab_space_routes",
+  name: "list_space_routes",
   description:
     "List all routes in the Lab Space for the current owner. Returns path, type (api/page), " +
     "public/private status, version number, and live URL for each route.",
@@ -48,13 +48,13 @@ toolRegistry.register({
       });
       return text(`Lab Space routes (${rows.length}):\n${lines.join("\n")}`);
     } catch (e: any) {
-      return err(`list_lab_space_routes failed: ${e?.message ?? String(e)}`);
+      return err(`list_space_routes failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "get_lab_space_route",
+  name: "get_space_route",
   description:
     "Get a route's full source code by path. Returns path, type, code, public status, version, " +
     "and timestamps.",
@@ -84,16 +84,16 @@ toolRegistry.register({
       };
       return text(JSON.stringify(result, null, 2));
     } catch (e: any) {
-      return err(`get_lab_space_route failed: ${e?.message ?? String(e)}`);
+      return err(`get_space_route failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "write_lab_space_route",
+  name: "write_space_route",
   description:
     "Create a new route or fully rewrite an existing one. Use for new routes or full rewrites. " +
-    "For partial edits, use edit_lab_space_route instead.",
+    "For partial edits, use edit_space_route instead.",
   parameters: {
     path: { type: "string", description: "Route path starting with /. Use / for homepage", required: true },
     route_type: { type: "string", description: "'api' = TypeScript endpoint, 'page' = React/TSX page", required: true, enum: ["api", "page"] },
@@ -140,16 +140,16 @@ toolRegistry.register({
       invalidateApiCache(id);
       return text(`Created ${routeType} route at ${routePath}${isPublic ? " (public)" : ""}\nLive URL: ${liveUrl(userId, routePath)}\nid: ${id}`);
     } catch (e: any) {
-      return err(`write_lab_space_route failed: ${e?.message ?? String(e)}`);
+      return err(`write_space_route failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "edit_lab_space_route",
+  name: "edit_space_route",
   description:
     "Edit an existing route by sending only changed sections with // ... existing code ... placeholders. " +
-    "Preferred for all edits. Route type cannot be changed via edit — use write_lab_space_route for that. " +
+    "Preferred for all edits. Route type cannot be changed via edit — use write_space_route for that. " +
     "If the change is too large, break into multiple smaller calls. You must inspect the result after each call.",
   parameters: {
     path: { type: "string", description: "Route path to edit, e.g. /about or /api/hello", required: true },
@@ -195,13 +195,13 @@ toolRegistry.register({
       invalidateApiCache(row.id);
       return text(`Edited route ${routePath} (v${newVersion})\nLive URL: ${liveUrl(userId, routePath)}\nInstruction: ${args.edit_instructions || "code updated"}`);
     } catch (e: any) {
-      return err(`edit_lab_space_route failed: ${e?.message ?? String(e)}`);
+      return err(`edit_space_route failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "delete_lab_space_route",
+  name: "delete_space_route",
   description: "Delete a Lab Space route by path.",
   parameters: {
     path: { type: "string", description: "Route path to delete", required: true },
@@ -220,7 +220,7 @@ toolRegistry.register({
       await db.query("DELETE FROM space_route_versions WHERE route_id = ? AND owner_id = ?").run(row.id, userId);
       return text(`Deleted route at ${routePath}`);
     } catch (e: any) {
-      return err(`delete_lab_space_route failed: ${e?.message ?? String(e)}`);
+      return err(`delete_space_route failed: ${e?.message ?? String(e)}`);
     }
   },
 });
@@ -230,7 +230,7 @@ toolRegistry.register({
 // ============================================================
 
 toolRegistry.register({
-  name: "get_lab_space_route_history",
+  name: "get_space_route_history",
   description:
     "View the full version history of a route. Shows all versions (past and future relative to " +
     "current position) with action type and code preview. Current version is marked.",
@@ -262,13 +262,13 @@ toolRegistry.register({
       });
       return text(`Version history for ${routePath} (current: v${current}):\n${lines.join("\n")}`);
     } catch (e: any) {
-      return err(`get_lab_space_route_history failed: ${e?.message ?? String(e)}`);
+      return err(`get_space_route_history failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "undo_lab_space_route",
+  name: "undo_space_route",
   description:
     "Revert a route to its previous version. Can be called repeatedly to step further back. " +
     "History persists across restarts.",
@@ -312,13 +312,13 @@ toolRegistry.register({
       invalidateApiCache(route.id);
       return text(`Undid ${routePath}: restored from v${route.current_version} → v${newVersion} (was v${prevVersion.version})\nLive URL: ${liveUrl(userId, routePath)}`);
     } catch (e: any) {
-      return err(`undo_lab_space_route failed: ${e?.message ?? String(e)}`);
+      return err(`undo_space_route failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "redo_lab_space_route",
+  name: "redo_space_route",
   description:
     "Restore the next version after an undo. Only available after an undo. " +
     "New writes or edits clear the redo history.",
@@ -356,7 +356,7 @@ toolRegistry.register({
       invalidateApiCache(route.id);
       return text(`Redid ${routePath}: restored to v${newVersion} (the pre-undo state)\nLive URL: ${liveUrl(userId, routePath)}`);
     } catch (e: any) {
-      return err(`redo_lab_space_route failed: ${e?.message ?? String(e)}`);
+      return err(`redo_space_route failed: ${e?.message ?? String(e)}`);
     }
   },
 });
@@ -366,7 +366,7 @@ toolRegistry.register({
 // ============================================================
 
 toolRegistry.register({
-  name: "list_lab_space_assets",
+  name: "list_space_assets",
   description: "List all uploaded assets in the Lab Space. Returns URL paths and file sizes.",
   parameters: {},
   defaultPermission: "always",
@@ -391,13 +391,13 @@ toolRegistry.register({
       const lines = results.map((a) => `  ${a.path}  (${(a.size / 1024).toFixed(1)} KB)`);
       return text(`Lab Space assets (${results.length}):\n${lines.join("\n")}`);
     } catch (e: any) {
-      return err(`list_lab_space_assets failed: ${e?.message ?? String(e)}`);
+      return err(`list_space_assets failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "update_lab_space_asset",
+  name: "update_space_asset",
   description:
     "Copy a workspace file into the Lab Space assets. After uploading, reference the asset_path " +
     "in route code as <img src=\"/images/logo.png\" />.",
@@ -424,13 +424,13 @@ toolRegistry.register({
       const size = statSync(destPath).size;
       return text(`Uploaded asset: ${assetPath} (${(size / 1024).toFixed(1)} KB)\nUse in routes as: <img src="${assetPath}" />`);
     } catch (e: any) {
-      return err(`update_lab_space_asset failed: ${e?.message ?? String(e)}`);
+      return err(`update_space_asset failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "delete_lab_space_asset",
+  name: "delete_space_asset",
   description: "Delete a static asset from the Lab Space.",
   parameters: {
     asset_path: { type: "string", description: "URL path of the asset, e.g. /images/logo.png", required: true },
@@ -446,7 +446,7 @@ toolRegistry.register({
       unlinkSync(filePath);
       return text(`Deleted asset: ${assetPath}`);
     } catch (e: any) {
-      return err(`delete_lab_space_asset failed: ${e?.message ?? String(e)}`);
+      return err(`delete_space_asset failed: ${e?.message ?? String(e)}`);
     }
   },
 });
@@ -469,7 +469,7 @@ const DEFAULT_SETTINGS: Record<string, string> = {
 };
 
 toolRegistry.register({
-  name: "get_lab_space_settings",
+  name: "get_space_settings",
   description:
     "Get all Lab Space site settings including title, description, OG image, favicon, " +
     "head HTML, robots.txt, noindex, 404 route, and language.",
@@ -484,13 +484,13 @@ toolRegistry.register({
       const settings = row ? JSON.parse(row.settings_json) : DEFAULT_SETTINGS;
       return text(JSON.stringify(settings, null, 2));
     } catch (e: any) {
-      return err(`get_lab_space_settings failed: ${e?.message ?? String(e)}`);
+      return err(`get_space_settings failed: ${e?.message ?? String(e)}`);
     }
   },
 });
 
 toolRegistry.register({
-  name: "update_lab_space_settings",
+  name: "update_space_settings",
   description:
     "Update Lab Space site settings globally or per-page. Pass any combination of settings to update. " +
     "Per-page settings only support: site_title, site_description, og_image_url, noindex. " +
@@ -545,7 +545,7 @@ toolRegistry.register({
       }
       return text(`Updated Lab Space settings:\n${Object.entries(updates).map(([k, v]) => `  ${k}: ${v}`).join("\n")}`);
     } catch (e: any) {
-      return err(`update_lab_space_settings failed: ${e?.message ?? String(e)}`);
+      return err(`update_space_settings failed: ${e?.message ?? String(e)}`);
     }
   },
 });
@@ -555,7 +555,7 @@ toolRegistry.register({
 // ============================================================
 
 toolRegistry.register({
-  name: "get_lab_space_errors",
+  name: "get_space_errors",
   description:
     "Get recent route compilation or execution errors. Returns route path, error message, " +
     "stack trace, and timestamp for each error.",
@@ -567,7 +567,7 @@ toolRegistry.register({
 });
 
 toolRegistry.register({
-  name: "restart_lab_space_server",
+  name: "restart_space_server",
   description:
     "Restart the Lab Space server. Clears compilation caches and restarts the route serving layer. " +
     "Use when routes are serving stale content or the API handler cache is corrupted.",
@@ -585,7 +585,7 @@ toolRegistry.register({
       }
       return text(`Cleared ${rows.length} route compilation caches. Server will recompile on next request.`);
     } catch (e: any) {
-      return err(`restart_lab_space_server failed: ${e?.message ?? String(e)}`);
+      return err(`restart_space_server failed: ${e?.message ?? String(e)}`);
     }
   },
 });
@@ -595,7 +595,7 @@ toolRegistry.register({
 // ============================================================
 
 toolRegistry.register({
-  name: "fetch_lab_space_route",
+  name: "fetch_space_route",
   description:
     "Fetch the live content of one of your own Lab Space routes. Useful for verifying what " +
     "an end-user would see, or to consume a /ws/api endpoint you own.",
@@ -621,7 +621,7 @@ toolRegistry.register({
       const content = await res.text();
       return text(`HTTP ${res.status} ${res.statusText}\n\n${content.slice(0, 16_000)}`);
     } catch (e: any) {
-      return err(`fetch_lab_space_route failed: ${e?.message ?? String(e)}`);
+      return err(`fetch_space_route failed: ${e?.message ?? String(e)}`);
     }
   },
 });
