@@ -8,29 +8,23 @@
  *   - Playwright (already in node_modules) + agent-browser CLI for browser automation
  *   - ffmpeg / d2 for media
  *   - HTML scraping for search results (no API key needed)
- *   - Cloudflare Workers AI for image generation, image editing, and
- *     audio transcription (when `CF_ACCOUNT_ID` + `CF_API_TOKEN` are
- *     configured as user secrets). No video model is available on this
- *     Cloudflare account as of 2026-06-22, so `lab_generate_video`
- *     remains a stub that tells the agent this honestly.
+ *   - Agnes AI for image generation, image editing, and video generation
+ *     (requires AGNES_API_KEY env var or secret). Currently free ($0/image, $0/sec).
  *
  * Tier classification (kept honest — the agent sees this in the tool list):
  *   T1   fully implemented, lab-internal
  *   T1+  fully implemented but depends on optional local binaries
- *        (ffmpeg, d2) or optional Cloudflare creds — tool reports a clear
- *        error if missing
+ *        (ffmpeg, d2) or optional Agnes creds — tool reports a clear error if missing
  *   T2   stubbed with a clear "not implemented in-lab yet" message
  *
  * Tools prefixed `lab_` so they don't collide with the existing `builtin.ts`
  * tools (`read_file`, `write_file`, etc.) or the `zo_*` namespace in the
  * (now orphaned) zo_tools.ts file.
  *
- * Cloudflare Models used (verified against this account on 2026-06-22):
- *   Image generation:  @cf/black-forest-labs/flux-2-klein-9b  (default)
- *                     @cf/bytedance/stable-diffusion-xl-lightning  (fast, raw JPEG)
- *   Image editing:    @cf/black-forest-labs/flux-2-dev  (up to 3 input images)
- *   Transcription:    @cf/openai/whisper  (multipart, audio file)
- *   No video model:   lab_generate_video returns a "no model available" message.
+ * Agnes AI Models used (verified 2026-07-25):
+ *   Image generation/editing: agnes-image-2.0-flash  (OpenAI-compatible)
+ *   Video generation:         agnes-video-v2.0       (async, poll for result)
+ *   Transcription:            @cf/openai/whisper      (Cloudflare Workers AI, optional)
  */
 
 import { toolRegistry, type ToolContext } from "./registry.ts";
@@ -393,6 +387,33 @@ function aspectToSize(ar: string, base = 1024): { width: number; height: number 
 // ===========================================================================
 // FILE TOOLS
 // ===========================================================================
+// -------------------------------------------------------------------
+// Agnes AI helpers
+// -------------------------------------------------------------------
+
+const AGNES_BASE = "https://apihub.agnes-ai.com";
+
+async function agnesGetApiKey(ctx: ToolContext): Promise<string | null> {
+  return ctx.secrets.get("AGNES_API_KEY");
+}
+
+function agnesMissingCredsMsg(tool: string): string {
+  return (
+    `${tool} requires an Agnes AI API key. To enable:\n` +
+    `  1. Get an API key from https://agnes-ai.com\n` +
+    `  2. Set the AGNES_API_KEY environment variable, OR\n` +
+    `     save it in the lab UI at Settings > Secrets as AGNES_API_KEY\n` +
+    `  3. Try again.`
+  );
+}
+
+/** Fetch a resource from a URL and return it as a Buffer. */
+async function fetchUrlToBuffer(url: string): Promise<Buffer> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`fetch failed (HTTP ${res.status}): ${url}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 
 toolRegistry.register({
   name: "lab_read_file",
@@ -1506,137 +1527,95 @@ toolRegistry.register({
 });
 
 // ===========================================================================
-// MEDIA — Cloudflare Workers AI
+// MEDIA — Agnes AI
 // ===========================================================================
 
-// Image generation + editing + (no) video via Cloudflare Workers AI.
-// These are optional: if the user hasn't set CF_ACCOUNT_ID + CF_API_TOKEN
-// secrets, the tools return a clear setup message instead of failing silently.
+// Image generation, image editing, and video generation via Agnes AI.
+// Requires AGNES_API_KEY (set as a Render env var or in the Secrets vault).
 
 toolRegistry.register({
   name: "lab_generate_image",
   description:
-    "Generate an image from a text prompt using Cloudflare Workers AI " +
-    "(SDXL-Lightning for speed, FLUX.2 [klein] 9B for quality, FLUX.1 [schnell] as a fallback). " +
-    "The output PNG is saved to the sandbox's `Images/` directory and the path is returned. " +
-    "Requires CF_ACCOUNT_ID and CF_API_TOKEN secrets.",
+    "Generate an image from a text prompt using Agnes AI Image 2.0 Flash. " +
+    "The output image is saved to the sandbox's `Images/` directory and the path is returned. " +
+    "Supports text-to-image and image-to-image (pass filepath for style transfer/reference). " +
+    "Requires AGNES_API_KEY.",
   parameters: {
     prompt: { type: "string", description: "detailed description of the image (style, lighting, composition, subject)", required: true },
     file_stem: { type: "string", description: "filename without extension (saved to sandbox Images/)", required: true },
+    filepath: { type: "string", description: "optional source image for image-to-image (style transfer, reference). Base64-encoded automatically.", required: false },
     aspect_ratio: {
       type: "string",
-      enum: ["1:1", "16:9", "4:3", "3:2", "9:16", "3:4", "2:3", "21:9", "4:1", "8:1", "1:4", "1:8", "5:4", "4:5"],
+      enum: ["1:1", "16:9", "4:3", "3:2", "9:16", "3:4", "2:3"],
       description: "image aspect ratio (default 1:1)",
       required: false,
     },
-    model: {
-      type: "string",
-      enum: ["flux-2-klein-9b", "flux-1-schnell", "sdxl-lightning", "leonardo-phoenix", "stability-sdxl-base"],
-      description: "which model to use. Default flux-2-klein-9b (high quality). Use sdxl-lightning for speed.",
-      required: false,
-    },
-    steps: { type: "number", description: "diffusion steps (default 20, ignored by flux-2-klein which is fixed at 4)", required: false },
     seed: { type: "number", description: "random seed for reproducibility", required: false },
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
     if (!args.prompt) return err("prompt is required");
     if (!args.file_stem) return err("file_stem is required");
-    const creds = await cfGetConfig(ctx);
-    if (!creds) return err(cfMissingCredsMsg("lab_generate_image"));
+    const apiKey = await agnesGetApiKey(ctx);
+    if (!apiKey) return err(agnesMissingCredsMsg("lab_generate_image"));
 
     const { width, height } = aspectToSize(args.aspect_ratio ?? "1:1");
-    const seed = args.seed ?? Math.floor(Math.random() * 4294967295);
-    const steps = args.steps ?? 20;
-    // Cloudflare image models return JPEG bytes (FF D8 magic), so write
-    // as .jpg not .png to avoid confusing readers / OS previews.
     const safeName = args.file_stem.replace(/[^a-z0-9_-]/gi, "_");
-    const outRel = `Images/${safeName}.jpg`;
-    const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(outRel) : resolve(userZoRoot(ctx.ownerId) + `/Images/${safeName}.jpg`);
+    const ext = "jpg";
+    const outRel = `Images/${safeName}.${ext}`;
+    const outAbs = ctx.sandbox
+      ? ctx.sandbox.resolveSafe(outRel)
+      : resolve(userZoRoot(ctx.ownerId) + `/Images/${safeName}.${ext}`);
 
-    const writeOut = async (buf: Buffer) => {
+    try {
+      const body: Record<string, any> = {
+        model: "agnes-image-2.0-flash",
+        prompt: args.prompt,
+        size: `${width}x${height}`,
+        response_format: "url",
+      };
+
+      // Image-to-image: read source, base64-encode, pass in extra_body
+      if (args.filepath && typeof args.filepath === "string") {
+        const srcAbs = resolveLabPath(ctx, args.filepath);
+        if (!existsSync(srcAbs)) return err(`source image not found: ${args.filepath}`);
+        const srcBuf = readFileSync(srcAbs);
+        const srcB64 = srcBuf.toString("base64");
+        const mime = srcAbs.endsWith(".png") ? "image/png" : "image/jpeg";
+        body.extra_body = { image: [`data:${mime};base64,${srcB64}`] };
+      }
+
+      const res = await fetch(`${AGNES_BASE}/v1/images/generations`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) return err(`Agnes image gen failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+      const j = await res.json() as any;
+
+      // Response: { data: [{ url, b64_json }] }
+      const item = j?.data?.[0];
+      if (!item) return err(`Agnes returned no image: ${JSON.stringify(j).slice(0, 500)}`);
+
+      let buf: Buffer;
+      if (item.b64_json) {
+        buf = Buffer.from(item.b64_json, "base64");
+      } else if (item.url) {
+        buf = await fetchUrlToBuffer(item.url);
+      } else {
+        return err(`Agnes image response has neither url nor b64_json: ${JSON.stringify(j).slice(0, 500)}`);
+      }
+
       mkdirSync(dirname(outAbs), { recursive: true });
       writeFileSync(outAbs, buf);
-      return outRel;
-    };
-
-    // Map the friendly model name to a Cloudflare model id.
-    // Each model has its own input shape, so we branch.
-    try {
-      // --- flux-2-klein-9b (multipart, best quality) ---
-      if ((args.model ?? "flux-2-klein-9b") === "flux-2-klein-9b") {
-        const fd = new FormData();
-        fd.append("prompt", args.prompt);
-        fd.append("width", String(width));
-        fd.append("height", String(height));
-        fd.append("seed", String(seed));
-        const res = await cfRunModel(creds, "@cf/black-forest-labs/flux-2-klein-9b", fd, { asJson: false });
-        if (!res.ok) return err(`Cloudflare flux-2-klein-9b failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
-        const j = await res.json() as any;
-        if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
-        const buf = decodeBase64Jpeg(j.result.image);
-        const path = await writeOut(buf);
-        return ok(`# Generated image\n\nModel: flux-2-klein-9b\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}\n\nPrompt: ${args.prompt}`, [{ path, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
-      }
-
-      // --- flux-1-schnell (JSON, 4 steps, fast) ---
-      if (args.model === "flux-1-schnell") {
-        const res = await cfRunModel(creds, "@cf/black-forest-labs/flux-1-schnell", {
-          prompt: args.prompt, steps: Math.min(steps, 8), width, height, seed,
-        });
-        if (!res.ok) return err(`Cloudflare flux-1-schnell failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
-        // Response may be JSON with base64 OR raw image bytes
-        const ct = res.headers.get("content-type") ?? "";
-        if (ct.startsWith("image/")) {
-          const path = await writeOut(Buffer.from(await res.arrayBuffer()));
-          return ok(`# Generated image\n\nModel: flux-1-schnell\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`, [{ path, mime: ct || "image/jpeg", kind: "image", alt: args.prompt }]);
-        }
-        const j = await res.json() as any;
-        if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
-        const buf = decodeBase64Jpeg(j.result.image);
-        const path = await writeOut(buf);
-        return ok(`# Generated image\n\nModel: flux-1-schnell\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`, [{ path, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
-      }
-
-      // --- sdxl-lightning (JSON, 1024x1024, raw JPEG bytes back) ---
-      if (args.model === "sdxl-lightning") {
-        const res = await cfRunModel(creds, "@cf/bytedance/stable-diffusion-xl-lightning", {
-          prompt: args.prompt, num_steps: Math.min(steps, 20), guidance: 7.5, width, height, seed,
-        });
-        if (!res.ok) return err(`Cloudflare sdxl-lightning failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
-        const buf = Buffer.from(await res.arrayBuffer());
-        if (buf.length < 100) return err(`Cloudflare returned tiny response: ${buf.toString("utf8").slice(0, 200)}`);
-        await writeOut(buf);
-        return ok(`# Generated image\n\nModel: sdxl-lightning\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}\n(${buf.length} bytes JPEG)`, [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
-      }
-
-      // --- leonardo-phoenix (JSON) ---
-      if (args.model === "leonardo-phoenix") {
-        const res = await cfRunModel(creds, "@cf/leonardo/phoenix-1.0", {
-          prompt: args.prompt, num_steps: Math.min(steps, 20), guidance: 7.5, width, height, seed,
-        });
-        if (!res.ok) return err(`Cloudflare leonardo-phoenix failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
-        const j = await res.json() as any;
-        if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
-        const buf = decodeBase64Jpeg(j.result.image);
-        await writeOut(buf);
-        return ok(`# Generated image\n\nModel: leonardo-phoenix\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`, [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
-      }
-
-      // --- stability-sdxl-base (JSON) ---
-      if (args.model === "stability-sdxl-base") {
-        const res = await cfRunModel(creds, "@cf/stabilityai/stable-diffusion-xl-base-1.0", {
-          prompt: args.prompt, num_steps: Math.min(steps, 20), guidance: 7.5, width, height, seed,
-        });
-        if (!res.ok) return err(`Cloudflare stability-sdxl-base failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
-        const j = await res.json() as any;
-        if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
-        const buf = decodeBase64Jpeg(j.result.image);
-        await writeOut(buf);
-        return ok(`# Generated image\n\nModel: stability-sdxl-base\nSeed: ${seed}\nSize: ${width}x${height}\nSaved: ${outAbs}`, [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]);
-      }
-
-      return err(`unknown model: ${args.model}`);
+      return ok(
+        `# Generated image\n\nModel: agnes-image-2.0-flash\nSize: ${width}x${height}\nSaved: ${outAbs}\n\nPrompt: ${args.prompt}`,
+        [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]
+      );
     } catch (e: any) {
       return err(`lab_generate_image failed: ${e?.message ?? String(e)}`);
     }
@@ -1646,10 +1625,10 @@ toolRegistry.register({
 toolRegistry.register({
   name: "lab_edit_image",
   description:
-    "Edit an existing image using Cloudflare's FLUX.2 [klein] 9B model. " +
+    "Edit an existing image using Agnes AI Image 2.0 Flash. " +
     "Provide the source image and a prompt describing the desired change. " +
     "Supports multi-reference style transfer (up to 3 source images). " +
-    "Requires CF_ACCOUNT_ID and CF_API_TOKEN secrets.",
+    "Requires AGNES_API_KEY.",
   parameters: {
     prompt: { type: "string", description: "what to change or apply to the image(s)", required: true },
     filepaths: {
@@ -1659,9 +1638,8 @@ toolRegistry.register({
       items: { type: "string" },
     },
     file_stem: { type: "string", description: "output filename without extension (saved to sandbox Images/)", required: true },
-    width: { type: "number", description: "output width 256-1920 (default 1024)", required: false },
-    height: { type: "number", description: "output height 256-1920 (default 768)", required: false },
-    seed: { type: "number", description: "random seed for reproducibility", required: false },
+    width: { type: "number", description: "output width (default 1024)", required: false },
+    height: { type: "number", description: "output height (default 768)", required: false },
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
@@ -1669,54 +1647,64 @@ toolRegistry.register({
     if (!Array.isArray(args.filepaths) || args.filepaths.length === 0) return err("filepaths must be a non-empty array (1-3 images)");
     if (args.filepaths.length > 3) return err("max 3 source images");
     if (!args.file_stem) return err("file_stem is required");
-    const creds = await cfGetConfig(ctx);
-    if (!creds) return err(cfMissingCredsMsg("lab_edit_image"));
+    const apiKey = await agnesGetApiKey(ctx);
+    if (!apiKey) return err(agnesMissingCredsMsg("lab_edit_image"));
 
     try {
-      // Resolve all source paths
-      const absImages: Buffer[] = [];
+      // Read and base64-encode all source images
+      const imageUrls: string[] = [];
       for (const fp of args.filepaths as string[]) {
         const abs = resolveLabPath(ctx, fp);
         if (!existsSync(abs)) return err(`source image not found: ${abs}`);
-        absImages.push(readFileSync(abs));
+        const buf = readFileSync(abs);
+        const b64 = buf.toString("base64");
+        const mime = abs.endsWith(".png") ? "image/png" : "image/jpeg";
+        imageUrls.push(`data:${mime};base64,${b64}`);
       }
 
       const width = args.width ?? 1024;
       const height = args.height ?? 768;
-      const seed = args.seed ?? Math.floor(Math.random() * 4294967295);
       const safeName = args.file_stem.replace(/[^a-z0-9_-]/gi, "_");
-      // Cloudflare editing also returns JPEG bytes — write as .jpg.
-      const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(`${safeName}.jpg`) : resolve(userZoRoot(ctx.ownerId) + `/Images/${safeName}.jpg`);
+      const outRel = `Images/${safeName}.jpg`;
+      const outAbs = ctx.sandbox
+        ? ctx.sandbox.resolveSafe(outRel)
+        : resolve(userZoRoot(ctx.ownerId) + `/Images/${safeName}.jpg`);
 
-      // FLUX.2 [klein] 9B is the only model in this account with a reliable
-      // editing path. It requires multipart with input_image_0..2.
-      const fd = new FormData();
-      fd.append("prompt", args.prompt);
-      fd.append("width", String(width));
-      fd.append("height", String(height));
-      fd.append("seed", String(seed));
-      absImages.forEach((buf, i) => {
-        // Cloudflare expects each input image to be <= 512x512.
-        // Blob needs a BlobPart — copy into a fresh Uint8Array<ArrayBuffer>.
-        const copy = new Uint8Array(buf.byteLength);
-        copy.set(buf);
-        const blob = new Blob([copy], { type: "image/jpeg" });
-        fd.append(`input_image_${i}`, blob, `input_${i}.jpg`);
+      const res = await fetch(`${AGNES_BASE}/v1/images/generations`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "agnes-image-2.0-flash",
+          prompt: args.prompt,
+          size: `${width}x${height}`,
+          response_format: "url",
+          extra_body: { image: imageUrls },
+        }),
       });
 
-      const res = await cfRunModel(creds, "@cf/black-forest-labs/flux-2-klein-9b", fd, { asJson: false });
-      if (!res.ok) return err(`Cloudflare flux-2-klein-9b edit failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
+      if (!res.ok) return err(`Agnes image edit failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
       const j = await res.json() as any;
-      if (!j?.success || !j?.result?.image) return err(`Cloudflare returned no image: ${JSON.stringify(j).slice(0, 500)}`);
 
-      const outRel = `Images/${safeName}.jpg`;
-      const out = decodeBase64Jpeg(j.result.image);
+      const item = j?.data?.[0];
+      if (!item) return err(`Agnes returned no image: ${JSON.stringify(j).slice(0, 500)}`);
+
+      let buf: Buffer;
+      if (item.b64_json) {
+        buf = Buffer.from(item.b64_json, "base64");
+      } else if (item.url) {
+        buf = await fetchUrlToBuffer(item.url);
+      } else {
+        return err(`Agnes image response has neither url nor b64_json: ${JSON.stringify(j).slice(0, 500)}`);
+      }
+
       mkdirSync(dirname(outAbs), { recursive: true });
-      writeFileSync(outAbs, out);
+      writeFileSync(outAbs, buf);
       return ok(
-        `# Edited image\n\nModel: flux-2-klein-9b\nSeed: ${seed}\nSize: ${width}x${height}\n` +
-        `Source images: ${args.filepaths.join(", ")}\n` +
-        `Saved: ${outAbs}\n\nPrompt: ${args.prompt}`,
+        `# Edited image\n\nModel: agnes-image-2.0-flash\nSize: ${width}x${height}\n` +
+        `Source images: ${args.filepaths.join(", ")}\nSaved: ${outAbs}\n\nPrompt: ${args.prompt}`,
         [{ path: outRel, mime: "image/jpeg", kind: "image", alt: args.prompt }]
       );
     } catch (e: any) {
@@ -1728,123 +1716,117 @@ toolRegistry.register({
 toolRegistry.register({
   name: "lab_generate_video",
   description:
-    "Generate a short MP4 video (4 seconds, 1280x720, 24fps) by animating a source image using ffmpeg. " +
-    "The lab's Cloudflare account has no video generation models enabled on Cloudflare " +
-    "Workers AI, so this tool currently returns a clear not-available message listing the " +
-    "image models that ARE available. If video is added to the account later, this tool can be " +
-    "extended to call it (Cloudflare offers Pixverse v6 and Hailuo 2.3 in their general catalog " +
-    "but they aren't enabled in this account).",
+    "Generate a short MP4 video from a text prompt using Agnes AI Video V2.0. " +
+    "Optional: pass a source image to base the video on. " +
+    "The API is async — this tool polls until the video is ready, then downloads it. " +
+    "Requires AGNES_API_KEY.",
   parameters: {
     instruction: { type: "string", description: "describe the video to generate", required: true },
-    filepath: { type: "string", description: "optional source image to animate", required: false },
+    filepath: { type: "string", description: "optional source image to base the video on", required: false },
     file_stem: { type: "string", description: "output filename without extension", required: true },
+    width: { type: "number", description: "video width in pixels (default 848)", required: false },
+    height: { type: "number", description: "video height in pixels (default 480)", required: false },
+    duration: { type: "number", description: "video duration in seconds (default 5)", required: false },
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
     if (!args.instruction) return err("instruction is required");
     if (!args.file_stem) return err("file_stem is required");
     if (!ctx.sandbox) return err("sandbox not active — agent must be running in a sandbox");
-    if (!ffmpegAvailable()) return err("lab_generate_video: ffmpeg is not installed on this machine. Install it (apt install ffmpeg) to enable video generation.");
+    const apiKey = await agnesGetApiKey(ctx);
+    if (!apiKey) return err(agnesMissingCredsMsg("lab_generate_video"));
 
     const safeName = String(args.file_stem).replace(/[^a-z0-9_-]/gi, "_");
     const outRel = `Videos/${safeName}.mp4`;
     const outAbs = ctx.sandbox.resolveSafe(outRel);
-    const dir = dirname(outAbs);
-    try { mkdirSync(dir, { recursive: true }); } catch {}
+    try { mkdirSync(dirname(outAbs), { recursive: true }); } catch {}
 
-    // 1. Source image: either the provided filepath, or one we generate.
-    let sourceRel: string | null = null;
-    let sourceAbs: string | null = null;
-    if (args.filepath && typeof args.filepath === "string") {
-      const fp = String(args.filepath);
-      sourceAbs = resolveLabPath(ctx, fp);
-      if (!existsSync(sourceAbs)) {
-        return err(`lab_generate_video: source image not found: ${fp}`);
-      }
-      sourceRel = fp.startsWith(ctx.sandbox.workdir)
-        ? fp.slice(ctx.sandbox.workdir.length).replace(/^[/\\]+/, "")
-        : fp;
-    } else {
-      // Try to generate a base image via Cloudflare (same code path as lab_generate_image).
-      const creds = await cfGetConfig(ctx);
-      if (!creds) {
-        return err(
-          "lab_generate_video: no source image supplied and no Cloudflare creds to generate one.\n" +
-          "Either pass `filepath` to animate an existing image, or set CF_ACCOUNT_ID + CF_API_TOKEN secrets."
-        );
-      }
-      try {
-        const width = 768, height = 432; // 16:9
-        const seed = Math.floor(Math.random() * 4294967295);
-        const fd = new FormData();
-        fd.append("prompt", args.instruction);
-        fd.append("width", String(width));
-        fd.append("height", String(height));
-        fd.append("seed", String(seed));
-        const res = await cfRunModel(creds, "@cf/black-forest-labs/flux-2-klein-9b", fd, { asJson: false });
-        if (!res.ok) return err(`lab_generate_video: image gen failed (HTTP ${res.status}): ${(await res.text()).slice(0, 500)}`);
-        const j = await res.json() as any;
-        if (!j?.success || !j?.result?.image) return err(`lab_generate_video: image gen returned no image: ${JSON.stringify(j).slice(0, 500)}`);
-        const buf = decodeBase64Jpeg(j.result.image);
-        const tmpRel = `Videos/_src_${safeName}.jpg`;
-        const tmpAbs = ctx.sandbox.resolveSafe(tmpRel);
-        mkdirSync(dirname(tmpAbs), { recursive: true });
-        writeFileSync(tmpAbs, buf);
-        sourceRel = tmpRel;
-        sourceAbs = tmpAbs;
-      } catch (e: any) {
-        return err(`lab_generate_video: image generation failed: ${e?.message ?? String(e)}`);
-      }
-    }
+    const width = args.width ?? 848;
+    const height = args.height ?? 480;
 
-    // 2. Animate via ffmpeg — slow horizontal pan over 4s on a 2x-upscaled source.
-    //    Uses scale (cover-fit) + crop with time-based x/y offsets to produce
-    //    a smooth Ken-Burns-style pan. fps filter normalises frame rate.
-    const duration = 4; // seconds
-    const fps = 24;
-    const frames = duration * fps;
-    const w = 1280, h = 720;
-    // Pan window: scroll the crop window horizontally across the upscaled source
-    // over the full duration (96 frames at 24fps). Stays centred vertically.
-    // crop=out_w:out_h:x:y, with x increasing linearly from 0 to (2w-w)=w.
-    const vf = [
-      `scale=${w * 2}:${h * 2}:force_original_aspect_ratio=increase`,
-      `crop=${w}:${h}:x='min(${w}*(t/${duration}),${w})':y='(ih-${h})/2'`,
-      `fps=${fps}`,
-      `format=yuv420p`,
-    ].join(",");
-    const args2 = [
-      "-y",
-      "-loop", "1",
-      "-i", sourceAbs!,
-      "-t", String(duration),
-      "-vf", vf,
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "20",
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
-      outAbs,
-    ];
     try {
-      await runCommand("ffmpeg", args2, { timeoutMs: 120_000 });
-    } catch (e: any) {
-      return err(`lab_generate_video: ffmpeg failed: ${e?.message ?? String(e)}\nstderr: ${(e?.stderr ?? "").toString().slice(-1000)}`);
-    }
-    if (!existsSync(outAbs)) return err(`lab_generate_video: ffmpeg exited but output is missing at ${outAbs}`);
+      // Build the create request
+      const createBody: Record<string, any> = {
+        model: "agnes-video-v2.0",
+        prompt: args.instruction,
+        width,
+        height,
+      };
 
-    return ok(
-      `# Generated video\n\n` +
-      `Source: ${sourceRel ?? "(generated base image)"}\n` +
-      `Duration: ${duration}s @ ${fps}fps\n` +
-      `Size: ${w}x${h}\n` +
-      `Saved: ${outAbs}\n` +
-      `Motion: Ken Burns (slow zoom in)\n\n` +
-      `Prompt: ${args.instruction}\n\n` +
-      `Note: this is animated still-image video (true video synthesis models like Pixverse/Hailuo ` +
-      `are not enabled in the lab's Cloudflare account). Pass \`filepath\` to animate a different source image.`,
-      [{ path: outRel, mime: "video/mp4", kind: "video", alt: args.instruction }]
-    );
+      // Optional source image — convert to data URL
+      if (args.filepath && typeof args.filepath === "string") {
+        const srcAbs = resolveLabPath(ctx, args.filepath);
+        if (!existsSync(srcAbs)) return err(`source image not found: ${args.filepath}`);
+        const srcBuf = readFileSync(srcAbs);
+        const srcB64 = srcBuf.toString("base64");
+        const mime = srcAbs.endsWith(".png") ? "image/png" : "image/jpeg";
+        createBody.image = `data:${mime};base64,${srcB64}`;
+      }
+
+      // 1. Create the video generation task
+      const createRes = await fetch(`${AGNES_BASE}/v1/videos`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(createBody),
+      });
+
+      if (!createRes.ok) return err(`Agnes video create failed (HTTP ${createRes.status}): ${(await createRes.text()).slice(0, 500)}`);
+      const createJ = await createRes.json() as any;
+      const videoId = createJ?.video_id ?? createJ?.id;
+      if (!videoId) return err(`Agnes returned no video_id: ${JSON.stringify(createJ).slice(0, 500)}`);
+
+      // 2. Poll for completion
+      const maxWaitMs = 300_000; // 5 minutes
+      const pollIntervalMs = 3_000;
+      const start = Date.now();
+      let status = "queued";
+      let videoUrl: string | null = null;
+
+      while (Date.now() - start < maxWaitMs) {
+        await new Promise((r) => setTimeout(r, pollIntervalMs));
+        const pollRes = await fetch(`${AGNES_BASE}/agnesapi?video_id=${videoId}`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!pollRes.ok) {
+          // Non-fatal: retry
+          continue;
+        }
+        const pollJ = await pollRes.json() as any;
+        status = pollJ?.metadata?.status ?? pollJ?.status ?? "unknown";
+
+        if (status === "completed" || status === "done" || status === "succeeded") {
+          videoUrl = pollJ?.metadata?.url ?? pollJ?.result?.url ?? pollJ?.url;
+          break;
+        }
+        if (status === "failed" || status === "error") {
+          return err(`Agnes video generation failed: ${JSON.stringify(pollJ).slice(0, 500)}`);
+        }
+        // still queued/in_progress — continue polling
+      }
+
+      if (!videoUrl) {
+        return err(`Agnes video did not complete within ${maxWaitMs / 1000}s. Last status: ${status}`);
+      }
+
+      // 3. Download the video
+      const videoRes = await fetch(videoUrl);
+      if (!videoRes.ok) return err(`Failed to download video (HTTP ${videoRes.status})`);
+      const videoBuf = Buffer.from(await videoRes.arrayBuffer());
+      mkdirSync(dirname(outAbs), { recursive: true });
+      writeFileSync(outAbs, videoBuf);
+
+      const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+      return ok(
+        `# Generated video\n\nModel: agnes-video-v2.0\nSize: ${width}x${height}\n` +
+        `Saved: ${outAbs}\nTime: ${elapsed}s\n\nPrompt: ${args.instruction}`,
+        [{ path: outRel, mime: "video/mp4", kind: "video", alt: args.instruction }]
+      );
+    } catch (e: any) {
+      return err(`lab_generate_video failed: ${e?.message ?? String(e)}`);
+    }
   },
 });
 

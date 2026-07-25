@@ -114,7 +114,12 @@ export async function runAgentTurn(
     runId: run.id,
     sandbox,
     secrets: {
-      get: async (name: string): Promise<string | null> => SecretStore.get(ownerId, name),
+      get: async (name: string): Promise<string | null> => {
+        const v = await SecretStore.get(ownerId, name);
+        if (v != null) return v;
+        // Fallback to process.env (Render env vars, etc.)
+        return process.env[name] ?? process.env[name.toUpperCase()] ?? null;
+      },
     },
     mcp: {
       call: (server, tool, args) => mcpManager.callTool(server, tool, args, ownerId),
