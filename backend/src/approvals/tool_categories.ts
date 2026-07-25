@@ -92,9 +92,27 @@ const TOOL_CATEGORIES: Record<string, ActionCategory> = {
   browser_screenshot: "image",
   web_search: "list",
 
-  // Webspace
+  // Webspace (legacy)
   manage_webspace: "generic",
   fetch_webspace_route: "http",
+
+  // Lab Space (new)
+  list_lab_space_routes: "list",
+  get_lab_space_route: "read",
+  write_lab_space_route: "write",
+  edit_lab_space_route: "edit",
+  delete_lab_space_route: "delete",
+  get_lab_space_route_history: "list",
+  undo_lab_space_route: "write",
+  redo_lab_space_route: "write",
+  list_lab_space_assets: "list",
+  update_lab_space_asset: "write",
+  delete_lab_space_asset: "delete",
+  get_lab_space_settings: "read",
+  update_lab_space_settings: "write",
+  get_lab_space_errors: "list",
+  restart_lab_space_server: "exec",
+  fetch_lab_space_route: "http",
 
   // Integration tools
   list_integrations: "list",

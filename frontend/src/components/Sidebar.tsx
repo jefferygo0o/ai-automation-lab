@@ -11,7 +11,7 @@ import { Personas as PersonasApi, type Persona, Chats, type Chat } from "../api"
 import { useChatPanel } from "../contexts/ChatPanelContext";
 
 const NAV_ITEMS = [
-  { to: "/web-space", label: "Web Space", icon: Globe },
+  { to: "/web-space", label: "Lab Space", icon: Globe },
   { to: "/chats", label: "Home", icon: LayoutDashboard },
   { to: "/files", label: "Files", icon: FolderTree },
   { to: "/automations", label: "Automations", icon: Timer },

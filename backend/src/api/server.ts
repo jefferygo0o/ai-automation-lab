@@ -30,7 +30,6 @@ import { sandboxBrowse, sandboxRead, sandboxReadBinary, sandboxWrite, sandboxExe
 import { resolveSandboxOptions } from "../agents/permissions.ts";
 import { createSandbox } from "../sandbox/index.ts";
 import { labSpaceApi } from "../lab-space/index.ts";
-import { labSpaceApi as webSpaceApi } from "../webspace/index.ts";
 import { workspaceApi } from "../workspace/index.ts";
 import { automationsApi } from "../automations/index.ts";
 import { toolRegistry } from "../tools/registry.ts";
@@ -1078,8 +1077,6 @@ api.route("/api/webhooks", webhooksApi);
 
 // ---- Lab Space ----
 api.route("/api/lab-space", labSpaceApi);
-// ---- Web Space (legacy alias) ----
-api.route("/api/web-space", webSpaceApi);
 
 // ---- Workspace ----
 api.route("/api/workspace", workspaceApi);

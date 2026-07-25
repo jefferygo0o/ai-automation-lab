@@ -1,6 +1,6 @@
 import { api } from "./client";
 
-// ---- New types for Web Space, Workspace, Automations, Browser ----
+// ---- New types for Lab Space, Workspace, Automations, Browser ----
 
 export interface SpaceRoute {
   id: string;
@@ -199,18 +199,54 @@ export const Runs = {
   byChat: (chatId: string) => api<{ runs: Run[] }>(`/api/chats/${chatId}/runs`),
 };
 
-// ---- Web Space ----
+// ---- Lab Space ----
 export const Space = {
-  list: () => api<{ routes: SpaceRoute[] }>("/api/web-space/routes"),
-  get: (id: string) => api<SpaceRoute>(`/api/web-space/routes/${id}`),
+  list: () => api<{ routes: SpaceRoute[] }>("/api/lab-space/routes"),
+  get: (id: string) => api<SpaceRoute>(`/api/lab-space/routes/${id}`),
   create: (path: string, type: string, code: string, isPublic: boolean) =>
-    api<SpaceRoute>("/api/web-space/routes", { method: "POST", body: JSON.stringify({ path, type, code, public: !!isPublic }) }),
+    api<SpaceRoute>("/api/lab-space/routes", { method: "POST", body: JSON.stringify({ path, type, code, public: !!isPublic }) }),
   update: (id: string, data: Partial<{ path: string; code: string; type: string; public: boolean }>) =>
-    api<{ ok: boolean }>(`/api/web-space/routes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+    api<{ ok: boolean }>(`/api/lab-space/routes/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   publish: (id: string, isPublic: boolean) =>
-    api<{ ok: boolean }>(`/api/web-space/routes/${id}/publish`, { method: "POST", body: JSON.stringify({ public: !!isPublic }) }),
-  delete: (id: string) => api<{ ok: boolean }>(`/api/web-space/routes/${id}`, { method: "DELETE" }),
+    api<{ ok: boolean }>(`/api/lab-space/routes/${id}/publish`, { method: "POST", body: JSON.stringify({ public: !!isPublic }) }),
+  delete: (id: string) => api<{ ok: boolean }>(`/api/lab-space/routes/${id}`, { method: "DELETE" }),
+  history: (id: string) => api<{ versions: SpaceVersion[] }>(`/api/lab-space/routes/${id}/history`),
+  undo: (id: string) => api<{ ok: boolean; version: number }>(`/api/lab-space/routes/${id}/undo`, { method: "POST" }),
+  redo: (id: string) => api<{ ok: boolean; version: number }>(`/api/lab-space/routes/${id}/redo`, { method: "POST" }),
+  assets: () => api<{ assets: { path: string; size: number }[] }>("/api/lab-space/assets"),
+  uploadAsset: (sourceFile: string, assetPath: string) =>
+    api<{ ok: boolean; path: string }>("/api/lab-space/assets", { method: "POST", body: JSON.stringify({ sourceFile, assetPath }) }),
+  deleteAsset: (assetPath: string) =>
+    api<{ ok: boolean }>(`/api/lab-space/assets/${encodeURIComponent(assetPath)}`, { method: "DELETE" }),
+  settings: () => api<SpaceSettings>("/api/lab-space/settings"),
+  updateSettings: (data: Partial<SpaceSettings> & { path?: string }) =>
+    api<{ ok: boolean }>("/api/lab-space/settings", { method: "PUT", body: JSON.stringify(data) }),
+  errors: () => api<{ errors: { route?: string; message: string; timestamp: number }[] }>("/api/lab-space/errors"),
+  restart: () => api<{ ok: boolean }>("/api/lab-space/restart", { method: "POST" }),
 };
+
+export interface SpaceVersion {
+  version: number;
+  action: string;
+  path: string;
+  route_type: string;
+  code_preview: string;
+  created_at: number;
+  is_current: boolean;
+}
+
+export interface SpaceSettings {
+  site_title?: string;
+  site_description?: string;
+  og_image_url?: string;
+  favicon_url?: string;
+  custom_head_html?: string;
+  robots_txt?: string;
+  noindex?: string;
+  custom_404_route?: string;
+  lang?: string;
+  path?: string;
+}
 
 // ---- Workspace ----
 export const Workspace = {

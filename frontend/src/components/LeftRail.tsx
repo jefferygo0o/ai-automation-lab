@@ -11,7 +11,7 @@ import { Chats, type Chat } from "../api";
 import { useTabStore } from "../stores/tabStore";
 
 const NAV_ITEMS = [
-  { to: "/web-space", label: "Web Space", icon: Globe },
+  { to: "/web-space", label: "Lab Space", icon: Globe },
   { to: "/chats", label: "Home", icon: LayoutDashboard },
   { to: "/files", label: "Files", icon: FolderTree },
   { to: "/automations", label: "Automations", icon: Timer },

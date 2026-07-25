@@ -129,7 +129,7 @@ html,body{margin:0;padding:0;height:100%;background:#0b0d10;color:#e6e6e6;font:1
         >
           <iframe
             key={previewKey}
-            title="Web Space preview"
+            title="Lab Space preview"
             srcDoc={srcDoc}
             className="w-full h-full block"
             sandbox="allow-scripts allow-same-origin allow-forms allow-popups"

@@ -202,8 +202,8 @@ labSpaceApi.delete("/by-path/*", async (c) => {
 // VERSION HISTORY
 // ============================================================
 
-// GET /routes/:id/versions — get version history for a route
-labSpaceApi.get("/routes/:id/versions", async (c) => {
+// GET /routes/:id/history — get version history for a route
+labSpaceApi.get("/routes/:id/history", async (c) => {
   const userId = c.get("userId") as string;
   const routeId = c.req.param("id");
   const rows = await db.query(

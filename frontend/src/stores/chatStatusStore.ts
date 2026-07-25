@@ -5,7 +5,7 @@ import { create } from "zustand";
  *
  * The side `ChatPanel` header reads from this store to show a working
  * indicator (and which tool is currently executing) even when the user
- * is focused on a different page — e.g. while editing a Web Space route
+ * is focused on a different page — e.g. while editing a Lab Space route
  * while a background chat is still streaming.
  *
  * Each `ChatPanel` instance publishes its own state on every change. A
