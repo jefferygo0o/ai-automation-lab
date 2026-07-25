@@ -197,11 +197,16 @@ automationsApi.get("/scheduler/status", async (c) => {
 
 // Manual trigger — fires the automation once, regardless of schedule. Useful
 // for testing before waiting on the timer.
+// Runs in the background so the HTTP response returns immediately.
+// Awaiting the full agent turn here would timeout on platforms like Render.
 automationsApi.post("/:id/run-now", async (c) => {
   const userId = c.get("userId") as string;
   const row = await db.query("SELECT * FROM automations WHERE id = ? AND owner_id = ?")
     .get(c.req.param("id"), userId) as Automation | undefined;
   if (!row) return c.json({ error: "not found" }, 404);
-  const runId = await fireAutomationById(row.id);
-  return c.json({ ok: true, run_id: runId });
+  // Fire asynchronously — don't block the response
+  fireAutomationById(row.id).catch((e) =>
+    console.error(`[automations] manual run-now ${row.id} failed:`, e)
+  );
+  return c.json({ ok: true });
 });
