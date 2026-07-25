@@ -29,7 +29,8 @@ import { RunStore } from "../runs/index.ts";
 import { sandboxBrowse, sandboxRead, sandboxReadBinary, sandboxWrite, sandboxExec, sandboxDelete } from "../sandbox/api.ts";
 import { resolveSandboxOptions } from "../agents/permissions.ts";
 import { createSandbox } from "../sandbox/index.ts";
-import { webSpaceApi } from "../webspace/index.ts";
+import { labSpaceApi } from "../lab-space/index.ts";
+import { labSpaceApi as webSpaceApi } from "../webspace/index.ts";
 import { workspaceApi } from "../workspace/index.ts";
 import { automationsApi } from "../automations/index.ts";
 import { toolRegistry } from "../tools/registry.ts";
@@ -560,7 +561,7 @@ api.post("/api/chats/:id/messages", async (c) => {
     return c.json({ error: "content or files required" }, 400);
   }
   if (files.length > 0) {
-    const sandboxOpts = resolveSandboxOptions(agent);
+    const sandboxOpts = resolveSandboxOptions(agent, userId);
     const sandbox = createSandbox(sandboxOpts);
     const { processAttachments } = await import("../chat/attachments.ts");
     const result = await processAttachments(userId, content, files, sandboxOpts.workdir ?? "");
@@ -1075,7 +1076,9 @@ api.route("/api/templates", templatesApi);
 // ---- Webhooks (CRUD is auth-protected; public fire endpoint is mounted) ----
 api.route("/api/webhooks", webhooksApi);
 
-// ---- Web Space ----
+// ---- Lab Space ----
+api.route("/api/lab-space", labSpaceApi);
+// ---- Web Space (legacy alias) ----
 api.route("/api/web-space", webSpaceApi);
 
 // ---- Workspace ----
@@ -1090,7 +1093,7 @@ api.get("/api/agents/:id/sandbox", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
-  const opts = resolveSandboxOptions(agent);
+  const opts = resolveSandboxOptions(agent, userId);
   const path = c.req.query("path") ?? ".";
   try {
     const result = sandboxBrowse(opts, path);
@@ -1104,7 +1107,7 @@ api.get("/api/agents/:id/sandbox/read", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
-  const opts = resolveSandboxOptions(agent);
+  const opts = resolveSandboxOptions(agent, userId);
   const path = c.req.query("path");
   if (!path) return c.json({ error: "path required" }, 400);
   try {
@@ -1137,7 +1140,7 @@ api.get("/api/agents/:id/sandbox/file", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
-  const opts = resolveSandboxOptions(agent);
+  const opts = resolveSandboxOptions(agent, userId);
   const path = c.req.query("path");
   if (!path) return c.json({ error: "path required" }, 400);
   try {
@@ -1159,7 +1162,7 @@ api.put("/api/agents/:id/sandbox/write", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
-  const opts = resolveSandboxOptions(agent);
+  const opts = resolveSandboxOptions(agent, userId);
   const { path, content } = (await c.req.json()) as { path: string; content: string };
   try {
     sandboxWrite(opts, path, content);
@@ -1173,7 +1176,7 @@ api.delete("/api/agents/:id/sandbox", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
-  const opts = resolveSandboxOptions(agent);
+  const opts = resolveSandboxOptions(agent, userId);
   const path = c.req.query("path");
   if (!path) return c.json({ error: "path required" }, 400);
   try {
@@ -1188,7 +1191,7 @@ api.post("/api/agents/:id/sandbox/exec", async (c) => {
   const userId = c.get("userId") as string;
   const agent = await AgentStore.get(c.req.param("id"), userId);
   if (!agent) return c.json({ error: "not found" }, 404);
-  const opts = resolveSandboxOptions(agent);
+  const opts = resolveSandboxOptions(agent, userId);
   const { command, args, timeoutMs } = (await c.req.json()) as { command: string; args?: string[]; timeoutMs?: number };
   try {
     const r = await sandboxExec(opts, command, args ?? [], timeoutMs);

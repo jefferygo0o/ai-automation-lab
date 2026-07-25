@@ -49,6 +49,7 @@ import {
 import { join, resolve, basename, extname, dirname } from "node:path";
 import { nanoid } from "nanoid";
 import { WorkspaceService } from "../workspace/index.ts";
+import { workspaceFor } from "../workspace/index.ts";
 
 export interface SkillFrontmatter {
   id: string;
@@ -80,14 +81,15 @@ export interface Skill extends SkillFrontmatter {
   updatedAt: number;
 }
 
-const SKILLS_ROOT = WorkspaceService.skillsRoot();
+// Per-user paths — computed lazily per ownerId
+function userSkillsRoot(ownerId: string): string { return workspaceFor(ownerId).skillsRoot(); }
+function userGlobalDir(ownerId: string): string { return join(userSkillsRoot(ownerId), "global"); }
+function userUsersDir(ownerId: string): string { return join(userSkillsRoot(ownerId), "users"); }
 
 const BUILTIN_DIR = resolve(import.meta.dir, "builtin");
-const GLOBAL_DIR = join(SKILLS_ROOT, "global");
-const USERS_DIR = join(SKILLS_ROOT, "users");
 
-function ensureDirs() {
-  for (const d of [SKILLS_ROOT, GLOBAL_DIR, USERS_DIR]) {
+function ensureDirs(ownerId: string) {
+  for (const d of [userSkillsRoot(ownerId), userGlobalDir(ownerId), userUsersDir(ownerId)]) {
     if (!existsSync(d)) mkdirSync(d, { recursive: true });
   }
 }
@@ -268,24 +270,26 @@ function renderSkillFile(meta: SkillFrontmatter, body: string): string {
 }
 
 function skillFilePath(scope: "user" | "global", userId: string, id: string): string {
-  if (scope === "global") return join(GLOBAL_DIR, `${id}.md`);
-  return join(USERS_DIR, userId, `${id}.md`);
+  if (scope === "global") return join(userGlobalDir(userId), `${id}.md`);
+  return join(userUsersDir(userId), `${id}.md`);
 }
 
 export const Skills = {
-  init() {
-    ensureDirs();
+  init(ownerId?: string) {
+    if (ownerId) ensureDirs(ownerId);
   },
 
   /** Seed built-in skills into the global directory so users can edit/clone them. */
-  seedUserSkills() {
-    ensureDirs();
+  seedUserSkills(ownerId?: string) {
+    const gid = ownerId ? userGlobalDir(ownerId) : null;
+    if (!gid) return; // no userId available at startup — skip global seeding
+    ensureDirs(ownerId!);
     try {
       if (!existsSync(BUILTIN_DIR)) return;
       for (const file of readdirSync(BUILTIN_DIR)) {
         if (extname(file) !== ".md") continue;
         const src = join(BUILTIN_DIR, file);
-        const dest = join(GLOBAL_DIR, file);
+        const dest = join(gid, file);
         if (!existsSync(dest)) {
           copyFileSync(src, dest);
         }
@@ -295,13 +299,13 @@ export const Skills = {
     }
   },
 
-  list(): Skill[] {
-    ensureDirs();
+  list(ownerId?: string): Skill[] {
+    if (ownerId) ensureDirs(ownerId);
     const out: Skill[] = [];
-    if (existsSync(GLOBAL_DIR)) {
-      for (const file of readdirSync(GLOBAL_DIR)) {
+    if (ownerId && existsSync(userGlobalDir(ownerId))) {
+      for (const file of readdirSync(userGlobalDir(ownerId))) {
         if (extname(file) !== ".md") continue;
-        const s = readSkillFile(join(GLOBAL_DIR, file), "user");
+        const s = readSkillFile(join(userGlobalDir(ownerId!), file), "user");
         if (s) out.push(s);
       }
     }
@@ -329,8 +333,8 @@ export const Skills = {
 
   /** Per-user private skills (in data/skills/users/{userId}/). */
   listForUser(userId: string): Skill[] {
-    ensureDirs();
-    const dir = join(USERS_DIR, userId);
+    ensureDirs(userId);
+    const dir = join(userUsersDir(userId));
     if (!existsSync(dir)) return [];
     const out: Skill[] = [];
     for (const file of readdirSync(dir)) {
@@ -390,8 +394,8 @@ export const Skills = {
     body: string,
     meta: Partial<SkillFrontmatter> = {},
   ): Skill {
-    ensureDirs();
-    const dir = join(USERS_DIR, userId);
+    ensureDirs(userId);
+    const dir = join(userUsersDir(userId));
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     const fm: SkillFrontmatter = {
       id,

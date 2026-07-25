@@ -2,10 +2,9 @@ import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
 import { mkdirSync, existsSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { WorkspaceService } from "../workspace/index.ts";
+import { workspaceFor } from "../workspace/index.ts";
 
-const WORKSPACE_ROOT = WorkspaceService.root();
-const SITES_DIR = WorkspaceService.sitesRoot();
+function userSitesDir(ownerId: string): string { return workspaceFor(ownerId).sitesRoot(); }
 
 export interface Site {
   id: string;
@@ -102,9 +101,10 @@ export const SiteStore = {
       slug = `${slugify(name)}-${suffix}`;
     }
     const now = Date.now();
+    const sitesDir = userSitesDir(ownerId);
     const rootDir = parentPathParts.length > 0
-      ? join(SITES_DIR, ...parentPathParts, slug)
-      : join(SITES_DIR, slug);
+      ? join(sitesDir, ...parentPathParts, slug)
+      : join(sitesDir, slug);
 
     // Create directory + zosite.json
     mkdirSync(rootDir, { recursive: true });
@@ -159,8 +159,8 @@ export const SiteStore = {
   async delete(id: string, ownerId: string): Promise<boolean> {
     const site = await SiteStore.get(id, ownerId);
     if (!site) return false;
-    // Remove files (careful — only under SITES_DIR)
-    if (site.rootDir.startsWith(SITES_DIR)) {
+    // Remove files (careful — only under user's sites dir)
+    if (site.rootDir.startsWith(userSitesDir(ownerId))) {
       try { rmSync(site.rootDir, { recursive: true, force: true }); } catch {}
     }
     const r = await db.prepare("DELETE FROM sites WHERE id = ? AND owner_id = ?").run(id, ownerId);

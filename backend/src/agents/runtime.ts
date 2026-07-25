@@ -92,7 +92,7 @@ export async function runAgentTurn(
 
   // Load agent config + sandbox
   const cfg = readAgentConfig(agent.id);
-  const sandboxOpts = resolveSandboxOptions(agent);
+  const sandboxOpts = resolveSandboxOptions(agent, ownerId);
   const sandbox = createSandbox(sandboxOpts);
 
   const abort = opts.signal ?? new AbortController().signal;

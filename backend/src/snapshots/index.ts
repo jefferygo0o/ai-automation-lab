@@ -22,10 +22,11 @@ import { nanoid } from "nanoid";
 import { db } from "../db/index.ts";
 import { supabaseAdmin } from "../security/supabase.ts";
 import { AGENTS_DIR, ensureAgentDir } from "../agents/files.ts";
-import { WorkspaceService } from "../workspace/index.ts";
+import { workspaceFor } from "../workspace/index.ts";
 
-function resolveAgentDir(agentId: string): string {
-  return WorkspaceService.agentRoot(agentId);
+function resolveAgentDir(agentId: string, ownerId?: string): string {
+  const ws = ownerId ? workspaceFor(ownerId) : workspaceFor("__global__");
+  return ws.agentRoot(agentId);
 }
 
 const BUCKET = process.env.SUPABASE_SNAPSHOT_BUCKET || "agent-snapshots";

@@ -81,12 +81,7 @@ export interface Sandbox {
   cleanup(): void;
 }
 
-const SBOX_ROOT = WorkspaceService.sandboxesRoot();
 
-function sandboxRootDir() {
-  if (!existsSync(SBOX_ROOT)) mkdirSync(SBOX_ROOT, { recursive: true });
-  return SBOX_ROOT;
-}
 
 class LocalSandbox implements Sandbox {
   readonly id: string;
@@ -275,6 +270,4 @@ export function createSandbox(opts: SandboxOptions): Sandbox {
   return new LocalSandbox(opts);
 }
 
-export function sandboxWorkdirForAgent(agentId: string): string {
-  return join(sandboxRootDir(), agentId);
-}
+

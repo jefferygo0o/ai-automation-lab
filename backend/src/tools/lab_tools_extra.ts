@@ -39,13 +39,12 @@ import { join, resolve, isAbsolute, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { WorkspaceService } from "../workspace/index.ts";
+import { workspaceFor } from "../workspace/index.ts";
 
 import { setActiveView } from "../browser/active.ts";
-const LAB_PROJECT_ROOT = WorkspaceService.root();
-const LAB_BACKEND_ROOT = WorkspaceService.zoRoot();
-const DATA_DIR = WorkspaceService.root();
-mkdirSync(DATA_DIR, { recursive: true });
+/** Resolve paths per-user. Falls back to a shared root when no ownerId is available. */
+function userRoot(ownerId: string): string { return workspaceFor(ownerId).root(); }
+function userZoRoot(ownerId: string): string { return workspaceFor(ownerId).zoRoot(); }
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -70,13 +69,13 @@ function resolveInSandbox(ctx: ToolContext, p: string): string {
   return ctx.sandbox.resolveSafe(p);
 }
 
-/** Resolve an absolute path, restricting to DATA_DIR when no sandbox is active. */
+/** Resolve an absolute path, restricting to user workspace when no sandbox is active. */
 function resolveLabPath(ctx: ToolContext, p: string): string {
   if (ctx.sandbox) return resolveInSandbox(ctx, p);
-  // No sandbox: restrict to DATA_DIR
-  const abs = isAbsolute(p) ? p : resolve(DATA_DIR, p);
+  // No sandbox: restrict to user workspace
+  const abs = isAbsolute(p) ? p : resolve(userRoot(ctx.ownerId), p);
   const real = realpathSync(abs);
-  const root = realpathSync(DATA_DIR);
+  const root = realpathSync(userRoot(ctx.ownerId));
   if (real !== root && !real.startsWith(root + sep)) {
     throw new Error(`path escapes lab workspace: ${p}`);
   }
@@ -588,7 +587,7 @@ toolRegistry.register({
   defaultPermission: "always",
   async execute(args, ctx) {
     try {
-      const target = args.path ?? DATA_DIR;
+      const target = args.path ?? userRoot(ctx.ownerId);
       const abs = resolveLabPath(ctx, target);
       if (!existsSync(abs)) return err(`path not found: ${abs}`);
       const st = statSync(abs);
@@ -700,7 +699,7 @@ toolRegistry.register({
     if (!args.command) return err("command is required");
     if (!ctx.sandbox) return err("sandbox not active — agent must run inside a sandbox");
     try {
-      const wrapped = `cd ${DATA_DIR} && ${args.command}`;
+      const wrapped = `cd ${userRoot(ctx.ownerId)} && ${args.command}`;
       const r = await ctx.sandbox.run("bash", ["-c", wrapped]);
       const body = `exit=${r.exitCode ?? r.signal} duration=${r.durationMs}ms\n--- stdout ---\n${r.stdout}${r.truncated ? "\n... (truncated)\n" : ""}--- stderr ---\n${r.stderr}`;
       return r.ok ? ok(body) : { content: [{ type: "text" as const, text: body }], isError: true };
@@ -732,7 +731,7 @@ toolRegistry.register({
     let failed = 0;
     for (let i = 0; i < args.commands.length; i++) {
       const c = args.commands[i];
-      const r = await ctx.sandbox.run("bash", ["-c", `cd ${DATA_DIR} && ${c}`]);
+      const r = await ctx.sandbox.run("bash", ["-c", `cd ${userRoot(ctx.ownerId)} && ${c}`]);
       results.push(`# [${i + 1}/${args.commands.length}] ${c}\nexit=${r.exitCode ?? r.signal} duration=${r.durationMs}ms\n${r.stdout}${r.truncated ? "\n... (truncated)" : ""}${r.stderr ? "\nstderr: " + r.stderr : ""}`);
       if (!r.ok) {
         failed++;
@@ -765,7 +764,7 @@ toolRegistry.register({
     if (!Array.isArray(args.commands) || args.commands.length === 0) return err("commands must be a non-empty array");
     const t = args.timeoutMs ?? 30_000;
     const run = async (c: string, idx: number) => {
-      const r = await ctx.sandbox!.run("bash", ["-c", `cd ${DATA_DIR} && ${c}`]);
+      const r = await ctx.sandbox!.run("bash", ["-c", `cd ${userRoot(ctx.ownerId)} && ${c}`]);
       return { idx, c, r };
     };
     const out: { idx: number; c: string; r: Awaited<ReturnType<typeof ctx.sandbox.run>> }[] = [];
@@ -1553,7 +1552,7 @@ toolRegistry.register({
     // as .jpg not .png to avoid confusing readers / OS previews.
     const safeName = args.file_stem.replace(/[^a-z0-9_-]/gi, "_");
     const outRel = `Images/${safeName}.jpg`;
-    const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(outRel) : resolve(LAB_BACKEND_ROOT + `/Images/${safeName}.jpg`);
+    const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(outRel) : resolve(userZoRoot(ctx.ownerId) + `/Images/${safeName}.jpg`);
 
     const writeOut = async (buf: Buffer) => {
       mkdirSync(dirname(outAbs), { recursive: true });
@@ -1687,7 +1686,7 @@ toolRegistry.register({
       const seed = args.seed ?? Math.floor(Math.random() * 4294967295);
       const safeName = args.file_stem.replace(/[^a-z0-9_-]/gi, "_");
       // Cloudflare editing also returns JPEG bytes — write as .jpg.
-      const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(`${safeName}.jpg`) : resolve(LAB_BACKEND_ROOT + `/Images/${safeName}.jpg`);
+      const outAbs = ctx.sandbox ? ctx.sandbox.resolveSafe(`${safeName}.jpg`) : resolve(userZoRoot(ctx.ownerId) + `/Images/${safeName}.jpg`);
 
       // FLUX.2 [klein] 9B is the only model in this account with a reliable
       // editing path. It requires multipart with input_image_0..2.

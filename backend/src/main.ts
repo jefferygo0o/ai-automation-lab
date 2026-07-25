@@ -15,6 +15,7 @@ import "./tools/lab_tools.ts";
 import "./tools/integration_tools.ts";
 import "./tools/lab_tools_extra.ts";
 import "./tools/webspace_tools.ts";
+import "./tools/lab_space_tools.ts";
 import { Skills } from "./skills/index.ts";
 import api from "./api/server.ts";
 import { webhooksPublicApi } from "./webhooks/index.ts";

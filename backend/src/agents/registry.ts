@@ -26,6 +26,7 @@ import { recordHistory } from "./history.ts";
 import { decryptSecret } from "../secrets/vault.ts";
 import { rmSync } from "node:fs";
 import { WorkspaceService } from "../workspace/index.ts";
+import { workspaceFor } from "../workspace/index.ts";
 
 export interface AgentRecord {
   id: string;
@@ -96,13 +97,35 @@ function safeRead(id: string, name: string): string {
   try { return readAgentFile(id, name); } catch { return ""; }
 }
 
-function pathForSkills(id: string): string {
-  return WorkspaceService.agentSkillsRoot(id);
+function pathForSkills(id: string, ownerId?: string): string {
+  const ws = ownerId ? workspaceFor(ownerId) : workspaceFor("__global__");
+  return ws.agentSkillsRoot(id);
 }
 
-async function updateHash(id: string): Promise<void> {
+async function updateHash(id: string, ownerId?: string): Promise<void> {
   try {
-    const hash = computeAgentHash(id);
+    // build a workspace-scoped hash so two users with the same agent content don't collide
+    const cfg = readAgentConfig(id);
+    const cfgStr = JSON.stringify(cfg);
+    const sys = safeRead(id, "system.md");
+    const usr = safeRead(id, "user.md");
+    const skillsDir = pathForSkills(id, ownerId);
+    const skillFiles: string[] = [];
+    try {
+      if (fs.existsSync(skillsDir)) {
+        for (const e of fs.readdirSync(skillsDir).sort()) {
+          if (e.endsWith(".md")) skillFiles.push(e);
+        }
+      }
+    } catch { /* ignore */ }
+    const h = createHash("sha256");
+    h.update("config:"); h.update(cfgStr);
+    h.update("|system:"); h.update(sys);
+    h.update("|user:"); h.update(usr);
+    for (const f of skillFiles) {
+      h.update("|skill:"); h.update(f); h.update(":"); h.update(safeRead(id, `skills/${f}`));
+    }
+    const hash = h.digest("hex");
     await db.prepare(`UPDATE agents SET hash = ?, runtime = ? WHERE id = ?`).run(hash, AGENT_RUNTIME, id);
   } catch (e) {
     console.error(`[agents] failed to update hash for ${id}:`, e);
