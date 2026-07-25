@@ -247,6 +247,7 @@ export default function App() {
                 <Route path="/secrets" element={<SecretsPage />} />
                 <Route path="/runs" element={<RunsPage />} />
                 <Route path="/browser" element={<BrowserPage />} />
+                <Route path="/terminal" element={<TerminalPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="*" element={<Navigate to="/chats" replace />} />
               </Routes>
@@ -257,3 +258,4 @@ export default function App() {
     </Routes>
   );
 }
+import TerminalPage from "./pages/TerminalPage";

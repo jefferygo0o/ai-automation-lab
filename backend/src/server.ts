@@ -18,6 +18,7 @@ import { mcpManager } from "./mcp/client.ts";
 import { AutomationScheduler } from "./automations/scheduler.ts";
 import { backfillAgentConfigs } from "./agents/registry.ts";
 import { hydrateAllAgents, ensureSnapshotBucket } from "./snapshots/index.ts";
+import { onTerminalOpen, onTerminalMessage, onTerminalClose } from "./terminal/index.ts";
 
 Skills.init();
 Skills.seedUserSkills();
@@ -85,10 +86,25 @@ const mime = (p: string) => {
 // `app.fetch` returns a Response which we pass through unmodified.
 Bun.serve({
   port,
-  async fetch(req) {
+  websocket: {
+    open: onTerminalOpen,
+    message: onTerminalMessage,
+    close: onTerminalClose,
+  },
+  async fetch(req, server) {
     const url = new URL(req.url);
 
-    // API routes first — let Hono handle them
+    // Terminal WebSocket upgrade
+    if (url.pathname === "/api/terminal/ws") {
+      const authHeader = req.headers.get("authorization") || undefined;
+      const { authenticateBearer } = await import("./security/auth.ts");
+      const user = await authenticateBearer(authHeader);
+      if (!user) return new Response("Unauthorized", { status: 401 });
+      const upgraded = server.upgrade(req, { data: { userId: user.id } });
+      if (!upgraded) return new Response("WebSocket upgrade failed", { status: 500 });
+      return undefined as any;
+    }
+
     // Web Space serving — /ws/<owner>/<path> routes
     if (url.pathname.startsWith("/ws/")) {
       const { webSpaceServing } = await import("./webspace/serving.ts");
@@ -126,3 +142,4 @@ Bun.serve({
 });
 
 console.log(`[lab] API + UI on :${port} (dist=${DIST})`);
+
