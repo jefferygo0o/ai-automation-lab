@@ -108,6 +108,13 @@ function wrapHonoDefault(
 
 // ---- Page route rendering ----
 
+/** Common headers for webspace responses (allows cross-origin iframe embedding). */
+const WS_HEADERS = {
+  "Content-Type": "text/html; charset=utf-8",
+  "Access-Control-Allow-Origin": "*",
+  "X-Frame-Options": "ALLOWALL",
+};
+
 /**
  * Render a page route to an HTML Response.
  *
@@ -126,9 +133,7 @@ export function renderPage(route: SpaceRouteRow): Response {
     trimmed.startsWith("<!doctype") ||
     trimmed.startsWith("<html")
   ) {
-    return new Response(code, {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
-    });
+    return new Response(code, { headers: WS_HEADERS });
   }
 
   // Try JSON structured doc: {"title":"x","body":"<h1>hi</h1>","style":"..."}
@@ -136,9 +141,10 @@ export function renderPage(route: SpaceRouteRow): Response {
     try {
       const doc = JSON.parse(code);
       if (doc && typeof doc === "object" && "body" in doc) {
-        return new Response(htmlShell(doc.title ?? route.path, doc.body, doc.style ?? "", doc.script ?? ""), {
-          headers: { "Content-Type": "text/html; charset=utf-8" },
-        });
+        return new Response(
+          htmlShell(doc.title ?? route.path, doc.body, doc.style ?? "", doc.script ?? ""),
+          { headers: WS_HEADERS }
+        );
       }
     } catch {
       // fall through to partial HTML
@@ -146,10 +152,7 @@ export function renderPage(route: SpaceRouteRow): Response {
   }
 
   // Partial HTML — wrap in a minimal shell.
-  return new Response(
-    htmlShell(route.path, code, "", ""),
-    { headers: { "Content-Type": "text/html; charset=utf-8" } }
-  );
+  return new Response(htmlShell(route.path, code, "", ""), { headers: WS_HEADERS });
 }
 
 function htmlShell(title: string, body: string, style: string, script: string): string {

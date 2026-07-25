@@ -11,6 +11,7 @@ import "./tools/lab_tools.ts";
 import "./tools/integration_tools.ts";
 import "./tools/lab_tools_extra.ts";
 import "./tools/lab_space_tools.ts";
+import "./tools/webspace_tools.ts";
 import { Skills } from "./skills/index.ts";
 import api from "./api/server.ts";
 import { mcpManager } from "./mcp/client.ts";
@@ -88,6 +89,16 @@ Bun.serve({
     const url = new URL(req.url);
 
     // API routes first — let Hono handle them
+    // Web Space serving — /ws/<owner>/<path> routes
+    if (url.pathname.startsWith("/ws/")) {
+      const { webSpaceServing } = await import("./webspace/serving.ts");
+      const stripped = new Request(
+        new URL(url.pathname.replace(/^\/ws/, "") + url.search, url.origin),
+        req,
+      );
+      return webSpaceServing.fetch(stripped);
+    }
+
     if (url.pathname.startsWith("/api/") || url.pathname === "/api") {
       return api.fetch(req);
     }
