@@ -598,7 +598,7 @@ api.post("/api/chats/:id/messages", async (c) => {
     } catch { clearInterval(heartbeat); }
   }, 10_000);
   const clearHb = async () => { clearInterval(heartbeat); };
-  runAgentTurn(userId, c.req.param("id"), content, send)
+  runAgentTurn(userId, c.req.param("id"), content, send, { maxToolCalls: 25 })
     .catch((e: any) => send({ type: "error", message: e?.message ?? String(e) }))
     .finally(() => { clearHb(); writer.close().catch(() => {}); });
   return new Response(readable, {
