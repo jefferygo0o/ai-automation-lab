@@ -35,6 +35,7 @@ export interface Automation {
   instruction: string;
   rrule: string;
   enabled: boolean;
+  model: string | null;
   lastRunAt: number | null;
   nextRunAt: number | null;
   createdAt: number;
@@ -268,13 +269,27 @@ export const Automations = {
   get: (id: string) => api<{ automation: Automation }>(`/api/automations/${id}`),
   create: (name: string, instruction: string, rrule: string, description: string = "", agentId: string | null = null) =>
     api<{ automation: Automation }>("/api/automations", { method: "POST", body: JSON.stringify({ name, instruction, rrule, description, agentId }) }),
-  update: (id: string, data: Partial<{ name: string; description: string; instruction: string; rrule: string; agentId: string | null; enabled: boolean }>) =>
+  update: (id: string, data: Partial<{ name: string; description: string; instruction: string; rrule: string; agentId: string | null; enabled: boolean; model: string | null }>) =>
     api<{ automation: Automation }>(`/api/automations/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   delete: (id: string) => api<{ ok: boolean }>(`/api/automations/${id}`, { method: "DELETE" }),
   runs: (id: string, limit: number = 50) =>
     api<{ runs: AutomationRun[] }>(`/api/automations/${id}/runs?limit=${limit}`),
   runNow: (id: string) =>
     api<{ run: AutomationRun; output?: string }>(`/api/automations/${id}/run`, { method: "POST" }),
+};
+
+// ---- Models ----
+export interface ModelPreset {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  baseUrl?: string;
+  apiKeySecret?: string;
+}
+
+export const Models = {
+  list: () => api<{ models: ModelPreset[] }>("/api/models"),
 };
 
 // ---- Integrations (Foundry-powered) ----

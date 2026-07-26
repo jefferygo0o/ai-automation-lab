@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Automations, type Automation, type AutomationRun } from "../api";
+import { Automations, Models, type Automation, type AutomationRun, type ModelPreset } from "../api";
+import { useRealtimeSubscription } from "../hooks/useRealtime";
+import { useAuth } from "../state/auth";
 import {
   Timer, Plus, Trash2, Play, Pause,
   AlertCircle, Clock, History, Zap, Activity, RefreshCw,
@@ -56,6 +58,7 @@ export default function AutomationsPage() {
   const [dueMap, setDueMap] = useState<Record<string, number>>({});
   const [running, setRunning] = useState<Set<string>>(new Set());
   const [now, setNow] = useState(Date.now());
+  const [models, setModels] = useState<ModelPreset[]>([]);
   const tickRef = useRef<number | null>(null);
 
   const fetchAutomations = useCallback(async () => {
@@ -92,13 +95,32 @@ export default function AutomationsPage() {
     } catch {}
   }, []);
 
+  const fetchModels = useCallback(async () => {
+    try {
+      const res = await Models.list();
+      setModels(res.models || []);
+    } catch {}
+  }, []);
+
   useEffect(() => {
     fetchAutomations();
     fetchSchedulerStatus();
     fetchAgents();
-  }, [fetchAutomations, fetchSchedulerStatus, fetchAgents]);
+    fetchModels();
+  }, [fetchAutomations, fetchSchedulerStatus, fetchAgents, fetchModels]);
 
-  // Live ticker — re-fetch status every 10s, re-render "next run in" every 1s.
+  // Realtime: live-updates automations list when rows change in Supabase.
+  const userId = useAuth((s) => s.userId);
+  useRealtimeSubscription(
+    "automations",
+    "*",
+    userId ? `owner_id=eq.${userId}` : undefined,
+    useCallback(() => {
+      Automations.list().then((res) => setAutomations(res.automations)).catch(() => {});
+    }, []),
+  );
+
+  // Live ticker — re-render "next run in" every 1s. Scheduler status every 30s.
   useEffect(() => {
     const i = setInterval(() => {
       setNow(Date.now());
@@ -108,9 +130,10 @@ export default function AutomationsPage() {
   }, []);
 
   useEffect(() => {
+    fetchSchedulerStatus();
     const i = setInterval(() => {
       fetchSchedulerStatus();
-    }, 10_000);
+    }, 30_000);
     return () => clearInterval(i);
   }, [fetchSchedulerStatus]);
 
@@ -146,6 +169,15 @@ export default function AutomationsPage() {
       setAutomations((prev) => prev.map((a) => a.id === res.automation.id ? res.automation : a));
     } catch (e: any) {
       setError(e.message || "Failed to update");
+    }
+  };
+
+  const handleModelChange = async (auto: Automation, model: string) => {
+    try {
+      const res = await Automations.update(auto.id, { model: model || null });
+      setAutomations((prev) => prev.map((a) => a.id === res.automation.id ? res.automation : a));
+    } catch (e: any) {
+      setError(e.message || "Failed to update model");
     }
   };
 
@@ -325,8 +357,21 @@ export default function AutomationsPage() {
                       </button>
                     </div>
                   </div>
-                  <div className="card-body">
+                  <div className="card-body space-y-2">
                     <pre className="text-xs text-ink-500 whitespace-pre-wrap font-sans">{auto.instruction}</pre>
+                    <div className="flex items-center gap-2 border-t border-line pt-2">
+                      <span className="text-2xs text-ink-400 shrink-0">Model:</span>
+                      <select
+                        value={auto.model || ""}
+                        onChange={(e) => handleModelChange(auto, e.target.value)}
+                        className="input input-sm flex-1"
+                      >
+                        <option value="">Agent default</option>
+                        {models.map((m) => (
+                          <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   {historyFor === auto.id && (
                     <div className="border-t border-line">
