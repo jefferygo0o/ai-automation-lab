@@ -80,63 +80,71 @@ function splitSqlStatements(sql: string): string[] {
   let current = "";
   let inSingleQuote = false;
   let inDoubleQuote = false;
-  let inDollarQuote = false;
   let dollarQuoteMarker = "";
   let i = 0;
   while (i < sql.length) {
     const char = sql[i];
-    if (inSingleQuote) {
-      current += char;
-      if (char === "'") {
-        if (sql[i + 1] === "'") {
-          current += sql[i + 1];
-          i += 2;
-          continue;
-        }
-        inSingleQuote = false;
-      }
-    } else if (inDoubleQuote) {
-      current += char;
-      if (char === '"') {
-        if (sql[i + 1] === '"') {
-          current += sql[i + 1];
-          i += 2;
-          continue;
-        }
-        inDoubleQuote = false;
-      }
-    } else if (inDollarQuote) {
-      if (char === "$" && dollarQuoteMarker && sql.slice(i, i + dollarQuoteMarker.length) === dollarQuoteMarker) {
+    if (dollarQuoteMarker) {
+      if (sql.startsWith(dollarQuoteMarker, i)) {
         current += dollarQuoteMarker;
         i += dollarQuoteMarker.length;
-        inDollarQuote = false;
         dollarQuoteMarker = "";
-        continue;
-      }
-      current += char;
-    } else {
-      if (char === "'") {
-        inSingleQuote = true;
-        current += char;
-      } else if (char === '"') {
-        inDoubleQuote = true;
-        current += char;
-      } else if (char === "$") {
-        const marker = sql.slice(i).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/)?.[0];
-        if (marker) {
-          dollarQuoteMarker = marker;
-          inDollarQuote = true;
-          current += marker;
-          i += marker.length;
-          continue;
-        }
-        current += char;
-      } else if (char === ";") {
-        if (current.trim()) statements.push(current);
-        current = "";
       } else {
         current += char;
+        i++;
       }
+      continue;
+    }
+    if (inSingleQuote) {
+      current += char;
+      i++;
+      if (char === "'") {
+        if (sql[i] === "'") {
+          current += sql[i++];
+        } else {
+          inSingleQuote = false;
+        }
+      }
+      continue;
+    }
+    if (inDoubleQuote) {
+      current += char;
+      i++;
+      if (char === '"') {
+        if (sql[i] === '"') {
+          current += sql[i++];
+        } else {
+          inDoubleQuote = false;
+        }
+      }
+      continue;
+    }
+    if (char === "'") {
+      inSingleQuote = true;
+      current += char;
+      i++;
+      continue;
+    }
+    if (char === '"') {
+      inDoubleQuote = true;
+      current += char;
+      i++;
+      continue;
+    }
+    if (char === "$") {
+      const marker = sql.slice(i).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/)?.[0];
+      if (marker) {
+        dollarQuoteMarker = marker;
+        current += marker;
+        i += marker.length;
+        continue;
+      }
+    }
+    if (char === ";") {
+      if (current.trim()) statements.push(current);
+      current = "";
+    } else {
+      current += char;
     }
     i++;
   }
