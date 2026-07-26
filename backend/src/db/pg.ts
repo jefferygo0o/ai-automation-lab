@@ -19,7 +19,7 @@ export function getPool(): Pool {
   if (!url) { url = process.env.DATABASE_URL; envSource = "DATABASE_URL"; }
   if (!url) {
     console.error(
-      "[db] FATAL: no Postgres connection string configured. Set SUPABASE_DB_URL (Supabase transaction-mode pooler, port 6543) or DATABASE_URL (Render Postgres) in the environment, then restart."
+      "[db] FATAL: no Postgres connection string configured. Set SUPABASE_DB_URL (Supabase session-mode / direct, port 5432) or DATABASE_URL (Render Postgres) in the environment, then restart. NOTE: Transaction-mode pooler (port 6543) strips SET LOCAL commands, which breaks RLS auth context."
     );
     throw new Error("SUPABASE_DB_URL is not set");
   }
@@ -32,15 +32,24 @@ export function getPool(): Pool {
 
   _pool = new Pool({
     connectionString: url,
-    max: 2,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 30000,
+    max: 10,
+    min: 2,
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 15_000,
     ssl: isLocal ? undefined : { rejectUnauthorized: false },
     keepAlive: true,
+    allowExitOnIdle: true,
+    // Validate connections before handing them out to catch dead connections early
+    application_name: 'ai-automation-lab',
   });
   _pool.on("error", (err) => {
     console.error("[db] idle client error:", err?.message ?? err);
   });
+
+  // Periodically validate idle connections to avoid handing out dead ones.
+  setInterval(() => {
+    _pool?.query("SELECT 1").catch(() => {});
+  }, 25_000).unref();
 
   // Probe connection immediately so failures surface at startup
   _pool.query("SELECT 1").then(() => {

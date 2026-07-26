@@ -7,7 +7,7 @@
  * (background jobs, schedulers), or "webhook" (incoming HTTP triggers).
  */
 import { nanoid } from "nanoid";
-import { db } from "../db/index.ts";
+import { getPool } from "../db/index.ts";
 
 export type AuditActor = "user" | "agent" | "system" | "webhook" | "anonymous";
 
@@ -29,24 +29,33 @@ export const Audit = {
     try {
       const id = `aud_${nanoid(12)}`;
       const at = Date.now();
-      await db.prepare(
-        `INSERT INTO audit_log (id, owner_id, actor, action, target_id, target_type, metadata_json, ip, user_agent, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        id,
-        input.ownerId,
-        input.actor,
-        input.action,
-        input.targetId ?? null,
-        input.targetType ?? null,
-        input.metadata ? JSON.stringify(input.metadata) : null,
-        input.ip ?? null,
-        input.userAgent ?? null,
-        at,
-      );
+      // Use a dedicated connection so audit failures can't poison the caller's transaction.
+      // If a request context exists, its client may be in an ABORT state from a prior error;
+      // a separate connection avoids cascading 25P02 failures.
+      const client = await getPool().connect();
+      try {
+        await client.query(
+          `INSERT INTO audit_log (id, owner_id, actor, action, target_id, target_type, metadata_json, ip, user_agent, at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+          [
+            id,
+            input.ownerId,
+            input.actor,
+            input.action,
+            input.targetId ?? null,
+            input.targetType ?? null,
+            input.metadata ? JSON.stringify(input.metadata) : null,
+            input.ip ?? null,
+            input.userAgent ?? null,
+            at,
+          ],
+        );
+      } finally {
+        client.release();
+      }
     } catch (e) {
       // Don't let audit logging break the request path
-      console.error("[audit] failed to record event:", e);
+      console.error("[audit] failed to record event:", e?.message ?? e);
     }
   },
 

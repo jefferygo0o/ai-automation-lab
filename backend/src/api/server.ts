@@ -110,6 +110,7 @@ api.use("/api/*", async (c, next) => {
 
     // --- Phase 2: wrap in user-scoped PG transaction for RLS ---
     const pgClient = await getPool().connect();
+    let pgClientReleased = false;
     try {
       await pgClient.query("BEGIN");
       await pgClient.query("SET LOCAL role = 'authenticated'");
@@ -124,8 +125,12 @@ api.use("/api/*", async (c, next) => {
           throw e;
         }
       });
+    } catch (err) {
+      // Destroy the client on failure so a poisoned/closed connection isn't returned to the pool
+      try { pgClient.release(true); pgClientReleased = true; } catch {}
+      throw err;
     } finally {
-      pgClient.release();
+      if (!pgClientReleased) pgClient.release();
     }
     return;
   }
