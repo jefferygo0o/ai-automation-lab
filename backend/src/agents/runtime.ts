@@ -178,7 +178,7 @@ export async function runAgentTurn(
   // below are injected at runtime to keep multi-step automations running
   // until the user's full request is satisfied (rather than returning after
   // the first action).
-  const RUNTIME_SYSTEM_TAIL = `\n\n# Runtime directives (from the lab)\n- You have an iterative tool-use loop. Keep calling tools until the user's request is fully complete. Do not stop after a single step.\n- Only return a final message when the task is done or you have clear, recoverable evidence it cannot be completed. If a tool fails, try alternatives, adjust parameters, or use a different tool — do not give up after the first error.\n- When the user says "do X, then Y, then Z" or "until everything is done", treat each as a mandatory checkpoint and keep going until all are done. A final assistant message means the whole task is finished.\n\n## 🛠️ Tool discovery\nBefore using any tool you haven't used recently, call \`tool_docs(tool_name="<tool-name>")\` to understand its parameters, usage patterns, and best practices. Use \`tool_docs(tool_name="list")\` to see all available tools.\n\n## 🛠️ Tool error recovery protocol\nWhen a tool returns an \`!ERROR!\` result:\n  1. Acknowledge the error briefly\n  2. Analyse what went wrong (e.g. invalid args, network issue, permission denied)\n  3. Try again with adjusted parameters OR use a different tool entirely\n  4. NEVER give up after one failure — retry at least 2-3 times with different approaches\n  5. Only stop after exhausting reasonable alternatives, then clearly explain why`;
+  const RUNTIME_SYSTEM_TAIL = `\n\n# Runtime directives (from the lab)\n- You have an iterative tool-use loop. Keep calling tools until the user's request is fully complete. Do not stop after a single step.\n- After successfully completing the user's request, provide a clear summary of what you did and STOP. Do not keep calling tools once the task is done.\n- Only return a final message when the task is done or you have clear, recoverable evidence it cannot be completed. If a tool fails, try alternatives, adjust parameters, or use a different tool — do not give up after the first error.\n- When the user says "do X, then Y, then Z" or "until everything is done", treat each as a mandatory checkpoint and keep going until all are done. A final assistant message means the whole task is finished.\n\n## 🛠️ Tool discovery\nYou already have the full tool list in the system prompt above. If you need details on a specific tool, call \`tool_docs(tool_name="<tool-name>")\` — but do this sparingly (max 3 per turn). You can also call \`tool_docs(tool_name="list")\` for a compact overview. Do NOT call tool_docs for every tool.\n\n## 🛠️ Tool error recovery protocol\nWhen a tool returns an \`!ERROR!\` result:\n  1. Acknowledge the error briefly\n  2. Analyse what went wrong (e.g. invalid args, network issue, permission denied)\n  3. Try again with adjusted parameters OR use a different tool entirely\n  4. NEVER give up after one failure — retry at least 2-3 times with different approaches\n  5. Only stop after exhausting reasonable alternatives, then clearly explain why`;
 
   const systemPrompt = [
     systemMd.trim(),
@@ -266,11 +266,13 @@ export async function runAgentTurn(
   let totalPrompt = 0; // forces number type
   let totalCompletion = 0;
 
-  const MAX_STEPS = 100;
+  const MAX_STEPS = 30;
   let runStatus: "completed" | "failed" | "cancelled" = "completed";
   let runError: string | undefined;
   const maxToolCalls = opts.maxToolCalls ?? 0;
   let totalToolCalls = 0;
+  const MAX_TOOL_DOCS = 3; // cap tool_docs calls per run to prevent discovery spam
+  let toolDocsCount = 0;
 
   try {
     for (let step = 0; step < MAX_STEPS; step++) {
@@ -404,6 +406,16 @@ export async function runAgentTurn(
           await emit({ type: "tool_result", name: tc.name, result, ok: false, durationMs: 0, error: String(result.error), toolCallId: tc.id });
           pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
           continue;
+        }
+        // Cap tool_docs calls to prevent discovery loops (agent calls it for every tool)
+        if (tc.name === "tool_docs") {
+          toolDocsCount++;
+          if (toolDocsCount > MAX_TOOL_DOCS) {
+            const result = { content: [{ type: "text", text: `tool_docs call limit reached (${MAX_TOOL_DOCS} per turn). Use the tools you already know or call tool_docs(tool_name="list") once for a summary.` }] };
+            await emit({ type: "tool_result", name: tc.name, result, ok: true, durationMs: 0, toolCallId: tc.id });
+            pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
+            continue;
+          }
         }
         const perm = tool.defaultPermission;
         let result: any;
