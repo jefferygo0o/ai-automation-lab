@@ -177,6 +177,25 @@ function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
  * to the provided callback. The runtime iterates until the model returns
  * finishReason="stop" with no tool calls.
  */
+/** Sleep helper — respects AbortSignal. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new DOMException("Aborted", "AbortError")); }, { once: true });
+  });
+}
+
+/** Parse Retry-After header (seconds or HTTP-date). Falls back to defaultMs. */
+function parseRetryAfter(header: string | null, defaultMs: number): number {
+  if (!header) return defaultMs;
+  const secs = Number(header);
+  if (!Number.isNaN(secs) && secs > 0) return secs * 1000;
+  try { return Math.max(0, new Date(header).getTime() - Date.now()); } catch { return defaultMs; }
+}
+
+const MAX_429_RETRIES = 6;
+
 export async function streamChat(
   cfg: LLMConfig,
   req: LLMRequest,
@@ -186,16 +205,26 @@ export async function streamChat(
   const body = buildRequestBody(cfg, req, true);
   const headers = buildHeaders(cfg);
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-    signal: req.signal,
-  });
+  let res: Response | undefined;
+  for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: req.signal,
+    });
+    if (res.status !== 429) break;
+    if (attempt < MAX_429_RETRIES) {
+      const retryMs = parseRetryAfter(res.headers.get("retry-after"), Math.min(3000 * 2 ** attempt, 60_000));
+      console.warn(`[llm] 429 rate-limited (attempt ${attempt + 1}/${MAX_429_RETRIES}), retrying in ${retryMs}ms...`);
+      await res.text().catch(() => "");
+      await sleep(retryMs, req.signal).catch(() => {});
+    }
+  }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    const errMsg = `${res.status} ${res.statusText}: ${text.slice(0, 800)}`;
+  if (!res!.ok) {
+    const text = await res!.text().catch(() => "");
+    const errMsg = `${res!.status} ${res!.statusText}: ${text.slice(0, 800)}`;
     onChunk({ type: "error", error: errMsg });
     return { content: "", toolCalls: [], finishReason: "error", raw: errMsg };
   }
@@ -277,14 +306,27 @@ export async function callLLM(cfg: LLMConfig, req: LLMRequest): Promise<LLMRespo
     return streamChat(cfg, req, req.onChunk ?? (() => {}));
   }
   const url = buildChatUrl(cfg);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: buildHeaders(cfg),
-    body: JSON.stringify(buildRequestBody(cfg, req, false)),
-    signal: req.signal,
-  });
-  if (!res.ok) {
-    const t = await res.text().catch(() => "");
+  const headers = buildHeaders(cfg);
+  const body = JSON.stringify(buildRequestBody(cfg, req, false));
+
+  let res: Response | undefined;
+  for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
+    res = await fetch(url, {
+      method: "POST",
+      headers,
+      body,
+      signal: req.signal,
+    });
+    if (res.status !== 429) break;
+    if (attempt < MAX_429_RETRIES) {
+      const retryMs = parseRetryAfter(res.headers.get("retry-after"), Math.min(3000 * 2 ** attempt, 60_000));
+      console.warn(`[llm] 429 rate-limited (attempt ${attempt + 1}/${MAX_429_RETRIES}), retrying in ${retryMs}ms...`);
+      await res.text().catch(() => "");
+      await sleep(retryMs, req.signal).catch(() => {});
+    }
+  }
+  if (!res!.ok) {
+    const t = await res!.text().catch(() => "");
     return { content: "", toolCalls: [], finishReason: "error", raw: t };
   }
   const json = await res.json() as any;

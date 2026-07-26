@@ -45,8 +45,12 @@ export const SecretStore = {
     const now = Date.now();
     const enc = encryptSecret(value);
     await db.prepare(
-      `INSERT OR REPLACE INTO secrets (id, owner_id, name, ciphertext, iv, auth_tag, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO secrets (id, owner_id, name, ciphertext, iv, auth_tag, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET
+         owner_id = EXCLUDED.owner_id, name = EXCLUDED.name,
+         ciphertext = EXCLUDED.ciphertext, iv = EXCLUDED.iv,
+         auth_tag = EXCLUDED.auth_tag, created_at = EXCLUDED.created_at`,
     ).run(id, ownerId, canonical, enc.ciphertext, enc.iv, enc.authTag, now);
     return { id, ownerId, name: canonical, createdAt: now };
   },

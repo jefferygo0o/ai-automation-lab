@@ -252,9 +252,24 @@ export async function runAgentTurn(
     console.log("[runtime] filtered out", history.length - filteredHistory.length, "orphaned tool messages from history");
   }
 
+  // Smart truncation: if history exceeds MAX_HISTORY_MESSAGES, keep only the
+  // last N messages. This prevents 429 rate-limit cascades when automation
+  // runs accumulate large message contexts. We always keep the system prompt
+  // and try to keep complete user→assistant→tool sequences intact.
+  const MAX_HISTORY_MESSAGES = 40;
+  let truncatedHistory = filteredHistory;
+  if (filteredHistory.length > MAX_HISTORY_MESSAGES) {
+    truncatedHistory = filteredHistory.slice(-MAX_HISTORY_MESSAGES);
+    // Ensure we don't start with an orphaned tool message
+    while (truncatedHistory.length > 0 && truncatedHistory[0].role === "tool") {
+      truncatedHistory.shift();
+    }
+    console.log(`[runtime] truncated history from ${filteredHistory.length} to ${truncatedHistory.length} messages (limit=${MAX_HISTORY_MESSAGES})`);
+  }
+
   const messages: ChatMessage[] = [
     { role: "system", content: systemPrompt },
-    ...filteredHistory.map((m) => ({
+    ...truncatedHistory.map((m) => ({
       role: m.role as ChatMessage["role"],
       content: m.content,
       toolCalls: m.toolCalls as any,
@@ -317,16 +332,10 @@ export async function runAgentTurn(
         const raw = typeof resp.raw === "string" ? resp.raw : JSON.stringify(resp.raw ?? "");
         console.log("[runtime] LLM provider error raw:", raw.slice(0, 500));
         
-        // Diagnose message structure - verify tool call/tool response pairs
-        const toolCallMsgs = messages.filter(m => m.role === "assistant" && m.toolCalls?.length);
-        const toolResponseMsgs = messages.filter(m => m.role === "tool");
-        const tcCount = toolCallMsgs.reduce((s, m) => s + (m.toolCalls?.length ?? 0), 0);
-        console.log(`[runtime] MSG DIAG: ${messages.length} msgs, ${tcCount} tool calls, ${toolResponseMsgs.length} tool responses`);
-        toolCallMsgs.forEach((m, i) => {
-          const ids = m.toolCalls?.map((tc: any) => tc.id) ?? [];
-          const tool_resps = messages.filter(msg => msg.role === "tool" && ids.includes(msg.toolCallId ?? ""));
-          console.log(`  assistant_tc[${i}]: ${ids.length} calls (${ids.join(",")}), matched ${tool_resps.length} tool responses`);
-        });
+        // Brief message structure summary for429 debugging
+        const tcMsgs = messages.filter(m => m.role === "assistant" && m.toolCalls?.length);
+        const trMsgs = messages.filter(m => m.role === "tool");
+        console.log(`[runtime]429 error: ${messages.length} msgs, ${tcMsgs.length} assistant+tc, ${trMsgs.length} tool responses`);
         
         const isAuthError = raw.includes("401") || raw.includes("403") || raw.includes("auth") || raw.includes("unauthorized") || raw.includes("API key") || raw.includes("api_key");
         const msg = isAuthError

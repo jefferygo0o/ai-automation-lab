@@ -1,4 +1,4 @@
-import { Pool, types } from "pg";
+import { Pool, types } from "pg";import { getRequestClient } from "./user_context.ts";
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
@@ -11,7 +11,7 @@ types.setTypeParser(1700, (val: string) => parseFloat(val)); // NUMERIC/DECIMAL 
 
 let _pool: Pool | null = null;
 
-function getPool(): Pool {
+export function getPool(): Pool {
   if (_pool) return _pool;
   let url = process.env.SUPABASE_DB_URL;
   let envSource = "SUPABASE_DB_URL";
@@ -62,23 +62,6 @@ function convertParams(sql: string, params?: any[]): [string, any[]] {
   let idx = 0;
   const converted = sql.replace(/\?/g, () => `$${++idx}`);
   return [converted, params];
-}
-
-function convertInsertOrReplace(sql: string): string {
-  const rm = sql.match(/INSERT\s+OR\s+REPLACE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
-  if (rm) {
-    const cols = rm[2].split(",").map(c => c.trim().replace(/["`]/g, ""));
-    const firstCol = cols[0];
-    const assigns = cols.map(c => `${c} = EXCLUDED.${c}`).join(", ");
-    return `${sql.replace(/INSERT\s+OR\s+REPLACE\s+INTO/i, "INSERT INTO")} ON CONFLICT (${firstCol}) DO UPDATE SET ${assigns}`;
-  }
-  const im = sql.match(/INSERT\s+OR\s+IGNORE\s+INTO\s+(\w+)\s*\(([^)]+)\)/i);
-  if (im) {
-    const cols = im[2].split(",").map(c => c.trim().replace(/["`]/g, ""));
-    const firstCol = cols[0];
-    return `${sql.replace(/INSERT\s+OR\s+IGNORE\s+INTO/i, "INSERT INTO")} ON CONFLICT (${firstCol}) DO NOTHING`;
-  }
-  return sql.replace(/INSERT\s+OR\s+(REPLACE|IGNORE)\s+INTO/gi, "INSERT INTO");
 }
 
 function splitSqlStatements(sql: string): string[] {
@@ -162,24 +145,29 @@ class PGStatement<T = any> {
   private pool: Pool;
   private sql: string;
   constructor(pool: Pool, sql: string) {
-    this.sql = convertInsertOrReplace(sql);
+    this.sql = sql;
     this.pool = pool;
+  }
+  /** Route through user-context client when inside a request, else pool. */
+  private q(sql: string, params: any[]) {
+    const c = getRequestClient();
+    return (c ?? this.pool).query(sql, params);
   }
   all(...params: any[]): Promise<T[]> {
     const [sql, p] = convertParams(this.sql, params);
-    return this.pool.query(sql, p).then(r => r.rows as T[]);
+    return this.q(sql, p).then(r => r.rows as T[]);
   }
   get(...params: any[]): Promise<T | null> {
     const [sql, p] = convertParams(this.sql, params);
-    return this.pool.query(sql, p).then(r => (r.rows[0] ?? null) as T | null);
+    return this.q(sql, p).then(r => (r.rows[0] ?? null) as T | null);
   }
   run(...params: any[]): Promise<{ changes: number; lastInsertRowid: number }> {
     const [sql, p] = convertParams(this.sql, params);
-    return this.pool.query(sql, p).then(r => ({ changes: r.rowCount ?? 0, lastInsertRowid: 0 }));
+    return this.q(sql, p).then(r => ({ changes: r.rowCount ?? 0, lastInsertRowid: 0 }));
   }
 }
 
-class PgDbShim {
+class Database {
   query<T = any>(sql: string): PGStatement<T> { return new PGStatement<T>(getPool(), sql); }
   prepare<T = any>(sql: string): PGStatement<T> { return new PGStatement<T>(getPool(), sql); }
   exec(sql: string): Promise<{ changes: number }> {
@@ -190,7 +178,8 @@ class PgDbShim {
         const stmt = statements[i];
         if (!stmt.trim()) continue;
         try {
-          const r = await getPool().query(stmt);
+          const uc = getRequestClient();
+          const r = await (uc ?? getPool()).query(stmt);
           totalChanges += r.rowCount ?? 0;
         } catch (e: any) {
           // Log the failing statement so we can diagnose which one errors
@@ -204,6 +193,14 @@ class PgDbShim {
     return runNext();
   }
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    const existing = getRequestClient();
+    if (existing) {
+      // Already inside a user-scoped request transaction — use a savepoint.
+      const sp = `sp_${Math.random().toString(36).slice(2, 8)}`;
+      await existing.query(`SAVEPOINT ${sp}`);
+      try { const r = await fn(); await existing.query(`RELEASE SAVEPOINT ${sp}`); return r; }
+      catch (e) { await existing.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {}); throw e; }
+    }
     const client = await getPool().connect();
     try { await client.query("BEGIN"); const r = await fn(); await client.query("COMMIT"); return r; }
     catch (e) { await client.query("ROLLBACK"); throw e; }
@@ -212,7 +209,7 @@ class PgDbShim {
   close(): Promise<void> { return _pool ? _pool.end() : Promise.resolve(); }
 }
 
-export const db = new PgDbShim();
+export const db = new Database();
 
 async function repairAutomationSchema(): Promise<void> {
   const statements = [

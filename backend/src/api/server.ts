@@ -14,6 +14,8 @@ import { integrationsApi } from "../integrations/api.ts";
 import { rateLimit, incrementHourly } from "../security/ratelimit.ts";
 import { SecretStore } from "../secrets/store.ts";
 import { db } from "../db/index.ts";
+import { getPool } from "../db/pg.ts";
+import { runUserContext } from "../db/user_context.ts";
 import { AgentStore, restoreAgentConfigFromDb } from "../agents/registry.ts";
 import { HistoryStore } from "../agents/history.ts";
 import { ChatStore } from "../chats/index.ts";
@@ -105,6 +107,27 @@ api.use("/api/*", async (c, next) => {
     c.set("apiKeyId", auth.apiKeyId);
     c.set("scopes", auth.scopes);
     c.set("timezone", c.req.raw.headers.get("x-timezone") ?? "UTC");
+
+    // --- Phase 2: wrap in user-scoped PG transaction for RLS ---
+    const pgClient = await getPool().connect();
+    try {
+      await pgClient.query("BEGIN");
+      await pgClient.query("SET LOCAL role = 'authenticated'");
+      const claims = JSON.stringify({ sub: auth.userId, role: "authenticated" });
+      await pgClient.query(`SET LOCAL request.jwt.claims = '${claims.replace(/'/g, "''")}'`);
+      await runUserContext(pgClient, async () => {
+        try {
+          await next();
+          await pgClient.query("COMMIT");
+        } catch (e) {
+          await pgClient.query("ROLLBACK").catch(() => {});
+          throw e;
+        }
+      });
+    } finally {
+      pgClient.release();
+    }
+    return;
   }
   await next();
 });
