@@ -1,6 +1,9 @@
 import { db } from "../db/index.ts";
 import { nanoid } from "nanoid";
 import { nextScheduledRun } from "./rrule.ts";
+import { deliverResult, notifyFailure } from "./delivery.ts";
+
+const RUN_TIMEOUT_MS = Number(process.env.AUTOMATION_RUN_TIMEOUT_MS ?? 5 * 60 * 1000); // default 5 minutes
 
 interface AutomationRow {
   id: string;
@@ -18,6 +21,8 @@ interface AutomationRow {
   updated_at: number;
   timezone?: string;
   model?: string | null;
+  delivery_method?: string;
+  delivery_target_json?: string;
 }
 
 export function getNextRun(row: AutomationRow, now = Date.now()): number | null {
@@ -42,6 +47,10 @@ async function fireAutomation(auto: AutomationRow): Promise<void> {
   const startedAt = Date.now();
   await db.prepare("INSERT INTO automation_runs (id, automation_id, status, started_at) VALUES (?, ?, 'running', ?)").run(runId, auto.id, startedAt);
 
+  // Set up abort controller with timeout
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), RUN_TIMEOUT_MS);
+
   try {
     const { runAgentTurn } = await import("../agents/runtime.ts");
     const { ChatStore } = await import("../chats/index.ts");
@@ -56,20 +65,35 @@ async function fireAutomation(auto: AutomationRow): Promise<void> {
         if (event.type === "token") output += event.delta;
         else if (event.type === "message") output = event.content;
         else if (event.type === "error") error = event.message;
-      }, { maxToolCalls: 30, modelOverride: auto.model || undefined }).then(() => resolve()).catch((cause) => { error = cause?.message ?? String(cause); resolve(); });
+      }, { maxToolCalls: 30, signal: controller.signal, modelOverride: auto.model || undefined }).then(() => resolve()).catch((cause) => { error = cause?.message ?? String(cause); resolve(); });
     });
 
+    clearTimeout(timeoutHandle);
     const finishedAt = Date.now();
-    const status = error ? "failed" : "completed";
-    await db.prepare("UPDATE automation_runs SET status = ?, output = ?, error = ?, finished_at = ? WHERE id = ?").run(status, output.slice(0, 100_000), error, finishedAt, runId);
-    await db.prepare("UPDATE automations SET last_run_at = ?, last_error = ?, updated_at = ? WHERE id = ?").run(finishedAt, error, finishedAt, auto.id);
+    const timedOut = controller.signal.aborted && !error;
+    const status = timedOut ? "failed" : error ? "failed" : "completed";
+    const errorMessage = timedOut ? `automation timed out after ${RUN_TIMEOUT_MS / 1000}s` : error;
+    await db.prepare("UPDATE automation_runs SET status = ?, output = ?, error = ?, finished_at = ? WHERE id = ?").run(status, output.slice(0, 100_000), errorMessage, finishedAt, runId);
+    await db.prepare("UPDATE automations SET last_run_at = ?, last_error = ?, updated_at = ? WHERE id = ?").run(finishedAt, errorMessage, finishedAt, auto.id);
     console.log(`[scheduler] ran automation ${auto.id} (${auto.name}) — ${status} (${finishedAt - startedAt}ms)`);
+
+    // Deliver result if configured
+    if (status === "completed") {
+      await deliverResult(auto, output, "completed", runId).catch((e) => console.error(`[scheduler] delivery failed for ${auto.id}:`, e));
+    }
+    // Notify on failure (even when delivery is "none")
+    if (status === "failed" && errorMessage) {
+      await notifyFailure(auto, errorMessage, runId).catch((e) => console.error(`[scheduler] failure notification failed for ${auto.id}:`, e));
+    }
   } catch (cause: any) {
+    clearTimeout(timeoutHandle);
     const finishedAt = Date.now();
     const message = cause?.message ?? String(cause);
     await db.prepare("UPDATE automation_runs SET status = 'failed', error = ?, finished_at = ? WHERE id = ?").run(message, finishedAt, runId);
     await db.prepare("UPDATE automations SET last_run_at = ?, last_error = ?, updated_at = ? WHERE id = ?").run(finishedAt, message, finishedAt, auto.id);
     console.error(`[scheduler] automation ${auto.id} (${auto.name}) failed:`, message);
+    // Always notify on failure
+    await notifyFailure(auto, message, runId).catch((e) => console.error(`[scheduler] failure notification failed for ${auto.id}:`, e));
   }
 }
 
