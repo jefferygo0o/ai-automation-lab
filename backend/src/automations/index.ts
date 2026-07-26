@@ -233,3 +233,28 @@ automationsApi.post("/:id/run-now", async (c) => {
   fireAutomationById(row.id, userId).catch((error) => console.error(`[automations] manual run ${row.id} failed:`, error));
   return c.json({ ok: true });
 });
+
+// Diagnostic endpoint — shows raw DB state for debugging scheduler issues
+automationsApi.get("/debug/diagnose", async (c) => {
+  const userId = c.get("userId") as string;
+  const allRows = await db.query("SELECT * FROM automations WHERE owner_id = ?").all(userId) as AutomationRow[];
+  const now = Date.now();
+  const rows = await db.query("SELECT * FROM automations WHERE owner_id = ? AND active::int = 1 AND enabled::int = 1").all(userId) as AutomationRow[];
+  const due = rows.filter((row) => {
+    const next = getNextRun(row, now);
+    return next !== null && next <= now;
+  });
+  return c.json({
+    total: allRows.length,
+    active: rows.length,
+    due: due.length,
+    automations: allRows.map((r) => ({
+      id: r.id, name: r.name, agent_id: r.agent_id,
+      rrule: r.rrule, active: r.active, enabled: r.enabled,
+      last_run_at: r.last_run_at, last_error: r.last_error,
+      next_run_at: getNextRun(r, now),
+      created_at: r.created_at,
+    })),
+    scheduler: AutomationScheduler.getStats(),
+  });
+});

@@ -371,7 +371,7 @@ toolRegistry.register({
           if (!args.name || !args.instruction) return err("name and instruction required for create");
           const id = `auto_${nanoid()}`;
           const now = Date.now();
-          const agentId = args.agentId ?? "";
+          const agentId = args.agentId || null;
           const rrule = args.rrule ?? "FREQ=DAILY;INTERVAL=1";
           await db.query(
             `INSERT INTO automations (id, owner_id, name, description, agent_id, rrule, prompt, active, enabled, timezone, delivery_method, delivery_target_json, model, created_at, updated_at)
