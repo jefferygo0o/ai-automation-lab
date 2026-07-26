@@ -3,6 +3,7 @@ import {
   ArrowLeft, ArrowRight, RefreshCw, Home,
   ExternalLink, AlertCircle, Globe, Monitor,
   Play,
+  Activity,
 } from "lucide-react";
 import { getToken } from "../api/client";
 
@@ -229,6 +230,20 @@ export default function BrowserPage() {
           <AlertCircle className="w-3.5 h-3.5 shrink-0" />
           {error}
           <button onClick={() => setError(null)} className="ml-auto btn btn-ghost btn-xs">Dismiss</button>
+        </div>
+      )}
+
+      {/* Live interaction indicator — pulsing bar when AI is actively using the browser */}
+      {aiActive && showAiPreview && aiUrl && (
+        <div className="flex items-center gap-2 px-4 py-1.5 bg-green-50 border-b border-green-200 text-xs text-green-700">
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+          </span>
+          <Activity className="w-3 h-3 shrink-0" />
+          <span className="font-medium">Live interaction</span>
+          <span className="text-green-600 truncate">— AI is actively browsing</span>
+          <span className="ml-auto shrink-0 text-green-500 tabular-nums">{age > 60 ? `${Math.floor(age / 60)}m ${age % 60}s ago` : `${age}s ago`}</span>
         </div>
       )}
 

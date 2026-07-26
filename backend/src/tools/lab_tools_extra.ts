@@ -1478,6 +1478,11 @@ toolRegistry.register({
     try {
       if (args.action === "screenshot") {
         const r = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "act", action: "screenshot", fullPage: args.fullPage !== false });
+        // Also view the page to update the active browser preview
+        try {
+          const v = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "view" });
+          setActiveView(ctx.ownerId, { url: v.url, title: v.title, html: v.html ?? "", agentId: ctx.agentId });
+        } catch { /* best-effort */ }
         return ok(`![screenshot](${r.dataUri})\n\n---\nFull-page: ${args.fullPage !== false}`);
       }
       const r = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "act", action: args.action, selector: args.selector, text: args.text, value: args.value, url: args.url });

@@ -46,6 +46,7 @@ import { ApiKeys, ACCESS_SCOPES, scopeForMethod } from "../security/api_keys.ts"
 import { getUserTimezone, setUserTimezone } from "../settings/user.ts";
 import { ProviderRegistry, type ProviderRecord } from "../providers/registry.ts";
 import { browserApi } from "../browser/api.ts";
+import { sweepStaleViews } from "../browser/active.ts";
 import { channelsApi } from "../channels/index.ts";
 import { Catalogue } from "../catalog/index.ts";
 
@@ -1287,6 +1288,10 @@ api.delete("/api/access-tokens/:id", async (c) => {
 });
 
 api.route("/api/browser", browserApi);
+
+// Periodically sweep stale browser views (>5 minutes old)
+setInterval(sweepStaleViews, 60_000);
+
 api.route("/api/channels", channelsApi);
 
 api.get("/api/catalog", async (c) => c.json(await Catalogue.list(c.get("userId"))));

@@ -56,7 +56,7 @@ async function fireAutomation(auto: AutomationRow): Promise<void> {
         if (event.type === "token") output += event.delta;
         else if (event.type === "message") output = event.content;
         else if (event.type === "error") error = event.message;
-      }, { maxToolCalls: 100, modelOverride: auto.model || undefined }).then(() => resolve()).catch((cause) => { error = cause?.message ?? String(cause); resolve(); });
+      }, { maxToolCalls: 30, modelOverride: auto.model || undefined }).then(() => resolve()).catch((cause) => { error = cause?.message ?? String(cause); resolve(); });
     });
 
     const finishedAt = Date.now();

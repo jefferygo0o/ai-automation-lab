@@ -269,7 +269,7 @@ export async function runAgentTurn(
   const MAX_STEPS = 30;
   let runStatus: "completed" | "failed" | "cancelled" = "completed";
   let runError: string | undefined;
-  const maxToolCalls = opts.maxToolCalls ?? 0;
+  const maxToolCalls = opts.maxToolCalls ?? 50;
   let totalToolCalls = 0;
   const MAX_TOOL_DOCS = 3; // cap tool_docs calls per run to prevent discovery spam
   let toolDocsCount = 0;
@@ -483,13 +483,16 @@ export async function runAgentTurn(
       // Persist it as an assistant message and stop looping — without this
       // the next iteration sees the same messages and generates the same
       // output, causing infinite repetition.
-      if (validToolCalls.length === 0 && resp.content) {
-        messages.push({ role: "assistant", content: resp.content });
-        ChatStore.addMessage(chatId, {
-          role: "assistant",
-          content: resp.content,
-          runId: run.id,
-        });
+      if (validToolCalls.length === 0) {
+        const text = resp.content ?? "";
+        if (text) {
+          messages.push({ role: "assistant", content: text });
+          ChatStore.addMessage(chatId, {
+            role: "assistant",
+            content: text,
+            runId: run.id,
+          });
+        }
         break;
       }
     }

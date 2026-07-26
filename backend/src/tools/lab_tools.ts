@@ -34,6 +34,12 @@ function err(s: string) {
   return { content: [{ type: "text" as const, text: s }], isError: true };
 }
 
+/** Extract <title> from raw HTML. */
+function extractTitle(html: string): string {
+  const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  return m ? m[1].replace(/\s+/g, " ").trim() : "";
+}
+
 /** Fetch a URL and extract readable text content. */
 async function readWebpage(url: string, timeoutMs = 15_000): Promise<string> {
   const controller = new AbortController();
@@ -66,6 +72,49 @@ async function readWebpage(url: string, timeoutMs = 15_000): Promise<string> {
     return cleaned.length > maxLen
       ? cleaned.slice(0, maxLen) + `\n\n... (truncated, ${cleaned.length} total chars)`
       : cleaned;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Fetch a URL and return both the raw HTML and cleaned text.
+ * Used by browser_navigate so we can populate the active view cache
+ * for the BrowserPage live preview.
+ */
+async function readWebpageFull(url: string, timeoutMs = 15_000): Promise<{ html: string; text: string; title: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "user-agent":
+          "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36",
+      },
+    });
+    const html = await res.text();
+    const title = extractTitle(html);
+    const cleaned = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, "")
+      .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#x27;/g, "'")
+      .replace(/&#x2F;/g, "/")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    const maxLen = 32_000;
+    const text = cleaned.length > maxLen
+      ? cleaned.slice(0, maxLen) + `\n\n... (truncated, ${cleaned.length} total chars)`
+      : cleaned;
+    return { html, text, title };
   } finally {
     clearTimeout(timer);
   }
@@ -514,11 +563,21 @@ toolRegistry.register({
     try {
       ctx.onLog({ tool: "browser_navigate", args, result: `navigating to ${args.url}`, ok: true, durationMs: 0, at: Date.now() });
       let content: string;
+      let html = "";
+      let title = "";
       if (args.useBrowser) {
         content = await agentBrowserRead(args.url, args.timeoutMs ?? 20_000);
+        // agent-browser doesn't return raw HTML; use a minimal snapshot for the preview
+        html = `<html><head><title>${args.url}</title></head><body><p>${content.slice(0, 8000)}</p></body></html>`;
+        title = args.url;
       } else {
-        content = await readWebpage(args.url, args.timeoutMs ?? 15_000);
+        const full = await readWebpageFull(args.url, args.timeoutMs ?? 15_000);
+        content = full.text;
+        html = full.html;
+        title = full.title;
       }
+      // Update the active browser view so BrowserPage can show live preview
+      setActiveView(ctx.ownerId, { url: args.url, title, html, agentId: ctx.agentId });
       return text(`# ${args.url}\n\n${content}`);
     } catch (e: any) {
       return err(`browser_navigate failed: ${e?.message ?? String(e)}`);
@@ -557,6 +616,11 @@ toolRegistry.register({
         // Fallback to Playwright
         dataUri = await playwrightScreenshot(args.url, args.fullPage !== false);
       }
+      // Update the active browser view so BrowserPage can show live preview
+      try {
+        const full = await readWebpageFull(args.url, 20_000);
+        setActiveView(ctx.ownerId, { url: args.url, title: full.title, html: full.html, agentId: ctx.agentId });
+      } catch { /* best-effort */ }
       return text(`Screenshot of ${args.url}\n\n![page screenshot](${dataUri})\n\n---\nFull-page: ${args.fullPage !== false}`);
     } catch (e: any) {
       return err(`browser_screenshot failed: ${e?.message ?? String(e)}`);
