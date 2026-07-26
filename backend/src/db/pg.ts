@@ -1,7 +1,13 @@
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
+
+// The pg library returns BIGINT (OID 20) as strings by default. This breaks
+// any code that passes the value directly to `new Date()` (e.g. scheduler's
+// nextScheduledRun). Force BIGINT to parse as JavaScript numbers.
+types.setTypeParser(20, (val: string) => parseInt(val, 10));
+types.setTypeParser(1700, (val: string) => parseFloat(val)); // NUMERIC/DECIMAL too
 
 let _pool: Pool | null = null;
 

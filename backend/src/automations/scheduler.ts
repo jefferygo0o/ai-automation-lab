@@ -26,13 +26,15 @@ interface AutomationRow {
 }
 
 export function getNextRun(row: AutomationRow, now = Date.now()): number | null {
-  // Handle both INTEGER (0/1) and BOOLEAN (false/true) from Supabase
-  const isActive = row.active === 0 || row.active === false;
-  const isEnabled = row.enabled === 0 || row.enabled === false;
-  if (isActive || isEnabled) return null;
+  // Handle both BOOLEAN (Supabase pg driver) and INTEGER column types.
+  // pg returns booleans as true/false, SQLite/bun:sqlite returns 0/1.
+  const isActive = row.active === 1 || row.active === true;
+  const isEnabled = row.enabled === 1 || row.enabled === true || row.enabled === undefined;
+  if (!isActive || !isEnabled) return null;
   try {
     return nextScheduledRun(row.rrule || "FREQ=DAILY", row.created_at, row.last_run_at ?? null, row.timezone || "UTC");
-  } catch {
+  } catch (e: any) {
+    console.error(`[scheduler] getNextRun error for ${row.id}:`, e?.message ?? e);
     return null;
   }
 }
@@ -184,14 +186,29 @@ export const AutomationScheduler = {
 };
 
 async function tick(): Promise<void> {
-  if (running) return;
+  if (running) {
+    console.warn("[scheduler] tick skipped — previous tick still running");
+    return;
+  }
   running = true;
   const start = Date.now();
+
+  // Safety: if the DB query hangs, release the lock after 30s so future ticks aren't blocked forever.
+  const safetyTimeout = setTimeout(() => {
+    if (running) {
+      console.error("[scheduler] tick safety timeout — force-releasing lock after 30s");
+      running = false;
+    }
+  }, 30_000);
+
   try {
     const due = await loadDueAutomations(Date.now());
     console.log(`[scheduler] tick: ${due.length} automations due`);
     for (const automation of due) {
-      if (inFlight.has(automation.id)) continue;
+      if (inFlight.has(automation.id)) {
+        console.log(`[scheduler] skipping ${automation.id} — already in flight`);
+        continue;
+      }
       inFlight.add(automation.id);
       totalFires++;
       console.log(`[scheduler] firing automation ${automation.id} ("${automation.name}") rrule=${automation.rrule}`);
@@ -200,6 +217,7 @@ async function tick(): Promise<void> {
   } catch (e: any) {
     console.error("[scheduler] tick error:", e?.message ?? e);
   } finally {
+    clearTimeout(safetyTimeout);
     lastTickAt = Date.now();
     lastTickDurationMs = lastTickAt - start;
     running = false;
