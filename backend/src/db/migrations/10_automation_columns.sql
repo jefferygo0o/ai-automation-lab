@@ -1,31 +1,11 @@
 -- Keep existing automation tables compatible with the current API and scheduler.
--- This is idempotent for databases created before delivery and timezone support.
-DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'automations') THEN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'automations' AND column_name = 'enabled') THEN
-      ALTER TABLE automations ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'automations' AND column_name = 'timezone') THEN
-      ALTER TABLE automations ADD COLUMN timezone TEXT NOT NULL DEFAULT 'UTC';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'automations' AND column_name = 'delivery_method') THEN
-      ALTER TABLE automations ADD COLUMN delivery_method TEXT NOT NULL DEFAULT 'none';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'automations' AND column_name = 'delivery_target_json') THEN
-      ALTER TABLE automations ADD COLUMN delivery_target_json TEXT NOT NULL DEFAULT '{}';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'automations' AND column_name = 'model') THEN
-      ALTER TABLE automations ADD COLUMN model TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'automations' AND column_name = 'active') THEN
-      ALTER TABLE automations ADD COLUMN active INTEGER NOT NULL DEFAULT 1;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'automations' AND column_name = 'last_run_at') THEN
-      ALTER TABLE automations ADD COLUMN last_run_at BIGINT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'automations' AND column_name = 'last_error') THEN
-      ALTER TABLE automations ADD COLUMN last_error TEXT;
-    END IF;
-    ALTER TABLE automations ALTER COLUMN agent_id DROP NOT NULL;
-  END IF;
-END $$;
+-- Plain idempotent ALTER statements avoid dollar-quoted blocks in the startup splitter.
+ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS enabled INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC';
+ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS delivery_method TEXT NOT NULL DEFAULT 'none';
+ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS delivery_target_json TEXT NOT NULL DEFAULT '{}';
+ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS model TEXT;
+ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS last_run_at BIGINT;
+ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE public.automations ALTER COLUMN agent_id DROP NOT NULL;
