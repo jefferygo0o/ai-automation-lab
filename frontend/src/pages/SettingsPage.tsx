@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import {
-  Brain, Wrench, Settings, ChevronRight,
+  Brain, Wrench, Settings, ChevronRight, Save,
 } from "lucide-react";
 
 const TABS = [
