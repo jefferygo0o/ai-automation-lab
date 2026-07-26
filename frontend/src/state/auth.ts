@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { Auth } from "../api";
 import { getToken, setToken } from "../api/client";
+import { setSupabaseSession, getSupabase } from "../lib/supabase";
 
 interface AuthState {
   token: string | null;
@@ -27,13 +28,17 @@ export const useAuth = create<AuthState>((set) => ({
   bootstrap: () => {
     const token = getToken();
     const user = readUser();
-    if (token && user) set({ token, userId: user.userId, email: user.email });
+    if (token && user) {
+      set({ token, userId: user.userId, email: user.email });
+      setSupabaseSession(token).catch(() => {});
+    }
   },
   login: async (email, password) => {
     const auth = await Auth.login(email, password);
     setToken(auth.token);
     writeUser({ userId: auth.userId, email });
     set({ token: auth.token, userId: auth.userId, email });
+    await setSupabaseSession(auth.token);
   },
   register: async (email, password) => {
     await Auth.register(email, password);
@@ -42,5 +47,9 @@ export const useAuth = create<AuthState>((set) => ({
     writeUser({ userId: auth.userId, email });
     set({ token: auth.token, userId: auth.userId, email });
   },
-  logout: () => { setToken(null); writeUser(null); set({ token: null, userId: null, email: null }); },
+  logout: () => {
+    getSupabase()?.auth.signOut().catch(() => {});
+    setToken(null); writeUser(null);
+    set({ token: null, userId: null, email: null });
+  },
 }));

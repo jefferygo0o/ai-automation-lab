@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Runs, Run } from "../api";
-import { Play, Check, AlertCircle, Loader2, Activity, Clock, Coins, Zap } from "lucide-react";
+import { Play, Check, AlertCircle, Loader2, Activity, Clock, Coins, Zap } from "lucide-react";import { useRealtimeSubscription } from "../hooks/useRealtime";
 
 function StatusBadge({ s }: { s: string }) {
   const map: Record<string, { dot: string; label: string; icon: any }> = {
@@ -38,7 +38,7 @@ export default function RunsPage() {
       setRuns([]);
     }
   }
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { reload(); }, []);  useRealtimeSubscription("runs", "*", undefined, () => reload());
 
   async function toggle(id: string) {
     if (open === id) { setOpen(null); setDetail(null); return; }

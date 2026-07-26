@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Chats, Chat } from "../api";
-import { Plus, MessageSquare, Bot, Trash2, PanelRightOpen } from "lucide-react";
+import { Plus, MessageSquare, Bot, Trash2, PanelRightOpen } from "lucide-react";import { useRealtimeSubscription } from "../hooks/useRealtime";
 import { useChatPanel } from "../contexts/ChatPanelContext";
 
 export default function ChatsPage() {
@@ -23,7 +23,7 @@ export default function ChatsPage() {
       setChats([]); setAgents([]);
     }
   }
-  useEffect(() => { reload(); }, []);
+  useEffect(() => { reload(); }, []);  useRealtimeSubscription("chats", "*", undefined, () => reload());
 
   async function create() {
     if (!agentId) return;

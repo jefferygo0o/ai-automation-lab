@@ -307,6 +307,18 @@ CREATE POLICY agent_snapshots_isolation ON agent_snapshots
   USING (get_agent_owner(agent_id) = auth.uid())
   WITH CHECK (get_agent_owner(agent_id) = auth.uid());
 
+-- access_tokens
+ALTER TABLE access_tokens ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS access_tokens_isolation ON access_tokens;
+CREATE POLICY access_tokens_isolation ON access_tokens
+  FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+
+-- workspace_events
+ALTER TABLE workspace_events ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS workspace_events_isolation ON workspace_events;
+CREATE POLICY workspace_events_isolation ON workspace_events
+  FOR ALL USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid());
+
 -- ============================================================
 -- Tables deliberately LEFT WITHOUT RLS:
 --   integration_action_cache — shared cache, no owner_id.
