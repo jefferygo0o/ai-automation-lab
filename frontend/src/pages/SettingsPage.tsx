@@ -109,6 +109,16 @@ function AgentConfigSection() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secrets, setSecrets] = useState<SecretMeta[]>([]);
+  // Edit state
+  const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editBaseUrl, setEditBaseUrl] = useState("");
+  const [editApiKeySecret, setEditApiKeySecret] = useState("");
+  const [editModelId, setEditModelId] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editNewSecretName, setEditNewSecretName] = useState("");
+  const [editNewSecretValue, setEditNewSecretValue] = useState("");
 
   async function reload() {
     try {
@@ -186,6 +196,50 @@ function AgentConfigSection() {
     if (!confirm(`Delete agent "${name}"? This cannot be undone.`)) return;
     await Agents.remove(id);
     await reload();
+  }
+
+  function startEditAgent(agent: Agent) {
+    setEditingAgent(agent);
+    setEditName(agent.name);
+    setEditBaseUrl("");
+    setEditApiKeySecret("");
+    setEditModelId("");
+    setEditError(null);
+    setEditNewSecretName("");
+    setEditNewSecretValue("");
+    Agents.get(agent.id).then(({ config }) => {
+      if (config) {
+        setEditBaseUrl(config.baseUrl || "");
+        setEditApiKeySecret(config.apiKeySecret || "");
+        setEditModelId(config.model || "");
+      }
+    }).catch(() => {});
+  }
+
+  async function saveEditAgent() {
+    if (!editingAgent) return;
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      let keyName = editApiKeySecret;
+      if (!keyName && editNewSecretName.trim() && editNewSecretValue.trim()) {
+        keyName = editNewSecretName.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+        await Secrets.save(keyName, editNewSecretValue.trim());
+      }
+      const configUpdate: Record<string, any> = {};
+      if (editBaseUrl) configUpdate.baseUrl = editBaseUrl.trim();
+      if (editModelId) configUpdate.model = editModelId.trim();
+      if (keyName) configUpdate.apiKeySecret = keyName;
+      if (Object.keys(configUpdate).length > 0) {
+        await Agents.updateConfig(editingAgent.id, configUpdate as any);
+      }
+      setEditingAgent(null);
+      await reload();
+    } catch (e: any) {
+      setEditError(e?.message ?? "failed to save");
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   return (
@@ -268,6 +322,57 @@ function AgentConfigSection() {
         </div>
       )}
 
+      {/* Edit Model Modal */}
+      {editingAgent && (
+        <div className="fixed inset-0 z-40 bg-ink-900/30 backdrop-blur-[1px] flex items-center justify-center p-4" onClick={() => setEditingAgent(null)}>
+          <div className="w-full max-w-md rounded-lg border border-line bg-paper p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4">
+              <h3 className="text-base font-semibold text-ink-900">Edit model</h3>
+              <div className="text-xs text-ink-400 font-mono mt-0.5">{editingAgent.id}</div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-ink-700">Name</label>
+                <input className="input text-sm" value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Model name" autoFocus />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-ink-700">Base URL</label>
+                <input className="input text-sm font-mono" value={editBaseUrl} onChange={(e) => setEditBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-ink-700">API Key</label>
+                <select className="input text-sm font-mono" value={editApiKeySecret} onChange={(e) => setEditApiKeySecret(e.target.value)}>
+                  <option value="">— Keep current / Create new —</option>
+                  {secrets.map((sec) => (
+                    <option key={sec.id} value={sec.name}>{sec.name}</option>
+                  ))}
+                </select>
+                {!editApiKeySecret && (
+                  <div className="grid grid-cols-2 gap-2 mt-1">
+                    <input className="input text-xs font-mono" value={editNewSecretName} onChange={(e) => setEditNewSecretName(e.target.value)} placeholder="SECRET_NAME" />
+                    <input className="input text-xs font-mono" type="password" value={editNewSecretValue} onChange={(e) => setEditNewSecretValue(e.target.value)} placeholder="sk-..." />
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-medium text-ink-700">Model ID</label>
+                <input className="input text-sm font-mono" value={editModelId} onChange={(e) => setEditModelId(e.target.value)} placeholder="gpt-4.1" />
+              </div>
+              {editError && <div className="text-2xs text-rose-700">{editError}</div>}
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button onClick={() => setEditingAgent(null)} className="btn btn-sm">Cancel</button>
+              <button onClick={saveEditAgent} disabled={editSaving} className="btn btn-primary btn-sm">
+                {editSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-1.5">
         {agents.map((a) => (
           <div key={a.id} className="border border-line rounded bg-paper px-3 py-2 flex items-center gap-3">
@@ -276,6 +381,13 @@ function AgentConfigSection() {
               <div className="text-xs font-medium text-ink-900 truncate">{a.name}</div>
               <div className="text-2xs text-ink-400 font-mono truncate">{a.id}</div>
             </div>
+            <button
+              onClick={() => startEditAgent(a)}
+              className="btn btn-ghost btn-xs text-ink-400 hover:text-ink-700"
+              title="Edit model"
+            >
+              <Pencil className="w-3 h-3" />
+            </button>
             <button
               onClick={() => deleteAgent(a.id, a.name)}
               className="btn btn-ghost btn-xs text-rose-700"
