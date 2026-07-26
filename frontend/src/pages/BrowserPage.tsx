@@ -7,7 +7,8 @@ import {
 } from "lucide-react";
 import { getToken } from "../api/client";
 
-const POLL_INTERVAL = 3000;
+const BASE_POLL_MS = 3000;
+const MAX_POLL_MS = 30_000;
 
 export default function BrowserPage() {
   const [url, setUrl] = useState("");
@@ -28,12 +29,26 @@ export default function BrowserPage() {
   const [showAiPreview, setShowAiPreview] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [navRevision, setNavRevision] = useState(0);
+  const [tick, setTick] = useState(0); // drives the age counter
 
-  // Poll for AI browser activity
+  // Tick every second so the "Xs ago" counter updates live
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Poll for AI browser activity with exponential backoff on errors
   useEffect(() => {
     const apiBase = import.meta.env.VITE_API_BASE || "";
     const token = getToken();
     let lastTimestamp = 0;
+    let consecutiveErrors = 0;
+    let currentInterval = BASE_POLL_MS;
+
+    function scheduleNext() {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = setInterval(checkAiBrowser, currentInterval);
+    }
 
     async function checkAiBrowser() {
       try {
@@ -41,7 +56,14 @@ export default function BrowserPage() {
           cache: "no-store",
           headers: token ? { authorization: `Bearer ${token}` } : {},
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          consecutiveErrors++;
+          currentInterval = Math.min(BASE_POLL_MS * Math.pow(2, consecutiveErrors), MAX_POLL_MS);
+          scheduleNext();
+          return;
+        }
+        consecutiveErrors = 0;
+        currentInterval = BASE_POLL_MS;
         const data = await res.json();
         if (data.active) {
           setAiActive(true);
@@ -56,13 +78,15 @@ export default function BrowserPage() {
           setAiActive(false);
         }
       } catch {
-        // ignore poll errors
+        consecutiveErrors++;
+        currentInterval = Math.min(BASE_POLL_MS * Math.pow(2, consecutiveErrors), MAX_POLL_MS);
+        scheduleNext();
       }
     }
 
     // Check immediately, then poll
     checkAiBrowser();
-    pollRef.current = setInterval(checkAiBrowser, POLL_INTERVAL);
+    pollRef.current = setInterval(checkAiBrowser, currentInterval);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
@@ -137,6 +161,8 @@ export default function BrowserPage() {
   };
 
   const isBlank = !currentUrl || currentUrl === "about:blank";
+  // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+  tick; // ensure re-render every second
   const age = aiTimestamp ? Math.floor((Date.now() - aiTimestamp) / 1000) : 0;
 
   // Proxy URL for iframe with auth token query param
