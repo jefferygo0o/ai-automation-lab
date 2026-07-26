@@ -869,7 +869,7 @@ toolRegistry.register({
     url: { type: "string", description: "the URL to save", required: true },
     path: { type: "string", description: "destination file inside the sandbox (default 'saved-pages/<slug>.md')", required: false },
   },
-  defaultPermission: "ask",
+  defaultPermission: "always",
   async execute(args, ctx) {
     if (!args.url) return err("url is required");
     if (!ctx.sandbox) return err("sandbox not active");
@@ -1220,15 +1220,40 @@ agent-browser open "${url}" && sleep 2 && agent-browser screenshot /tmp/ab_scree
   }
 }
 
-function ensureSession(agentId: string, ownerId: string) {
-  let s = browserSessions.get(agentId);
-  if (s) return s;
-  if (!chromiumAvailable()) {
+let chromiumInstalling: Promise<boolean> | null = null;
+
+async function ensureChromium(): Promise<void> {
+  if (chromiumAvailable()) return;
+  if (!chromiumInstalling) {
+    chromiumInstalling = (async () => {
+      const backendDir = process.env.LAB_BACKEND_ROOT ?? join(
+        process.env.LAB_PROJECT_ROOT ?? "/app", "backend"
+      );
+      console.log("[browser] Chromium not found — auto-installing…");
+      try {
+        await runCommand("bunx", ["playwright", "install", "chromium"], {
+          cwd: backendDir,
+          timeoutMs: 180_000,
+        });
+      } catch (e: any) {
+        console.error("[browser] auto-install failed:", e?.message ?? e);
+      }
+      return chromiumAvailable();
+    })();
+  }
+  const ok = await chromiumInstalling;
+  if (!ok) {
     throw new Error(
-      "Playwright Chromium browser is not installed. " +
-      "Run `lab_install_dependency` with name='playwright-chromium' to install it."
+      "Playwright Chromium browser could not be installed. " +
+      "Run `lab_install_dependency` with name='playwright-chromium' manually."
     );
   }
+}
+
+async function ensureSession(agentId: string, ownerId: string) {
+  let s = browserSessions.get(agentId);
+  if (s) return s;
+  await ensureChromium();
   // Spawn a long-lived playwright script that accepts JSON commands on stdin
   // and returns JSON results on stdout. Each command is a single line.
   const script = join(tmpdir(), `lab_browser_${randomBytes(6).toString("hex")}.mjs`);
@@ -1396,8 +1421,8 @@ function publishBrowserProgress(session: {
 }
 
 let browserReqSeq = 0;
-function browserCall(agentId: string, ownerId: string, cmd: any, timeoutMs = 90_000): Promise<any> {
-  const s = ensureSession(agentId, ownerId);
+async function browserCall(agentId: string, ownerId: string, cmd: any, timeoutMs = 120_000): Promise<any> {
+  const s = await ensureSession(agentId, ownerId);
   const id = String(++browserReqSeq);
   return new Promise((resolveP, rejectP) => {
     const t = setTimeout(() => {
@@ -1429,11 +1454,11 @@ toolRegistry.register({
   parameters: {
     url: { type: "string", description: "the URL to open", required: true },
   },
-  defaultPermission: "ask",
+  defaultPermission: "always",
   async execute(args, ctx) {
     if (!args.url) return err("url is required");
     try {
-      const r = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "open", url: args.url });
+      const r = await browserCall(ctx.agentId, ctx.ownerId, { cmd: "open", url: args.url }, 120_000);
       setActiveView(ctx.ownerId, { url: r.url, title: r.title, html: r.html ?? "", agentId: ctx.agentId });
       return ok(`# ${r.title || args.url}\n\nURL: ${r.url}\n\n${r.text}`);
     } catch (e: any) {
@@ -1472,7 +1497,7 @@ toolRegistry.register({
     url: { type: "string", description: "URL for goto action", required: false },
     fullPage: { type: "boolean", description: "for screenshot: capture full page (default true)", required: false },
   },
-  defaultPermission: "ask",
+  defaultPermission: "always",
   async execute(args, ctx) {
     if (!args.action) return err("action is required");
     try {

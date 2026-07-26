@@ -30,10 +30,8 @@ COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 RUN cd frontend && bun run build
 RUN mkdir -p backend/dist-spa && cp -r frontend/dist/* backend/dist-spa/
-# Install Playwright's Chromium browser (browsers need /root/.cache persistence
-# which Render gives us via persistent disk on paid plans, or we re-download
-# on cold start).
-RUN cd backend && bunx playwright install chromium --with-deps 2>&1 | tail -5 || true
+# Install Playwright's Chromium browser.
+RUN cd backend && bunx playwright install chromium --with-deps 2>&1 | tail -10
 
 # --- Runtime stage: minimal image with only what's needed to run ---
 FROM base AS runtime
@@ -59,9 +57,8 @@ RUN node -v && npm -v
 COPY --from=install /app/backend/node_modules ./backend/node_modules
 COPY --from=install /app/frontend/node_modules ./frontend/node_modules
 COPY --from=build /app/backend ./backend
-# Re-install Chromium into the runtime layer's cache (much smaller than
-# baking the browser into the image, and avoids most multi-arch pitfalls).
-RUN cd backend && bunx playwright install chromium 2>&1 | tail -5 || true
+# Install Chromium into the runtime layer.
+RUN cd backend && bunx playwright install chromium --with-deps 2>&1 | tail -10
 # Install d2 (diagramming) — the d2lang install script drops it into /usr/local/bin
 RUN curl -fsSL https://d2lang.com/install.sh | sh -s -- 2>&1 | tail -3 || true
 
