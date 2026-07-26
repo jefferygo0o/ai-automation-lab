@@ -211,6 +211,7 @@ export const db = new PgDbShim();
 async function repairAutomationSchema(): Promise<void> {
   const statements = [
     "CREATE SCHEMA IF NOT EXISTS public",
+    "ALTER TABLE public.users ADD COLUMN IF NOT EXISTS timezone TEXT NOT NULL DEFAULT 'UTC'",
     "ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS agent_id TEXT",
     "ALTER TABLE public.automations ADD COLUMN IF NOT EXISTS rrule TEXT NOT NULL DEFAULT 'FREQ=DAILY'",
