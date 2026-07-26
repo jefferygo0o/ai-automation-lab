@@ -180,3 +180,79 @@ browserApi.get("/active/content", async (c) => {
   }
   return c.html(html, 200, { "Cache-Control": "no-store", "Content-Security-Policy": "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;" });
 });
+
+// ====================================================================
+// URL proxy — fetches any page server-side, returns same-origin HTML.
+// Solves X-Frame-Options blocking for the manual browser iframe.
+// ====================================================================
+
+browserApi.get("/proxy", async (c) => {
+  const rawUrl = c.req.query("url");
+  if (!rawUrl) return c.html("<h1>Missing url param</h1>", 400);
+
+  let target: URL;
+  try {
+    target = new URL(rawUrl);
+  } catch {
+    return c.html("<h1>Invalid URL</h1>", 400);
+  }
+  if (!["http:", "https:"].includes(target.protocol)) {
+    return c.html("<h1>Only http/https URLs allowed</h1>", 400);
+  }
+
+  try {
+    const res = await fetch(target.toString(), {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(30_000),
+    });
+
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("text/html") && !contentType.includes("application/xhtml")) {
+      return c.html(
+        `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#f5f5f5;font-family:sans-serif">
+          <div style="text-align:center">
+            <p>Cannot preview this content type: ${contentType}</p>
+            <a href="${target.toString()}" target="_blank" rel="noopener">Open in new tab</a>
+          </div>
+        </body></html>`,
+        200,
+        { "Cache-Control": "no-store" },
+      );
+    }
+
+    let html = await res.text();
+    const baseUrl = target.origin + "/";
+
+    // Rewrite relative URLs to absolute
+    html = html
+      .replace(/(<(?:a|link|area|base)\s[^>]*?\bhref\s*=\s*["'])\/(?!\/)/gi, `$1${target.origin}/`)
+      .replace(/(<(?:img|script|source|video|audio|iframe|embed|object|input|track)\s[^>]*?\bsrc\s*=\s*["'])\/(?!\/)/gi, `$1${target.origin}/`)
+      .replace(/(<(?:form)\s[^>]*?\baction\s*=\s*["'])\/(?!\/)/gi, `$1${target.origin}/`)
+      .replace(/(<(?:img|video|audio|source|track)\s[^>]*?\bposter\s*=\s*["'])\/(?!\/)/gi, `$1${target.origin}/`)
+      .replace(/(<(?:video|audio|source|track)\s[^>]*?\bsrcset\s*=\s*["'])\/(?!\/)/gi, `$1${target.origin}/`);
+
+    // Strip X-Frame-Options meta tags and inject base
+    html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?x-frame-options[^>]*>/gi, "");
+    html = html.replace(/<\/head>/i, `<base href="${baseUrl}">\n</head>`);
+
+    return c.html(html, 200, {
+      "Cache-Control": "no-store",
+      "Content-Security-Policy": "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob:; media-src * data: blob:",
+    });
+  } catch (err: any) {
+    return c.html(
+      `<html><body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#f5f5f5;font-family:sans-serif">
+        <div style="text-align:center">
+          <p>Failed to load: ${err.message ?? "unknown error"}</p>
+          <a href="${target.toString()}" target="_blank" rel="noopener">Open in new tab</a>
+        </div>
+      </body></html>`,
+      502,
+      { "Cache-Control": "no-store" },
+    );
+  }
+});

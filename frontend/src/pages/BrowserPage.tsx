@@ -26,6 +26,7 @@ export default function BrowserPage() {
   const [aiRevision, setAiRevision] = useState(0);
   const [showAiPreview, setShowAiPreview] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [navRevision, setNavRevision] = useState(0);
 
   // Poll for AI browser activity
   useEffect(() => {
@@ -81,7 +82,7 @@ export default function BrowserPage() {
   const navigate = useCallback((targetUrl: string) => {
     let normalized = targetUrl.trim();
     if (!normalized) return;
-    if (!/^https?:\/\/./i.test(normalized)) normalized = "https://" + normalized;
+    if (!/^https?:\/\//i.test(normalized)) normalized = "https://" + normalized;
 
     setUrl(normalized);
     setCurrentUrl(normalized);
@@ -92,10 +93,7 @@ export default function BrowserPage() {
     newHistory.push(normalized);
     setHistory(newHistory);
     setHistoryIdx(newHistory.length - 1);
-
-    if (iframeRef.current) {
-      iframeRef.current.src = normalized;
-    }
+    setNavRevision(r => r + 1);
   }, [history, historyIdx]);
 
   const goBack = () => {
@@ -105,7 +103,7 @@ export default function BrowserPage() {
       const u = history[idx];
       setUrl(u);
       setCurrentUrl(u);
-      if (iframeRef.current) iframeRef.current.src = u;
+      setNavRevision(r => r + 1);
     }
   };
 
@@ -116,21 +114,19 @@ export default function BrowserPage() {
       const u = history[idx];
       setUrl(u);
       setCurrentUrl(u);
-      if (iframeRef.current) iframeRef.current.src = u;
+      setNavRevision(r => r + 1);
     }
   };
 
   const refresh = () => {
-    if (currentUrl && iframeRef.current) {
-      iframeRef.current.src = currentUrl;
-    }
+    setNavRevision(r => r + 1);
   };
 
   const goHome = () => {
     setUrl("");
     setCurrentUrl("");
     setShowAiPreview(false);
-    if (iframeRef.current) iframeRef.current.src = defaultUrl;
+    setNavRevision(r => r + 1);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -144,9 +140,16 @@ export default function BrowserPage() {
 
   // Proxy URL for iframe with auth token query param
   const token = getToken();
+  const apiBase = import.meta.env.VITE_API_BASE || "";
+  
+  // Manual browser now uses server-side proxy to bypass X-Frame-Options
+  const manualProxyUrl = currentUrl && currentUrl !== "about:blank"
+    ? `${apiBase}/api/browser/proxy?url=${encodeURIComponent(currentUrl)}&token=${token ? encodeURIComponent(token) : ""}&_=${navRevision}`
+    : defaultUrl;
+  
   const proxyUrl = showAiPreview
-    ? `/api/browser/active/content?token=${token ? encodeURIComponent(token) : ""}&_=${aiTimestamp}-${aiRevision}`
-    : (currentUrl || defaultUrl);
+    ? `${apiBase}/api/browser/active/content?token=${token ? encodeURIComponent(token) : ""}&_=${aiTimestamp}-${aiRevision}`
+    : manualProxyUrl;
 
   return (
     <div className="h-full flex flex-col bg-white">
@@ -269,8 +272,9 @@ export default function BrowserPage() {
       ) : !showAiPreview && !isBlank ? (
         <div className="flex-1 relative bg-white">
           <iframe
+            key={`manual-${navRevision}`}
             ref={iframeRef}
-            src={currentUrl}
+            src={manualProxyUrl}
             className="w-full h-full border-0"
             sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
             title="Lab Browser"
