@@ -171,14 +171,18 @@ browserApi.get("/active/content", async (c) => {
       .replace(/(<(?:form)\s[^>]*?\baction\s*=\s*["'])\/(?!\/)/gi, `$1${baseUrl.origin}/`)
       .replace(/(<(?:img|video|audio|source|track)\s[^>]*?\bposter\s*=\s*["'])\/(?!\/)/gi, `$1${baseUrl.origin}/`)
       .replace(/(<(?:video|audio|source|track)\s[^>]*?\bsrcset\s*=\s*["'])\/(?!\/)/gi, `$1${baseUrl.origin}/`);
+    // Strip existing CSP meta tags that would conflict
+    html = html.replace(/<meta[^>]*http-equiv\s*=\s*["']?content-security-policy[^>]*>/gi, "");
+    // Inject <base> + permissive CSP as <meta> (srcdoc iframes ignore HTTP headers)
     html = html.replace(
       /<\/head>/i,
-      `<base href="${baseUrl.origin}/">\n</head>`
+      `<base href="${baseUrl.origin}/">\n<meta http-equiv="Content-Security-Policy" content="default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob:; media-src * data: blob:; style-src * 'unsafe-inline'; script-src * 'unsafe-inline' 'unsafe-eval'; font-src * data:;">
+</head>`
     );
   } catch {
     // If URL parsing fails, serve raw
   }
-  return c.html(html, 200, { "Cache-Control": "no-store", "Content-Security-Policy": "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:;" });
+  return c.html(html, 200, { "Cache-Control": "no-store" });
 });
 
 // ====================================================================
