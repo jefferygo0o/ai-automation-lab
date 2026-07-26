@@ -287,7 +287,12 @@ toolRegistry.register({
       required: false,
     },
     instruction: { type: "string", description: "the prompt/instruction the agent runs — required for create", required: false },
+    description: { type: "string", description: "optional automation description", required: false },
     agentId: { type: "string", description: "agent id to run — leave empty for default", required: false },
+    timezone: { type: "string", description: "IANA timezone, such as Europe/London", required: false },
+    delivery_method: { type: "string", description: "notification method: none, email, sms, telegram, slack, or discord", required: false, enum: ["none", "email", "sms", "telegram", "slack", "discord"] },
+    delivery_target_json: { type: "string", description: "JSON object containing notification target details", required: false },
+    model: { type: "string", description: "optional model override", required: false },
     active: { type: "boolean", description: "true = active, false = paused (for toggle/edit)", required: false },
   },
   defaultPermission: "ask",
@@ -320,9 +325,25 @@ toolRegistry.register({
           const agentId = args.agentId ?? "";
           const rrule = args.rrule ?? "FREQ=DAILY;INTERVAL=1";
           await db.query(
-            `INSERT INTO automations (id, owner_id, name, agent_id, rrule, prompt, active, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-          ).run(id, userId, args.name, agentId, rrule, args.instruction, 1, now, now);
+            `INSERT INTO automations (id, owner_id, name, description, agent_id, rrule, prompt, active, enabled, timezone, delivery_method, delivery_target_json, model, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).run(
+            id,
+            userId,
+            args.name,
+            args.description ?? "",
+            agentId,
+            rrule,
+            args.instruction,
+            1,
+            1,
+            args.timezone ?? "UTC",
+            args.delivery_method ?? "none",
+            args.delivery_target_json ?? "{}",
+            args.model ?? null,
+            now,
+            now,
+          );
           return text(`Created automation: ${id} ("${args.name}") — ${rrule}`);
         }
         case "edit": {
