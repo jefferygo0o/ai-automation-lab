@@ -64,6 +64,7 @@ export default function BrowserPage() {
         }
         consecutiveErrors = 0;
         currentInterval = BASE_POLL_MS;
+        scheduleNext();
         const data = await res.json();
         if (data.active) {
           setAiActive(true);
