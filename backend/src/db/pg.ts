@@ -150,6 +150,58 @@ function splitSqlStatements(sql: string): string[] {
   return statements;
 }
 
+/**
+ * Serial queue wrapper around a PoolClient.
+ *
+ * pg@8+ warns when two queries run concurrently on the same client.
+ * This wrapper ensures queries on a request-scoped client execute
+ * one at a time, preserving RLS context (SET LOCAL) on one connection.
+ */
+class SerialClient {
+  private queue: Array<() => void> = [];
+  private running = false;
+
+  constructor(private inner: PoolClient) {}
+
+  private async drain() {
+    if (this.running || this.queue.length === 0) return;
+    this.running = true;
+    while (this.queue.length > 0) {
+      const next = this.queue.shift()!;
+      await next();
+    }
+    this.running = false;
+  }
+
+  /** Mimic PoolClient.query — serialise concurrent calls. */
+  query(text: string, values?: any[]): Promise<any> {
+    return new Promise<any>((resolve, reject) => {
+      this.queue.push(async () => {
+        try {
+          const result = await this.inner.query(text, values);
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        }
+      });
+      this.drain();
+    });
+  }
+
+  release(err?: boolean | Error) {
+    return this.inner.release(err);
+  }
+}
+
+/** Wrap a PoolClient with a serial queue to prevent concurrent query warnings. */
+function wrapSerial(client: PoolClient): PoolClient {
+  if ((client as any)._serialWrapped) return client;
+  const wrapped = new SerialClient(client) as any;
+  wrapped._serialWrapped = true;
+  wrapped.release = client.release.bind(client);
+  return wrapped as PoolClient;
+}
+
 class PGStatement<T = any> {
   private pool: Pool;
   private sql: string;
@@ -160,7 +212,7 @@ class PGStatement<T = any> {
   /** Route through user-context client when inside a request, else pool. */
   private q(sql: string, params: any[]) {
     const c = getRequestClient();
-    return (c ?? this.pool).query(sql, params);
+    return (c ? wrapSerial(c) : this.pool).query(sql, params);
   }
   all(...params: any[]): Promise<T[]> {
     const [sql, p] = convertParams(this.sql, params);
@@ -188,7 +240,7 @@ class Database {
         if (!stmt.trim()) continue;
         try {
           const uc = getRequestClient();
-          const r = await (uc ?? getPool()).query(stmt);
+          const r = await (uc ? wrapSerial(uc) : getPool()).query(stmt);
           totalChanges += r.rowCount ?? 0;
         } catch (e: any) {
           // Log the failing statement so we can diagnose which one errors
@@ -206,9 +258,10 @@ class Database {
     if (existing) {
       // Already inside a user-scoped request transaction — use a savepoint.
       const sp = `sp_${Math.random().toString(36).slice(2, 8)}`;
-      await existing.query(`SAVEPOINT ${sp}`);
-      try { const r = await fn(); await existing.query(`RELEASE SAVEPOINT ${sp}`); return r; }
-      catch (e) { await existing.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {}); throw e; }
+      const wrapped = wrapSerial(existing);
+      await wrapped.query(`SAVEPOINT ${sp}`);
+      try { const r = await fn(); await wrapped.query(`RELEASE SAVEPOINT ${sp}`); return r; }
+      catch (e) { await wrapped.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {}); throw e; }
     }
     const client = await getPool().connect();
     try { await client.query("BEGIN"); const r = await fn(); await client.query("COMMIT"); return r; }
