@@ -123,7 +123,7 @@ function htmlTitle(html: string): string {
 /** Egress fetch with a sane default UA + timeout. */
 async function fetchText(url: string, opts: { timeoutMs?: number; headers?: Record<string, string> } = {}): Promise<{ status: number; body: string; title: string; contentType: string }> {
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), opts.timeoutMs ?? 15_000);
+  const t = setTimeout(() => controller.abort(), opts.timeoutMs ?? 300_000);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
@@ -155,7 +155,7 @@ async function runCommand(
     env: opts.env ? { ...process.env, ...opts.env } : process.env,
   });
 
-  const timeout = opts.timeoutMs ?? 30_000;
+  const timeout = opts.timeoutMs ?? 300_000;
   const timer = setTimeout(() => {
     child.kill("SIGTERM");
     // Send SIGKILL 2 seconds later if still alive
@@ -676,7 +676,7 @@ toolRegistry.register({
       if (args.include_pattern) rgArgs.push("--glob", args.include_pattern);
       if (args.exclude_pattern) rgArgs.push("--glob", `!${args.exclude_pattern}`);
       rgArgs.push("--", args.query, abs);
-      const r = await runCommand("rg", rgArgs, { timeoutMs: 15_000 });
+      const r = await runCommand("rg", rgArgs, { timeoutMs: 300_000 });
       if (r.ok) {
         const lines = r.stdout.split(/\r?\n/).filter(Boolean).slice(0, max);
         return ok(`Found ${lines.length} match(es):\n\n${lines.join("\n")}${lines.length === max ? "\n... (truncated)" : ""}`);
@@ -728,7 +728,7 @@ toolRegistry.register({
   description: "Run a shell command inside the lab data directory. Use for file operations, git, scripts, and system tools. Enforces timeout and output cap.",
   parameters: {
     command: { type: "string", description: "shell command to execute (can include pipes, redirects, env vars)", required: true },
-    timeoutMs: { type: "number", description: "max wall time in ms (default 30000)", required: false },
+    timeoutMs: { type: "number", description: "max wall time in ms (default 300000)", required: false },
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
@@ -756,7 +756,7 @@ toolRegistry.register({
       items: { type: "string" },
     },
     continue_on_error: { type: "boolean", description: "keep going after a non-zero exit (default false)", required: false },
-    timeoutMs: { type: "number", description: "per-command timeout in ms (default 30000)", required: false },
+    timeoutMs: { type: "number", description: "per-command timeout in ms (default 300000)", required: false },
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
@@ -792,13 +792,13 @@ toolRegistry.register({
       required: true,
       items: { type: "string" },
     },
-    timeoutMs: { type: "number", description: "per-command timeout in ms (default 30000)", required: false },
+    timeoutMs: { type: "number", description: "per-command timeout in ms (default 300000)", required: false },
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
     if (!ctx.sandbox) return err("sandbox not active");
     if (!Array.isArray(args.commands) || args.commands.length === 0) return err("commands must be a non-empty array");
-    const t = args.timeoutMs ?? 30_000;
+    const t = args.timeoutMs ?? 300_000;
     const run = async (c: string, idx: number) => {
       const r = await ctx.sandbox!.run("bash", ["-c", `cd ${userRoot(ctx.ownerId)} && ${c}`]);
       return { idx, c, r };
@@ -852,7 +852,7 @@ toolRegistry.register({
         }
         return ok(`# ${args.url}\n\n${text}`);
       }
-      const r = await fetchText(args.url, { timeoutMs: 20_000 });
+      const r = await fetchText(args.url, { timeoutMs: 300_000 });
       if (r.status >= 400) return err(`HTTP ${r.status} fetching ${args.url}`);
       const clean = htmlToText(r.body);
       return ok(`# ${args.url}\n\n${clean}`);
@@ -874,7 +874,7 @@ toolRegistry.register({
     if (!args.url) return err("url is required");
     if (!ctx.sandbox) return err("sandbox not active");
     try {
-      const r = await fetchText(args.url, { timeoutMs: 20_000 });
+      const r = await fetchText(args.url, { timeoutMs: 300_000 });
       if (r.status >= 400) return err(`HTTP ${r.status} fetching ${args.url}`);
       const clean = htmlToText(r.body);
       const slug = args.url.replace(/^https?:\/\//, "").replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 80).replace(/^-+|-+$/g, "");
@@ -910,7 +910,7 @@ toolRegistry.register({
       const params = new URLSearchParams({ q: args.query });
       if (trMap[tr]) params.set("df", trMap[tr]);
       const url = `https://html.duckduckgo.com/html/?${params.toString()}`;
-      const r = await fetchText(url, { timeoutMs: 15_000 });
+      const r = await fetchText(url, { timeoutMs: 300_000 });
       if (r.status >= 400) return err(`DuckDuckGo returned ${r.status}`);
       // Parse results from DDG HTML
       const results: { title: string; url: string; snippet: string }[] = [];
@@ -955,7 +955,7 @@ toolRegistry.register({
     try {
       const all: { query: string; results: { title: string; url: string; snippet: string }[] }[] = [];
       for (const q of args.queries) {
-        const r = await fetchText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, { timeoutMs: 15_000 });
+        const r = await fetchText(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`, { timeoutMs: 300_000 });
         const out: { title: string; url: string; snippet: string }[] = [];
         if (r.status < 400) {
           const re = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="result__snippet"[\s\S]*?>([\s\S]*?)<\/a>/g;
@@ -995,7 +995,7 @@ toolRegistry.register({
       u.searchParams.set("api", "1");
       u.searchParams.set("query", args.query);
       if (args.location) u.searchParams.set("near", args.location);
-      const r = await fetchText(u.toString(), { timeoutMs: 15_000 });
+      const r = await fetchText(u.toString(), { timeoutMs: 300_000 });
       if (r.status >= 400) return err(`Google Maps returned ${r.status}`);
       // Google Maps HTML is JS-heavy; the best we can do without the official API
       // is to extract anything visible in the SSR'd markup.
@@ -1028,7 +1028,7 @@ toolRegistry.register({
       const params = new URLSearchParams({ q });
       if (trMap[tr]) params.set("tbs", `qdr:${trMap[tr]}`);
       const url = `https://www.google.com/search?${params.toString()}&num=${count}`;
-      const r = await fetchText(url, { timeoutMs: 15_000 });
+      const r = await fetchText(url, { timeoutMs: 300_000 });
       if (r.status >= 400) return err(`Google returned ${r.status}`);
       // Best-effort extract: just keep the raw text, since Google result snippets
       // mix titles + URLs + snippets in a way that's hard to parse reliably.
@@ -1053,7 +1053,7 @@ toolRegistry.register({
     try {
       const count = Math.min(args.count ?? 10, 25);
       const url = `https://duckduckgo.com/?q=${encodeURIComponent(args.query)}&iax=images&ia=images`;
-      const r = await fetchText(url, { timeoutMs: 15_000 });
+      const r = await fetchText(url, { timeoutMs: 300_000 });
       if (r.status >= 400) return err(`DuckDuckGo returned ${r.status}`);
       // DDG images page is mostly JS; pull image URLs from the SSR'd markup.
       const imgs: string[] = [];
@@ -1083,7 +1083,7 @@ toolRegistry.register({
     try {
       const count = Math.min(args.count ?? 10, 25);
       const u = `https://www.google.com/search?q=related:${encodeURIComponent(args.url)}&num=${count}`;
-      const r = await fetchText(u, { timeoutMs: 15_000 });
+      const r = await fetchText(u, { timeoutMs: 300_000 });
       if (r.status >= 400) return err(`Google returned ${r.status}`);
       const links: { title: string; href: string }[] = [];
       const re = /<a[^>]+href="\/url\?q=([^"&]+)[^"]*"[^>]*>([\s\S]*?)<\/a>/g;
@@ -1163,7 +1163,7 @@ await browser.close();
  * Use agent-browser CLI to open a URL and extract page text.
  * Faster than Playwright for JS rendering since it's already installed.
  */
-async function agentBrowserRead(url: string, timeoutMs: number = 20_000): Promise<string> {
+async function agentBrowserRead(url: string, timeoutMs: number = 300_000): Promise<string> {
   if (!agentBrowserAvailable()) {
     throw new Error(
       "agent-browser CLI is not installed. " +
@@ -1233,7 +1233,7 @@ async function ensureChromium(): Promise<void> {
       try {
         await runCommand("bunx", ["playwright", "install", "chromium"], {
           cwd: backendDir,
-          timeoutMs: 180_000,
+          timeoutMs: 300_000,
         });
       } catch (e: any) {
         console.error("[browser] auto-install failed:", e?.message ?? e);
@@ -1298,9 +1298,9 @@ rl.on("line", async (line) => {
     let result;
     if (msg.cmd === "open") {
       await withProgress(msg.id, async () => {
-        await page.goto(msg.url, { waitUntil: "domcontentloaded", timeout: 60000 });
+        await page.goto(msg.url, { waitUntil: "domcontentloaded", timeout: 300_000 });
         currentUrl = page.url();
-        await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+        await page.waitForLoadState("networkidle", { timeout: 300_000 }).catch(() => {});
         await page.waitForTimeout(500);
       });
       currentUrl = page.url();
@@ -1311,7 +1311,7 @@ rl.on("line", async (line) => {
       const { action, selector, text, value, url } = msg;
       if (action === "click") {
         await withProgress(msg.id, async () => {
-          if (selector) await page.click(selector, { timeout: 10000 });
+          if (selector) await page.click(selector, { timeout: 300_000 });
           else throw new Error("click requires selector");
         });
       } else if (action === "fill") {
@@ -1334,14 +1334,14 @@ rl.on("line", async (line) => {
         });
       } else if (action === "goto") {
         await withProgress(msg.id, async () => {
-          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
+          await page.goto(url, { waitUntil: "domcontentloaded", timeout: 300_000 });
           currentUrl = page.url();
-          await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+          await page.waitForLoadState("networkidle", { timeout: 300_000 }).catch(() => {});
         });
         currentUrl = page.url();
       } else if (action === "wait") {
         await withProgress(msg.id, async () => {
-          if (selector) await page.waitForSelector(selector, { timeout: 15000 });
+          if (selector) await page.waitForSelector(selector, { timeout: 300_000 });
           else await page.waitForTimeout(value ?? 1000);
         });
       } else if (action === "screenshot") {
@@ -1421,7 +1421,7 @@ function publishBrowserProgress(session: {
 }
 
 let browserReqSeq = 0;
-async function browserCall(agentId: string, ownerId: string, cmd: any, timeoutMs = 120_000): Promise<any> {
+async function browserCall(agentId: string, ownerId: string, cmd: any, timeoutMs = 300_000): Promise<any> {
   const s = await ensureSession(agentId, ownerId);
   const id = String(++browserReqSeq);
   return new Promise((resolveP, rejectP) => {
@@ -1547,7 +1547,7 @@ toolRegistry.register({
       if (creds) {
         try {
           const mp3Path = join(tmpdir(), `lab_audio_${randomBytes(6).toString("hex")}.mp3`);
-          const conv = await runCommand("ffmpeg", ["-y", "-i", abs, "-ar", "16000", "-ac", "1", "-b:a", "32k", mp3Path], { timeoutMs: 60_000 });
+          const conv = await runCommand("ffmpeg", ["-y", "-i", abs, "-ar", "16000", "-ac", "1", "-b:a", "32k", mp3Path], { timeoutMs: 300_000 });
           if (conv.ok) {
             const fileBuf = readFileSync(mp3Path);
             try { unlinkSync(mp3Path); } catch {}
@@ -1598,7 +1598,7 @@ toolRegistry.register({
       const meta = (probe.stderr.split("\n").filter((l) => l.includes("Duration") || l.includes("Stream"))[0] ?? "").trim();
       // Extract audio track to WAV (then we'll convert to MP3 for CF Whisper).
       const wav = join(tmpdir(), `lab_video_audio_${randomBytes(6).toString("hex")}.wav`);
-      const extract = await runCommand("ffmpeg", ["-y", "-i", abs, "-vn", "-ac", "1", "-ar", "16000", wav], { timeoutMs: 60_000 });
+      const extract = await runCommand("ffmpeg", ["-y", "-i", abs, "-vn", "-ac", "1", "-ar", "16000", wav], { timeoutMs: 300_000 });
       if (!extract.ok) return err(`ffmpeg audio extract failed: ${extract.stderr.slice(0, 500)}`);
       // Try Cloudflare Whisper — convert the extracted WAV to MP3 first
       // (CF's whisper rejects some WAV headers; MP3 is reliable).
@@ -1606,7 +1606,7 @@ toolRegistry.register({
       if (creds) {
         try {
           const mp3Path = join(tmpdir(), `lab_video_audio_${randomBytes(6).toString("hex")}.mp3`);
-          const conv = await runCommand("ffmpeg", ["-y", "-i", wav, "-ar", "16000", "-ac", "1", "-b:a", "32k", mp3Path], { timeoutMs: 60_000 });
+          const conv = await runCommand("ffmpeg", ["-y", "-i", wav, "-ar", "16000", "-ac", "1", "-b:a", "32k", mp3Path], { timeoutMs: 300_000 });
           if (conv.ok) {
             const fileBuf = readFileSync(mp3Path);
             try { unlinkSync(mp3Path); } catch {}
@@ -1972,7 +1972,7 @@ toolRegistry.register({
       ctx.sandbox.writeFile(d2Path, args.code);
       const absD2 = ctx.sandbox.resolveSafe(d2Path);
       const absPng = absD2.replace(/\.d2$/, ".png");
-      const r = await runCommand("d2", [absD2, absPng], { timeoutMs: 30_000 });
+      const r = await runCommand("d2", [absD2, absPng], { timeoutMs: 300_000 });
       if (!r.ok) {
         return err(`d2 failed: ${r.stderr || r.stdout}\n\nTo enable diagrams, install d2: https://d2lang.com/tour/install\n(macOS: brew install d2  |  Linux: curl -fsSL https://d2lang.com/install.sh | sh -s --)`);
       }
@@ -2022,13 +2022,13 @@ toolRegistry.register({
       description: "Dependency to install. Supported values: 'ffmpeg', 'playwright-chromium', 'd2', 'whisper', or any apt package name (e.g. 'curl', 'git', 'python3-pip').",
       required: true,
     },
-    timeoutMs: { type: "number", description: "max time in ms for the installation (default 120_000)", required: false },
+    timeoutMs: { type: "number", description: "max time in ms for the installation (default 300_000)", required: false },
   },
   defaultPermission: "ask",
   async execute(args, ctx) {
     if (!args.name) return err("name is required");
     const name = String(args.name).toLowerCase();
-    const timeout = typeof args.timeoutMs === "number" ? args.timeoutMs : 120_000;
+    const timeout = typeof args.timeoutMs === "number" ? args.timeoutMs : 300_000;
 
     if (name === "playwright-chromium" || name === "playwright" || name === "chromium") {
       // Install Playwright Chromium browser
@@ -2072,7 +2072,7 @@ toolRegistry.register({
         }
         // Fallback: try brew or download
         const r = await runCommand("apt-get", ["update"], {
-          timeoutMs: 60_000,
+          timeoutMs: 300_000,
           env: { DEBIAN_FRONTEND: "noninteractive" },
         });
         if (!r.ok) return err("apt-get update failed and no alternative package manager found. Install ffmpeg manually: https://ffmpeg.org/download.html");

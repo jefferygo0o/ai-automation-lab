@@ -41,7 +41,7 @@ function extractTitle(html: string): string {
 }
 
 /** Fetch a URL and extract readable text content. */
-async function readWebpage(url: string, timeoutMs = 15_000): Promise<string> {
+async function readWebpage(url: string, timeoutMs = 300_000): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -82,7 +82,7 @@ async function readWebpage(url: string, timeoutMs = 15_000): Promise<string> {
  * Used by browser_navigate so we can populate the active view cache
  * for the BrowserPage live preview.
  */
-async function readWebpageFull(url: string, timeoutMs = 15_000): Promise<{ html: string; text: string; title: string }> {
+async function readWebpageFull(url: string, timeoutMs = 300_000): Promise<{ html: string; text: string; title: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -140,7 +140,7 @@ async function playwrightScreenshot(url: string, fullPage = true): Promise<strin
 import { chromium } from "playwright";
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-gpu"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-await page.goto(${JSON.stringify(url)}, { waitUntil: "networkidle", timeout: 20000 });
+await page.goto(${JSON.stringify(url)}, { waitUntil: "networkidle", timeout: 300_000 });
 await page.waitForTimeout(1000);
 const buf = await page.screenshot({ type: "png", fullPage: ${fullPage} });
 await browser.close();
@@ -186,7 +186,7 @@ async function agentBrowserScreenshot(url: string, fullPage = true): Promise<str
 }
 
 /** agent-browser CLI — open URL and extract text content. */
-async function agentBrowserRead(url: string, timeoutMs = 20_000): Promise<string> {
+async function agentBrowserRead(url: string, timeoutMs = 300_000): Promise<string> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -553,7 +553,7 @@ toolRegistry.register({
     },
     timeoutMs: {
       type: "number",
-      description: "timeout in ms (default 15000, or 20000 with useBrowser=true)",
+      description: "timeout in ms (default 300000)",
       required: false,
     },
   },
@@ -566,12 +566,12 @@ toolRegistry.register({
       let html = "";
       let title = "";
       if (args.useBrowser) {
-        content = await agentBrowserRead(args.url, args.timeoutMs ?? 20_000);
+        content = await agentBrowserRead(args.url, args.timeoutMs ?? 300_000);
         // agent-browser doesn't return raw HTML; use a minimal snapshot for the preview
         html = `<html><head><title>${args.url}</title></head><body><p>${content.slice(0, 8000)}</p></body></html>`;
         title = args.url;
       } else {
-        const full = await readWebpageFull(args.url, args.timeoutMs ?? 15_000);
+        const full = await readWebpageFull(args.url, args.timeoutMs ?? 300_000);
         content = full.text;
         html = full.html;
         title = full.title;

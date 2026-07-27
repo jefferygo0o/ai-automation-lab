@@ -102,7 +102,7 @@ class LocalSandbox implements Sandbox {
     if (!isAbsolute(this.workdir)) throw new Error("sandbox workdir must be absolute");
     this.options = {
       ...opts,
-      timeoutMs: opts.timeoutMs ?? 30_000,
+      timeoutMs: opts.timeoutMs ?? 300_000,
       maxOutputBytes: opts.maxOutputBytes ?? 256_000,
     };
     if (!existsSync(this.workdir)) mkdirSync(this.workdir, { recursive: true });
