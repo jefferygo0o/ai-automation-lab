@@ -8,6 +8,7 @@
  */
 import { nanoid } from "nanoid";
 import { getPool } from "../db/index.ts";
+import { getRequestClient } from "../db/user_context.ts";
 
 export type AuditActor = "user" | "agent" | "system" | "webhook" | "anonymous";
 
@@ -29,32 +30,54 @@ export const Audit = {
     try {
       const id = `aud_${nanoid(12)}`;
       const at = Date.now();
-      // Use a dedicated connection so audit failures can't poison the caller's transaction.
-      // If a request context exists, its client may be in an ABORT state from a prior error;
-      // a separate connection avoids cascading 25P02 failures.
-      const client = await getPool().connect();
-      try {
-        await client.query(
-          `INSERT INTO audit_log (id, owner_id, actor, action, target_id, target_type, metadata_json, ip, user_agent, at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-          [
-            id,
-            input.ownerId,
-            input.actor,
-            input.action,
-            input.targetId ?? null,
-            input.targetType ?? null,
-            input.metadata ? JSON.stringify(input.metadata) : null,
-            input.ip ?? null,
-            input.userAgent ?? null,
-            at,
-          ],
-        );
-      } finally {
-        client.release();
+      const values = [
+        id,
+        input.ownerId,
+        input.actor,
+        input.action,
+        input.targetId ?? null,
+        input.targetType ?? null,
+        input.metadata ? JSON.stringify(input.metadata) : null,
+        input.ip ?? null,
+        input.userAgent ?? null,
+        at,
+      ];
+      const INSERT =
+        `INSERT INTO audit_log (id, owner_id, actor, action, target_id, target_type, metadata_json, ip, user_agent, at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`;
+
+      const requestClient = getRequestClient();
+      if (requestClient) {
+        // Inside a request — use a savepoint so an RLS failure on audit_log
+        // doesn't poison the caller's transaction (the request can continue).
+        const sp = `sp_audit_${nanoid(6)}`;
+        await requestClient.query(`SAVEPOINT ${sp}`);
+        try {
+          await requestClient.query(INSERT, values);
+          await requestClient.query(`RELEASE SAVEPOINT ${sp}`);
+        } catch (e) {
+          await requestClient.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
+          console.error("[audit] failed to record event (request path):", e?.message ?? e);
+        }
+      } else {
+        // Background task (scheduler, boot) — no request context, so we need
+        // to set RLS context explicitly for the INSERT to pass the WITH CHECK policy.
+        const client = await getPool().connect();
+        try {
+          await client.query("BEGIN");
+          await client.query("SET LOCAL role = 'authenticated'");
+          const claims = JSON.stringify({ sub: input.ownerId, role: "authenticated" });
+          await client.query(`SET LOCAL request.jwt.claims = '${claims.replace(/'/g, "''")}'`);
+          await client.query(INSERT, values);
+          await client.query("COMMIT");
+        } catch (e) {
+          await client.query("ROLLBACK").catch(() => {});
+          console.error("[audit] failed to record event (background path):", e?.message ?? e);
+        } finally {
+          client.release();
+        }
       }
     } catch (e) {
-      // Don't let audit logging break the request path
       console.error("[audit] failed to record event:", e?.message ?? e);
     }
   },

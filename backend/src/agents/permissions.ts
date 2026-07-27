@@ -21,7 +21,7 @@ export function resolveSandboxOptions(agent: AgentRecord, ownerId: string): Sand
   const workdir = workspaceFor(ownerId).root();
   return {
     workdir: workdir,
-    timeoutMs: sb.timeoutMs ?? 60_000,
+    timeoutMs: sb.timeoutMs ?? 300_000,
     memoryMb: sb.memoryMb ?? 512,
     cpus: sb.cpus ?? 1,
     allowHosts: sb.allowHosts ?? [],
