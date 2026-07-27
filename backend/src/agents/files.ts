@@ -90,7 +90,7 @@ export const DEFAULT_CONFIG: AgentConfig = {
   sandbox: {
     backend: "local",
     workdir: "workdir",
-    timeoutMs: 30_000,
+    timeoutMs: 300_000,
     memoryMb: 512,
     cpus: 1,
     network: "egress",
@@ -339,4 +339,30 @@ export function unpackAgent(pack: { manifest: any; files: Record<string, string>
     writeAgentFile(id, name, content);
   }
   return id;
+}
+
+/**
+ * One-time migration: bump any agent config.json that still has the old
+ * 30-second sandbox timeout (30_000 ms) to the new 5-minute default
+ * (300_000 ms). New agents inherit the new default automatically.
+ */
+export function migrateSandboxTimeouts(): void {
+  const root = AGENTS_DIR;
+  if (!existsSync(root)) return;
+  let patched = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const cfgPath = join(root, entry.name, "config.json");
+    if (!existsSync(cfgPath)) continue;
+    try {
+      const raw = readFileSync(cfgPath, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed?.sandbox?.timeoutMs === 30_000) {
+        parsed.sandbox.timeoutMs = 300_000;
+        writeFileSync(cfgPath, JSON.stringify(parsed, null, 2));
+        patched++;
+      }
+    } catch { /* skip unreadable / invalid */ }
+  }
+  if (patched > 0) console.log(`[files] migrated ${patched} agent config(s): timeoutMs 30s -> 5min`);
 }
