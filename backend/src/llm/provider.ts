@@ -286,7 +286,7 @@ export async function streamChat(
       // Race reader.read() against idle timeout
       const result = await Promise.race([
         reader.read().then(r => ({ type: "data" as const, done: r.done, value: r.value })),
-        new Promise<{ type: "idle" as const }>((resolve) => {
+        new Promise<{ type: "idle" }>((resolve) => {
           const onAbort = () => { idleCleanup(); resolve({ type: "idle" }); };
           const idleCleanup = () => idleController.signal.removeEventListener("abort", onAbort);
           idleController.signal.addEventListener("abort", onAbort, { once: true });
