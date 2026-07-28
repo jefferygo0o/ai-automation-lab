@@ -209,10 +209,10 @@ export async function streamChat(
 
   // Combine caller's abort signal with a connect timeout so we don't
   // hang forever if the provider accepts TCP but never replies.
-  const connectTimeout = AbortSignal.timeout(CONNECT_TIMEOUT_MS);
-  const combinedSignal = req.signal
-    ? AbortSignal.any([req.signal, connectTimeout])
-    : connectTimeout;
+  const combinedController = new AbortController();
+  const connectTimer = setTimeout(() => combinedController.abort(), CONNECT_TIMEOUT_MS);
+  req.signal?.addEventListener("abort", () => combinedController.abort(), { once: true });
+  const combinedSignal = combinedController.signal;
 
   let res: Response | undefined;
   for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
