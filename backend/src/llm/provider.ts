@@ -46,7 +46,7 @@ export interface LLMRequest {
    * Used by the runtime to forward content deltas to the client as
    * `event: token` events instead of waiting for the full response.
    */
-  onChunk?: (chunk: StreamChunk) => void;
+  onChunk?: (chunk: StreamChunk) => void | Promise<void>;
 }
 
 export interface LLMResponse {
@@ -91,7 +91,7 @@ interface SseProcessCtx {
   toolCallAcc: Map<number, { id: string; name: string; args: string }>;
   finishReason: LLMResponse["finishReason"];
   usage: LLMResponse["usage"] | undefined;
-  onChunk: (c: StreamChunk) => void;
+  onChunk: (c: StreamChunk) => void | Promise<void>;
 }
 
 /**
@@ -109,7 +109,7 @@ function dedupeDelta(prev: string, delta: string): string {
   return delta.slice(overlap);
 }
 
-function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
+async function processSseLine(rawLine: string, ctx: SseProcessCtx): Promise<void> {
   const line = rawLine.trim();
   if (!line || !line.startsWith("data:")) return;
   const payload = line.slice(5).trim();
@@ -122,14 +122,14 @@ function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
       const msg = typeof json.error === "string" ? json.error : json.error.message ?? JSON.stringify(json.error);
       ctx.sseError = msg;
       ctx.finishReason = "error";
-      ctx.onChunk({ type: "error", error: msg });
+      await ctx.onChunk({ type: "error", error: msg });
       return;
     }
     if (json.choices?.[0]?.finish_reason === "error") {
       const msg = json.choices[0].error?.message ?? "Stream returned finish_reason=error";
       ctx.sseError = msg;
       ctx.finishReason = "error";
-      ctx.onChunk({ type: "error", error: msg });
+      await ctx.onChunk({ type: "error", error: msg });
       return;
     }
 
@@ -140,14 +140,14 @@ function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
       const deduped = dedupeDelta(ctx.reasoning, delta.reasoning);
       if (deduped) {
         ctx.reasoning += deduped;
-        ctx.onChunk({ type: "thinking", content: deduped });
+        await ctx.onChunk({ type: "thinking", content: deduped });
       }
     }
     if (delta.content !== undefined && delta.content !== null && delta.content !== "") {
       const deduped = dedupeDelta(ctx.content, delta.content);
       if (deduped) {
         ctx.content += deduped;
-        ctx.onChunk({ type: "content", content: deduped });
+        await ctx.onChunk({ type: "content", content: deduped });
       }
     }
     if (delta.toolCalls) {
@@ -162,7 +162,7 @@ function processSseLine(rawLine: string, ctx: SseProcessCtx): void {
         // Emit tool_call when the name first becomes known. Some providers
         // send the id in one delta and the name in the next — using `isNew`
         // alone misses the window. Track via the name transition instead.
-        ctx.onChunk({ type: "tool_call", toolCall: { id: existing.id, name: existing.name, arguments: existing.args } });
+        await ctx.onChunk({ type: "tool_call", toolCall: { id: existing.id, name: existing.name, arguments: existing.args } });
       }
     }
     if (delta.finishReason) ctx.finishReason = delta.finishReason as LLMResponse["finishReason"];
@@ -201,7 +201,7 @@ const SSE_IDLE_MS = 120_000; // 2 min — max gap between SSE chunks before abor
 export async function streamChat(
   cfg: LLMConfig,
   req: LLMRequest,
-  onChunk: (c: StreamChunk) => void,
+  onChunk: (c: StreamChunk) => void | Promise<void>,
 ): Promise<LLMResponse> {
   const url = buildChatUrl(cfg);
   const body = buildRequestBody(cfg, req, true);
@@ -302,7 +302,7 @@ export async function streamChat(
       buffer = lines.pop() ?? "";
 
       for (const raw of lines) {
-        processSseLine(raw, sseCtx);
+        await processSseLine(raw, sseCtx);
       }
     }
   } finally {
@@ -314,7 +314,7 @@ export async function streamChat(
   // complete SSE line without a trailing "\n" — that data was silently lost,
   // which caused the last tokens of the AI response to be dropped mid-sentence.
   if (buffer.trim()) {
-    processSseLine(buffer.trim(), sseCtx);
+    await processSseLine(buffer.trim(), sseCtx);
   }
 
   // Build final tool call list from accumulator
@@ -328,7 +328,7 @@ export async function streamChat(
     toolCalls.push({ id: tc.id || `call_${idx}_${Date.now()}`, name: tc.name, arguments: args });
   }
 
-  onChunk({ type: "done", finishReason, usage });
+  await onChunk({ type: "done", finishReason, usage });
   return { content, reasoning: reasoning || undefined, toolCalls, finishReason, usage, raw: sseCtx.sseError || undefined };
 }
 

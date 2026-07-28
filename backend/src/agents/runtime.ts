@@ -60,17 +60,20 @@ export async function runAgentTurn(
   opts: RunOptions = {}
 ): Promise<void> {
   const start = Date.now();
+  const emitSafe = async (event: StreamEvent): Promise<void> => {
+    await emit(event);
+  };
   const chat = await ChatStore.get(chatId, ownerId);
   if (!chat) {
-    emit({ type: "error", message: "chat not found" });
-    emit({ type: "done" });
+    await emitSafe({ type: "error", message: "chat not found" });
+    await emitSafe({ type: "done" });
     return;
   }
   const activeAgentId = chat.activeAgentId ?? chat.agentId;
   const agent = await AgentStore.get(activeAgentId, ownerId);
   if (!agent) {
-    emit({ type: "error", message: "agent not found" });
-    emit({ type: "done" });
+    await emitSafe({ type: "error", message: "agent not found" });
+    await emitSafe({ type: "done" });
     return;
   }
 
@@ -79,7 +82,7 @@ export async function runAgentTurn(
 
   // Open a Run so the UI can show live execution logs.
   const run = await RunStore.start(chatId, ownerId, activeAgentId);
-  emit({ type: "run_started", runId: run.id });
+  await emitSafe({ type: "run_started", runId: run.id });
 
   // Build tool spec from registry
   const builtinToolSpecs: ToolSpec[] = toolRegistry.all().map((t) => toolToSpec(t));
@@ -128,7 +131,7 @@ export async function runAgentTurn(
     },
     abort,
     onLog,
-    onApproval: (approval) => emit({ type: "approval_requested", ...approval, status: approval.status as "pending" | "approved" | "rejected" | "expired" | "auto-approved" }),
+    onApproval: (approval) => emitSafe({ type: "approval_requested", ...approval, status: approval.status as "pending" | "approved" | "rejected" | "expired" | "auto-approved" }),
   };
 
   // Build system prompt from agent files
@@ -137,6 +140,8 @@ export async function runAgentTurn(
   const skillsMd = readAgentFile(agent.id, "skills.md") ?? "";
   const toolsMd = readAgentFile(agent.id, "tools.md") ?? "";
   const memoryMd = readAgentFile(agent.id, "memory.md") ?? "";
+  const agentsMd = readAgentFile(agent.id, "AGENTS.md") ?? "";
+  const soulMd = readAgentFile(agent.id, "SOUL.md") ?? "";
 
   // Load user's active persona (Zo-style: a named identity overlay)
   const activePersona = await PersonaStore.getActive(ownerId);
@@ -178,11 +183,13 @@ export async function runAgentTurn(
   // below are injected at runtime to keep multi-step automations running
   // until the user's full request is satisfied (rather than returning after
   // the first action).
-  const RUNTIME_SYSTEM_TAIL = `\n\n# Runtime directives (from the lab)\n- You have an iterative tool-use loop. Keep calling tools until the user's request is fully complete. Do not stop after a single step.\n- After successfully completing the user's request, provide a clear summary of what you did and STOP. Do not keep calling tools once the task is done.\n- Only return a final message when the task is done or you have clear, recoverable evidence it cannot be completed. If a tool fails, try alternatives, adjust parameters, or use a different tool — do not give up after the first error.\n- When the user says "do X, then Y, then Z" or "until everything is done", treat each as a mandatory checkpoint and keep going until all are done. A final assistant message means the whole task is finished.\n\n## 🛠️ Tool discovery\nYou already have the full tool list in the system prompt above. If you need details on a specific tool, call \`tool_docs(tool_name="<tool-name>")\` — but do this sparingly (max 3 per turn). You can also call \`tool_docs(tool_name="list")\` for a compact overview. Do NOT call tool_docs for every tool.\n\n## 🛠️ Tool error recovery protocol\nWhen a tool returns an \`!ERROR!\` result:\n  1. Acknowledge the error briefly\n  2. Analyse what went wrong (e.g. invalid args, network issue, permission denied)\n  3. Try again with adjusted parameters OR use a different tool entirely\n  4. NEVER give up after one failure — retry at least 2-3 times with different approaches\n  5. Only stop after exhausting reasonable alternatives, then clearly explain why`;
+  const RUNTIME_SYSTEM_TAIL = `\n\n# Runtime directives (from the lab)\n- You have an iterative tool-use loop. Keep calling tools until the user's request is fully complete. Do not stop after a single step.\n- After successfully completing the user's request, provide a clear summary of what you did and STOP. Do not keep calling tools once the task is done.\n- Only return a final message when the task is done or you have clear, recoverable evidence it cannot be completed. If a tool fails, try alternatives, adjust parameters, or use a different tool — do not give up after the first error.\n- When the user says "do X, then Y, then Z" or "until everything is done", treat each as a mandatory checkpoint and keep going until all are done. A final assistant message means the whole task is finished.\n\n## 🛠️ Tool discovery\nYou already have the full tool list in the system prompt above. If you need details on a specific tool, call \`tool_docs(tool_name="<tool-name>")\` — but do this sparingly (max 3 per turn). You can also call \`tool_docs(tool_name="list")\` for a compact overview. Do NOT call tool_docs for every tool.\n\n## 🛠️ Tool error recovery protocol\nWhen a tool returns an \`!ERROR!\` result:\n  1. Acknowledge the error briefly\n  2. Analyse what went wrong (e.g. invalid args, network issue, permission denied)\n  3. Try again with adjusted parameters OR use a different tool entirely\n  4. NEVER give up after one failure — retry at least 2-3 times with different approaches\n  5. Only stop after exhausting reasonable alternatives, then clearly explain why\n\n## Persistent Workspace Memory (AGENTS.md / SOUL.md)\n\nAGENTS.md and SOUL.md files are the workspace's durable human-readable instruction system.\n- \`AGENTS.md\` (if present) is the compact root workspace index: a routing map of important projects/folders, canonical paths, stable purposes, aliases/former names, related projects, and where to read next. It should be ordered by likely usefulness rather than split into fragile active/stable buckets.\n- \`SOUL.md\` (if present) defines the personality, tone, and behavioral identity for the agent in this workspace.\n- If the root AGENTS.md does not exist, you may create one when you have enough settled project/folder/workflow context to make a useful workspace index.\n- Subdirectories may have their own AGENTS.md or SOUL.md. When working in a directory, follow the most specific applicable files.\n- These files may be auto-included when reading files, but if you have not seen them and need guidance, read them.\n- You may create and update AGENTS.md content when the guidance is stable and useful beyond this conversation. Keep the root AGENTS.md shaped like a compact routing index, and put detailed project decisions/current state in the relevant project AGENTS.md. Keep them concise, prune stale content, and do not turn them into a transcript log, scratchpad, recent-chat database, raw log store, or secret store.\n\nYour core memory consists of these components:\n- Use AGENTS.md for settled file/folder/project/workflow guidance.\n- Use SOUL.md for personality, tone, and behavioral identity, not broad private facts or task logs.\n- Use memory for facts, preferences, references, and tasks.\n- Use update_agent_file to modify AGENTS.md or SOUL.md when the user asks you to remember or refine behavior.`;
 
   const systemPrompt = [
     systemMd.trim(),
     personaMd.trim() ? `\n\n# Persona\n${personaMd.trim()}\n` : "",
+    agentsMd.trim() ? `\n\n# Workspace Instructions (AGENTS.md)\n${agentsMd.trim()}\n` : "",
+    soulMd.trim() ? `\n\n# Agent Identity (SOUL.md)\n${soulMd.trim()}\n` : "",
     personaOverlay,
     rulesBlock,
     skillsBlock.trim() ? `\n\n# Skills\n${skillsBlock.trim()}\n` : "",
@@ -303,15 +310,15 @@ export async function runAgentTurn(
           maxTokens: llmCfg.maxTokens,
           stream: true,
           signal: abort,
-          onChunk: (c) => {
-            if (c.type === "content" && c.content) emit({ type: "token", delta: c.content });
-            else if (c.type === "thinking" && c.content) emit({ type: "thinking", delta: c.content });
+          onChunk: async (c) => {
+            if (c.type === "content" && c.content) await emitSafe({ type: "token", delta: c.content });
+            else if (c.type === "thinking" && c.content) await emitSafe({ type: "thinking", delta: c.content });
             else if (c.type === "tool_call" && c.toolCall) {
               // Relay tool call deltas live so the frontend can show
               // the tool card with progressively filling content.
               // Use safeJsonParse to format args as a string for transport.
               const argsStr = typeof c.toolCall.arguments === 'string' ? c.toolCall.arguments : JSON.stringify(c.toolCall.arguments ?? {});
-              emit({ type: 'tool_call', name: c.toolCall.name, args: argsStr, toolCallId: c.toolCall.id });
+              await emitSafe({ type: 'tool_call', name: c.toolCall.name, args: argsStr, toolCallId: c.toolCall.id });
             }
           },
         });
@@ -323,7 +330,7 @@ export async function runAgentTurn(
         console.log("[runtime] LLM ERROR in catch:", e?.message ?? String(e));
         runStatus = "failed";
         runError = `LLM call failed: ${e?.message ?? String(e)}`;
-        emit({ type: "error", message: runError ?? "unknown error" });
+        await emitSafe({ type: "error", message: runError ?? "unknown error" });
         break;
       }
 
@@ -341,7 +348,7 @@ export async function runAgentTurn(
         const msg = isAuthError
           ? `API key not configured. Go to Settings → Secrets, add a secret named \`${cfg.apiKeySecret || cfg.provider.toUpperCase() + "_API_KEY"}\` with your API key, then try again.`
           : `LLM call failed: ${raw.slice(0, 200) || "check provider config"}`;
-        emit({ type: "error", message: msg });
+        await emitSafe({ type: "error", message: msg });
         runStatus = "failed";
         runError = msg;
         break;
@@ -380,17 +387,17 @@ export async function runAgentTurn(
         const msg = `Reached max tool calls limit (${maxToolCalls}). Stopping.`;
         messages.push({ role: "assistant", content: msg });
         await ChatStore.addMessage(chatId, { role: "assistant", content: msg, runId: run.id });
-        emit({ type: "token", delta: msg });
+        await emitSafe({ type: "token", delta: msg });
         break;
       }
       for (const tc of validToolCalls) {
         let fnArgs: any = {};
         try { fnArgs = typeof tc.arguments === "string" ? JSON.parse(tc.arguments) : (tc.arguments ?? {}); } catch { fnArgs = {}; }
-        await emit({ type: "tool_call", name: tc.name, args: fnArgs, toolCallId: tc.id });
+        await emitSafe({ type: "tool_call", name: tc.name, args: fnArgs, toolCallId: tc.id });
       }
         messages.push(assistantMsg);
         // Persist to ChatStore so subsequent runs don't load orphaned tools
-        ChatStore.addMessage(chatId, {
+        await ChatStore.addMessage(chatId, {
           role: "assistant",
           content: resp.content ?? "",
           toolCalls: validToolCalls.map(tc => ({
@@ -412,8 +419,8 @@ export async function runAgentTurn(
         const tool = toolRegistry.get(tc.name);
         if (!tool) {
           const result = { error: `unknown tool: ${tc.name}` };
-          await emit({ type: "tool_result", name: tc.name, result, ok: false, durationMs: 0, error: String(result.error), toolCallId: tc.id });
-          pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
+          await emitSafe({ type: "tool_result", name: tc.name, result, ok: false, durationMs: 0, error: String(result.error), toolCallId: tc.id });
+          await pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
           continue;
         }
         // Cap tool_docs calls to prevent discovery loops (agent calls it for every tool)
@@ -421,8 +428,8 @@ export async function runAgentTurn(
           toolDocsCount++;
           if (toolDocsCount > MAX_TOOL_DOCS) {
             const result = { content: [{ type: "text", text: `tool_docs call limit reached (${MAX_TOOL_DOCS} per turn). Use the tools you already know or call tool_docs(tool_name="list") once for a summary.` }] };
-            await emit({ type: "tool_result", name: tc.name, result, ok: true, durationMs: 0, toolCallId: tc.id });
-            pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
+            await emitSafe({ type: "tool_result", name: tc.name, result, ok: true, durationMs: 0, toolCallId: tc.id });
+            await pushToolMessage(messages, chatId, tc, JSON.stringify(result), run.id);
             continue;
           }
         }
@@ -457,7 +464,7 @@ export async function runAgentTurn(
               body: `The agent requested **${tc.name}** with these arguments:\n\n\`\`\`json\n${JSON.stringify(fnArgs, null, 2)}\n\`\`\``,
               payload: { tool: tc.name, args: fnArgs },
             });
-            await emit({ type: "approval_requested", approvalId: approval.id, title: approval.title, body: approval.body, status: approval.status, toolName: tc.name });
+            await emitSafe({ type: "approval_requested", approvalId: approval.id, title: approval.title, body: approval.body, status: approval.status, toolName: tc.name });
             const decision = await Approvals.waitFor(approval.id, abort);
             if (decision.status !== "approved" && decision.status !== "auto-approved") {
               result = { error: `tool ${tc.name} was not approved`, approvalId: approval.id, status: decision.status };
@@ -480,10 +487,10 @@ export async function runAgentTurn(
         }
         const resultStr = normalizeToolResult(result, ok);
         const toolDuration = Date.now() - toolStart;
-        await emit({ type: "tool_result", name: tc.name, result, ok, durationMs: toolDuration, error: ok ? undefined : String(result?.error ?? "failed"), toolCallId: tc.id });
-        pushToolMessage(messages, chatId, tc, resultStr, run.id);
+        await emitSafe({ type: "tool_result", name: tc.name, result, ok, durationMs: toolDuration, error: ok ? undefined : String(result?.error ?? "failed"), toolCallId: tc.id });
+        await pushToolMessage(messages, chatId, tc, resultStr, run.id);
         onLog({ tool: tc.name, args: fnArgs, result: resultStr, ok, durationMs: toolDuration, at: toolStart });
-        recordHistory(agent.id, tc.name, resultStr);
+        await recordHistory(agent.id, tc.name, resultStr);
         totalToolCalls++;
         await new Promise(r => setTimeout(r, 0));
       }
@@ -496,7 +503,7 @@ export async function runAgentTurn(
         const text = resp.content ?? "";
         if (text) {
           messages.push({ role: "assistant", content: text });
-          ChatStore.addMessage(chatId, {
+          await ChatStore.addMessage(chatId, {
             role: "assistant",
             content: text,
             runId: run.id,
@@ -509,7 +516,7 @@ export async function runAgentTurn(
     console.log("[runtime] OUTER ERROR:", e);
     runStatus = "failed";
     runError = e?.message ?? String(e);
-    emit({ type: "error", message: runError ?? "unknown error" });
+    await emitSafe({ type: "error", message: runError ?? "unknown error" });
   } finally {
     // Sandbox persists intentionally — agent files created during conversation
     // (e.g. instructions.txt, scripts, data) must survive for the user to
@@ -517,7 +524,7 @@ export async function runAgentTurn(
     // try { sandbox.cleanup(); } catch {}
     // Wrap DB ops in try-catch so a failure here cannot skip `emit("done")`
     try {
-      RunStore.complete(run.id, {
+      await RunStore.complete(run.id, {
         promptTokens: totalPrompt,
         completionTokens: totalCompletion,
         totalTokens: totalPrompt + totalCompletion,
@@ -527,25 +534,25 @@ export async function runAgentTurn(
     }
     if (runStatus === "failed" || runStatus === "cancelled") {
       try {
-        RunStore.fail(run.id, runError ?? runStatus);
+        await RunStore.fail(run.id, runError ?? runStatus);
       } catch (dbErr) {
         console.error("[runtime] RunStore.fail failed:", dbErr);
       }
     }
   }
 
-  emit({ type: "done" });
+  await emitSafe({ type: "done" });
 }
 
-function pushToolMessage(
+async function pushToolMessage(
   messages: ChatMessage[],
   chatId: string,
   tc: { id: string; name: string },
   content: string,
   runId: string
-) {
+): Promise<void> {
   messages.push({ role: "tool", content, toolCallId: tc.id, name: tc.name });
-  ChatStore.addMessage(chatId, { role: "tool", content, toolCallId: tc.id, name: tc.name, runId });
+  await ChatStore.addMessage(chatId, { role: "tool", content, toolCallId: tc.id, name: tc.name, runId });
 }
 
 /**
