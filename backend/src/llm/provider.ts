@@ -195,6 +195,8 @@ function parseRetryAfter(header: string | null, defaultMs: number): number {
 }
 
 const MAX_429_RETRIES = 6;
+const CONNECT_TIMEOUT_MS = 120_000; // 2 min — max wait for initial LLM connection
+const SSE_IDLE_MS = 120_000; // 2 min — max gap between SSE chunks before aborting
 
 export async function streamChat(
   cfg: LLMConfig,
@@ -205,13 +207,20 @@ export async function streamChat(
   const body = buildRequestBody(cfg, req, true);
   const headers = buildHeaders(cfg);
 
+  // Combine caller's abort signal with a connect timeout so we don't
+  // hang forever if the provider accepts TCP but never replies.
+  const connectTimeout = AbortSignal.timeout(CONNECT_TIMEOUT_MS);
+  const combinedSignal = req.signal
+    ? AbortSignal.any([req.signal, connectTimeout])
+    : connectTimeout;
+
   let res: Response | undefined;
   for (let attempt = 0; attempt <= MAX_429_RETRIES; attempt++) {
     res = await fetch(url, {
       method: "POST",
       headers,
       body: JSON.stringify(body),
-      signal: req.signal,
+      signal: combinedSignal,
     });
     if (res.status !== 429) break;
     if (attempt < MAX_429_RETRIES) {
@@ -260,16 +269,44 @@ export async function streamChat(
     onChunk,
   };
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
+  // SSE idle timeout: abort if no chunk arrives for SSE_IDLE_MS
+  let idleTimer: ReturnType<typeof setTimeout>;
+  let idleController = new AbortController();
+  const resetIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      console.warn("[llm] SSE idle timeout — no data for 2 min, aborting stream");
+      idleController.abort();
+    }, SSE_IDLE_MS);
+  };
+  resetIdle();
 
-    for (const raw of lines) {
-      processSseLine(raw, sseCtx);
+  try {
+    while (true) {
+      // Race reader.read() against idle timeout
+      const result = await Promise.race([
+        reader.read().then(r => ({ type: "data" as const, done: r.done, value: r.value })),
+        new Promise<{ type: "idle" as const }>((resolve) => {
+          const onAbort = () => { idleCleanup(); resolve({ type: "idle" }); };
+          const idleCleanup = () => idleController.signal.removeEventListener("abort", onAbort);
+          idleController.signal.addEventListener("abort", onAbort, { once: true });
+        }),
+      ]);
+
+      if (result.type === "idle") break;
+      if (result.done) break;
+      resetIdle();
+
+      buffer += decoder.decode(result.value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const raw of lines) {
+        processSseLine(raw, sseCtx);
+      }
     }
+  } finally {
+    clearTimeout(idleTimer);
   }
 
   // 🐛 FIX: Process any leftover buffer that wasn't followed by a newline.
