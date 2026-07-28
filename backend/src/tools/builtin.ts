@@ -378,9 +378,9 @@ toolRegistry.register({
 toolRegistry.register({
   name: "update_agent_file",
   description:
-    "Propose an edit to one of the agent's own config files (system.md, persona.md, etc). The user must approve before it is applied.",
+    "Propose an edit to one of the agent's own config files (system.md, persona.md, AGENTS.md, SOUL.md, skills.md, tools.md, memory.md). The user must approve before it is applied.",
   parameters: {
-    file: { type: "string", description: "file name (e.g. 'system.md', 'persona.md', 'skills.md', 'tools.md', 'memory.md')", required: true },
+    file: { type: "string", description: "file name (e.g. 'system.md', 'persona.md', 'AGENTS.md', 'SOUL.md', 'skills.md', 'tools.md', 'memory.md')", required: true },
     content: { type: "string", description: "new full file content", required: true },
     reason: { type: "string", description: "short justification shown to the user", required: true },
   },

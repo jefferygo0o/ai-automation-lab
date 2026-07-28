@@ -33,7 +33,7 @@ export function agentsDirForUser(ownerId: string): string {
 /** Legacy global agents dir — prefer agentsDirForUser(ownerId). */
 export const AGENTS_DIR = workspaceFor("_global").agentsRoot();
 
-export const AGENT_FILE_NAMES = ["system.md", "persona.md", "user.md", "instructions.md", "skills.md", "tools.md", "memory.md", "config.json"] as const;
+export const AGENT_FILE_NAMES = ["system.md", "persona.md", "user.md", "instructions.md", "skills.md", "tools.md", "memory.md", "AGENTS.md", "SOUL.md", "config.json"] as const;
 export type AgentFileName = typeof AGENT_FILE_NAMES[number];
 
 export interface AgentConfig {
@@ -146,6 +146,42 @@ summarises the categories you have access to.
 No long-term notes yet. As you complete tasks, use the update_memory tool
 to record: user preferences, recurring workflows, project context, and
 anything the user has told you to remember across sessions.
+`,
+  "AGENTS.md": `# Automation Lab Workspace Index
+
+This is the compact root workspace index. It maps important projects,
+folders, canonical paths, stable purposes, aliases/former names, related
+projects, and where to read next. Ordered by likely usefulness.
+
+## Projects
+
+<!-- List important project directories and their purpose -->
+
+## Workflows
+
+<!-- Describe recurring workflows and where their config lives -->
+
+## Conventions
+
+<!-- Note stable naming conventions, path patterns, and structure rules -->
+`,
+  "SOUL.md": `# Soul
+
+This file defines the personality, tone, and behavioral identity for this
+agent in this workspace. It is not a task log or scratchpad — it captures
+who you are and how you communicate.
+
+## Personality
+
+<!-- Describe your core traits: curious, methodical, direct, etc. -->
+
+## Tone
+
+<!-- Describe your communication style: formal, casual, concise, etc. -->
+
+## Behavioral Identity
+
+<!-- Describe how you approach tasks, handle uncertainty, and interact -->
 `,
   "config.json": JSON.stringify(DEFAULT_CONFIG, null, 2),
 };
@@ -365,4 +401,32 @@ export function migrateSandboxTimeouts(): void {
     } catch { /* skip unreadable / invalid */ }
   }
   if (patched > 0) console.log(`[files] migrated ${patched} agent config(s): timeoutMs 30s -> 5min`);
+}
+
+/**
+ * One-time migration: ensure every existing agent has AGENTS.md and
+ * SOUL.md files. New agents get them via STARTER_FILES, but agents
+ * created before the AGENTS.md/SOUL.md pattern was added won't have
+ * them — which means the runtime injects empty strings for their
+ * persistent workspace memory and identity.
+ */
+export function migrateAgentWorkspaceMemory(): void {
+  const root = AGENTS_DIR;
+  if (!existsSync(root)) return;
+  let patched = 0;
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const dir = join(root, entry.name);
+    const agentsPath = join(dir, "AGENTS.md");
+    const soulPath = join(dir, "SOUL.md");
+    if (!existsSync(agentsPath)) {
+      writeFileSync(agentsPath, STARTER_FILES["AGENTS.md"]);
+      patched++;
+    }
+    if (!existsSync(soulPath)) {
+      writeFileSync(soulPath, STARTER_FILES["SOUL.md"]);
+      patched++;
+    }
+  }
+  if (patched > 0) console.log(`[files] migrated ${patched} agent file(s): added AGENTS.md / SOUL.md`);
 }

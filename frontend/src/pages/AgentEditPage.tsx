@@ -10,6 +10,8 @@ import { Link } from "react-router-dom";
 const FILE_TABS: Array<{ key: string; label: string; description: string; sub?: string }> = [
   { key: "system.md",   label: "System",       description: "Core system prompt and operating instructions", sub: "system.md" },
   { key: "persona.md",  label: "Persona",      description: "Voice, tone, and personality",                sub: "persona.md" },
+  { key: "AGENTS.md",   label: "AGENTS.md",    description: "Workspace index: projects, workflows, conventions", sub: "AGENTS.md" },
+  { key: "SOUL.md",     label: "SOUL.md",      description: "Agent identity: personality, tone, behavioural identity", sub: "SOUL.md" },
   { key: "skills.md",   label: "Skills Index", description: "How the agent discovers and chooses skills",  sub: "skills.md" },
   { key: "tools.md",    label: "Tools Notes",  description: "Tool usage guidance and gotchas",             sub: "tools.md" },
   { key: "memory.md",   label: "Memory Notes", description: "Long-term narrative memory",                  sub: "memory.md" },

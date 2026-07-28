@@ -22,7 +22,7 @@ import api from "./api/server.ts";
 import { webhooksPublicApi } from "./webhooks/index.ts";
 import { AutomationScheduler } from "./automations/scheduler.ts";
 import { backfillAgentConfigs } from "./agents/registry.ts";
-import { migrateSandboxTimeouts } from "./agents/files.ts";
+import { migrateSandboxTimeouts, migrateAgentWorkspaceMemory } from "./agents/files.ts";
 import { serve } from "bun";
 import { join } from "path";
 
@@ -32,6 +32,7 @@ await initSchema(); // run PG schema migrations
 // Backfill any existing filesystem agent configs into the DB (one-time migration).
 backfillAgentConfigs().catch((e) => console.error("[lab] config backfill error:", e));
 migrateSandboxTimeouts();
+migrateAgentWorkspaceMemory();
 AutomationScheduler.start();
 
 const port = Number(process.env.PORT ?? 8787);
